@@ -1,0 +1,9 @@
+[submodule "reference/8086tiny"]
+	path = reference/8086tiny
+	url = https://github.com/adriancable/8086tiny
+[submodule "elks"]
+	path = elks
+	url = https://github.com/ghaerr/elks
+[submodule "reference/elks"]
+	path = reference/elks
+	url = https://github.com/ghaerr/elks
