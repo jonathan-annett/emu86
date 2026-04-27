@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-cli",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*", "tests/sst/baseline-cli.ts", "tests/sst/probe-cli.ts", "tests/sst/loader.ts", "tests/sst/runner.ts", "tests/sst/types.ts", "tests/sst/flag-masks.ts", "tests/integration/probe.ts", "tests/integration/diag-probe.ts", "tests/integration/long-probe.ts"],
+  "exclude": ["node_modules", "dist", "dist-cli"]
+}

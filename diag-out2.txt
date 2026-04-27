@@ -1,0 +1,1520 @@
+# Image: fd1440-minix.img (1474560 bytes)
+# RunResult: {"executed":107917,"reason":"halt-spin-exhausted"}
+# Counts: {"instruction":107916,"int":314,"trap":311,"io":981,"memWrite":1072,"intService":1}
+
+## Section 1: Final IDT state (read from memory after boot)
+Vector | Offset | Segment | Linear
+-------|--------|---------|--------
+  *00   |  3e1a  |  19f2   | 1dd3a
+   01   |  1001  |  f000   | f1001
+  *02   |  3e20  |  19f2   | 1dd40
+   03   |  1003  |  f000   | f1003
+   04   |  1004  |  f000   | f1004
+   05   |  1005  |  f000   | f1005
+   06   |  1006  |  f000   | f1006
+   07   |  1007  |  f000   | f1007
+  *08   |  3db4  |  19f2   | 1dcd4
+  *09   |  3dba  |  19f2   | 1dcda
+   0a   |  100a  |  f000   | f100a
+   0b   |  100b  |  f000   | f100b
+   0c   |  100c  |  f000   | f100c
+   0d   |  100d  |  f000   | f100d
+   0e   |  100e  |  f000   | f100e
+   0f   |  100f  |  f000   | f100f
+   10   |  1010  |  f000   | f1010
+   11   |  1011  |  f000   | f1011
+   12   |  1012  |  f000   | f1012
+   13   |  1013  |  f000   | f1013
+   14   |  1014  |  f000   | f1014
+   15   |  1015  |  f000   | f1015
+   16   |  1016  |  f000   | f1016
+   17   |  1017  |  f000   | f1017
+   18   |  1018  |  f000   | f1018
+   19   |  1019  |  f000   | f1019
+   1a   |  101a  |  f000   | f101a
+   1b   |  101b  |  f000   | f101b
+   1c   |  101c  |  f000   | f101c
+   1d   |  101d  |  f000   | f101d
+   1e   |  2000  |  f000   | f2000
+   1f   |  101f  |  f000   | f101f
+   20   |  1020  |  f000   | f1020
+   21   |  1021  |  f000   | f1021
+   22   |  1022  |  f000   | f1022
+   23   |  1023  |  f000   | f1023
+   24   |  1024  |  f000   | f1024
+   25   |  1025  |  f000   | f1025
+   26   |  1026  |  f000   | f1026
+   27   |  1027  |  f000   | f1027
+   28   |  1028  |  f000   | f1028
+   29   |  1029  |  f000   | f1029
+   2a   |  102a  |  f000   | f102a
+   2b   |  102b  |  f000   | f102b
+   2c   |  102c  |  f000   | f102c
+   2d   |  102d  |  f000   | f102d
+   2e   |  102e  |  f000   | f102e
+   2f   |  102f  |  f000   | f102f
+   30   |  1030  |  f000   | f1030
+   31   |  1031  |  f000   | f1031
+   32   |  1032  |  f000   | f1032
+   33   |  1033  |  f000   | f1033
+   34   |  1034  |  f000   | f1034
+   35   |  1035  |  f000   | f1035
+   36   |  1036  |  f000   | f1036
+   37   |  1037  |  f000   | f1037
+   38   |  1038  |  f000   | f1038
+   39   |  1039  |  f000   | f1039
+   3a   |  103a  |  f000   | f103a
+   3b   |  103b  |  f000   | f103b
+   3c   |  103c  |  f000   | f103c
+   3d   |  103d  |  f000   | f103d
+   3e   |  103e  |  f000   | f103e
+   3f   |  103f  |  f000   | f103f
+   40   |  1040  |  f000   | f1040
+   41   |  1041  |  f000   | f1041
+   42   |  1042  |  f000   | f1042
+   43   |  1043  |  f000   | f1043
+   44   |  1044  |  f000   | f1044
+   45   |  1045  |  f000   | f1045
+   46   |  1046  |  f000   | f1046
+   47   |  1047  |  f000   | f1047
+   48   |  1048  |  f000   | f1048
+   49   |  1049  |  f000   | f1049
+   4a   |  104a  |  f000   | f104a
+   4b   |  104b  |  f000   | f104b
+   4c   |  104c  |  f000   | f104c
+   4d   |  104d  |  f000   | f104d
+   4e   |  104e  |  f000   | f104e
+   4f   |  104f  |  f000   | f104f
+   50   |  1050  |  f000   | f1050
+   51   |  1051  |  f000   | f1051
+   52   |  1052  |  f000   | f1052
+   53   |  1053  |  f000   | f1053
+   54   |  1054  |  f000   | f1054
+   55   |  1055  |  f000   | f1055
+   56   |  1056  |  f000   | f1056
+   57   |  1057  |  f000   | f1057
+   58   |  1058  |  f000   | f1058
+   59   |  1059  |  f000   | f1059
+   5a   |  105a  |  f000   | f105a
+   5b   |  105b  |  f000   | f105b
+   5c   |  105c  |  f000   | f105c
+   5d   |  105d  |  f000   | f105d
+   5e   |  105e  |  f000   | f105e
+   5f   |  105f  |  f000   | f105f
+   60   |  1060  |  f000   | f1060
+   61   |  1061  |  f000   | f1061
+   62   |  1062  |  f000   | f1062
+   63   |  1063  |  f000   | f1063
+   64   |  1064  |  f000   | f1064
+   65   |  1065  |  f000   | f1065
+   66   |  1066  |  f000   | f1066
+   67   |  1067  |  f000   | f1067
+   68   |  1068  |  f000   | f1068
+   69   |  1069  |  f000   | f1069
+   6a   |  106a  |  f000   | f106a
+   6b   |  106b  |  f000   | f106b
+   6c   |  106c  |  f000   | f106c
+   6d   |  106d  |  f000   | f106d
+   6e   |  106e  |  f000   | f106e
+   6f   |  106f  |  f000   | f106f
+   70   |  1070  |  f000   | f1070
+   71   |  1071  |  f000   | f1071
+   72   |  1072  |  f000   | f1072
+   73   |  1073  |  f000   | f1073
+   74   |  1074  |  f000   | f1074
+   75   |  1075  |  f000   | f1075
+   76   |  1076  |  f000   | f1076
+   77   |  1077  |  f000   | f1077
+   78   |  1078  |  f000   | f1078
+   79   |  1079  |  f000   | f1079
+   7a   |  107a  |  f000   | f107a
+   7b   |  107b  |  f000   | f107b
+   7c   |  107c  |  f000   | f107c
+   7d   |  107d  |  f000   | f107d
+   7e   |  107e  |  f000   | f107e
+   7f   |  107f  |  f000   | f107f
+  *80   |  3e14  |  19f2   | 1dd34
+   81   |  1081  |  f000   | f1081
+   82   |  1082  |  f000   | f1082
+   83   |  1083  |  f000   | f1083
+   84   |  1084  |  f000   | f1084
+   85   |  1085  |  f000   | f1085
+   86   |  1086  |  f000   | f1086
+   87   |  1087  |  f000   | f1087
+   88   |  1088  |  f000   | f1088
+   89   |  1089  |  f000   | f1089
+   8a   |  108a  |  f000   | f108a
+   8b   |  108b  |  f000   | f108b
+   8c   |  108c  |  f000   | f108c
+   8d   |  108d  |  f000   | f108d
+   8e   |  108e  |  f000   | f108e
+   8f   |  108f  |  f000   | f108f
+   90   |  1090  |  f000   | f1090
+   91   |  1091  |  f000   | f1091
+   92   |  1092  |  f000   | f1092
+   93   |  1093  |  f000   | f1093
+   94   |  1094  |  f000   | f1094
+   95   |  1095  |  f000   | f1095
+   96   |  1096  |  f000   | f1096
+   97   |  1097  |  f000   | f1097
+   98   |  1098  |  f000   | f1098
+   99   |  1099  |  f000   | f1099
+   9a   |  109a  |  f000   | f109a
+   9b   |  109b  |  f000   | f109b
+   9c   |  109c  |  f000   | f109c
+   9d   |  109d  |  f000   | f109d
+   9e   |  109e  |  f000   | f109e
+   9f   |  109f  |  f000   | f109f
+   a0   |  10a0  |  f000   | f10a0
+   a1   |  10a1  |  f000   | f10a1
+   a2   |  10a2  |  f000   | f10a2
+   a3   |  10a3  |  f000   | f10a3
+   a4   |  10a4  |  f000   | f10a4
+   a5   |  10a5  |  f000   | f10a5
+   a6   |  10a6  |  f000   | f10a6
+   a7   |  10a7  |  f000   | f10a7
+   a8   |  10a8  |  f000   | f10a8
+   a9   |  10a9  |  f000   | f10a9
+   aa   |  10aa  |  f000   | f10aa
+   ab   |  10ab  |  f000   | f10ab
+   ac   |  10ac  |  f000   | f10ac
+   ad   |  10ad  |  f000   | f10ad
+   ae   |  10ae  |  f000   | f10ae
+   af   |  10af  |  f000   | f10af
+   b0   |  10b0  |  f000   | f10b0
+   b1   |  10b1  |  f000   | f10b1
+   b2   |  10b2  |  f000   | f10b2
+   b3   |  10b3  |  f000   | f10b3
+   b4   |  10b4  |  f000   | f10b4
+   b5   |  10b5  |  f000   | f10b5
+   b6   |  10b6  |  f000   | f10b6
+   b7   |  10b7  |  f000   | f10b7
+   b8   |  10b8  |  f000   | f10b8
+   b9   |  10b9  |  f000   | f10b9
+   ba   |  10ba  |  f000   | f10ba
+   bb   |  10bb  |  f000   | f10bb
+   bc   |  10bc  |  f000   | f10bc
+   bd   |  10bd  |  f000   | f10bd
+   be   |  10be  |  f000   | f10be
+   bf   |  10bf  |  f000   | f10bf
+   c0   |  10c0  |  f000   | f10c0
+   c1   |  10c1  |  f000   | f10c1
+   c2   |  10c2  |  f000   | f10c2
+   c3   |  10c3  |  f000   | f10c3
+   c4   |  10c4  |  f000   | f10c4
+   c5   |  10c5  |  f000   | f10c5
+   c6   |  10c6  |  f000   | f10c6
+   c7   |  10c7  |  f000   | f10c7
+   c8   |  10c8  |  f000   | f10c8
+   c9   |  10c9  |  f000   | f10c9
+   ca   |  10ca  |  f000   | f10ca
+   cb   |  10cb  |  f000   | f10cb
+   cc   |  10cc  |  f000   | f10cc
+   cd   |  10cd  |  f000   | f10cd
+   ce   |  10ce  |  f000   | f10ce
+   cf   |  10cf  |  f000   | f10cf
+   d0   |  10d0  |  f000   | f10d0
+   d1   |  10d1  |  f000   | f10d1
+   d2   |  10d2  |  f000   | f10d2
+   d3   |  10d3  |  f000   | f10d3
+   d4   |  10d4  |  f000   | f10d4
+   d5   |  10d5  |  f000   | f10d5
+   d6   |  10d6  |  f000   | f10d6
+   d7   |  10d7  |  f000   | f10d7
+   d8   |  10d8  |  f000   | f10d8
+   d9   |  10d9  |  f000   | f10d9
+   da   |  10da  |  f000   | f10da
+   db   |  10db  |  f000   | f10db
+   dc   |  10dc  |  f000   | f10dc
+   dd   |  10dd  |  f000   | f10dd
+   de   |  10de  |  f000   | f10de
+   df   |  10df  |  f000   | f10df
+   e0   |  10e0  |  f000   | f10e0
+   e1   |  10e1  |  f000   | f10e1
+   e2   |  10e2  |  f000   | f10e2
+   e3   |  10e3  |  f000   | f10e3
+   e4   |  10e4  |  f000   | f10e4
+   e5   |  10e5  |  f000   | f10e5
+   e6   |  10e6  |  f000   | f10e6
+   e7   |  10e7  |  f000   | f10e7
+   e8   |  10e8  |  f000   | f10e8
+   e9   |  10e9  |  f000   | f10e9
+   ea   |  10ea  |  f000   | f10ea
+   eb   |  10eb  |  f000   | f10eb
+   ec   |  10ec  |  f000   | f10ec
+   ed   |  10ed  |  f000   | f10ed
+   ee   |  10ee  |  f000   | f10ee
+   ef   |  10ef  |  f000   | f10ef
+   f0   |  10f0  |  f000   | f10f0
+   f1   |  10f1  |  f000   | f10f1
+   f2   |  10f2  |  f000   | f10f2
+   f3   |  10f3  |  f000   | f10f3
+   f4   |  10f4  |  f000   | f10f4
+   f5   |  10f5  |  f000   | f10f5
+   f6   |  10f6  |  f000   | f10f6
+   f7   |  10f7  |  f000   | f10f7
+   f8   |  10f8  |  f000   | f10f8
+   f9   |  10f9  |  f000   | f10f9
+   fa   |  10fa  |  f000   | f10fa
+   fb   |  10fb  |  f000   | f10fb
+   fc   |  10fc  |  f000   | f10fc
+   fd   |  10fd  |  f000   | f10fd
+   fe   |  10fe  |  f000   | f10fe
+   ff   |  10ff  |  f000   | f10ff
+
+## Section 2: IVT-write events for kernel-installed vectors
+Total IVT writes: 1072
+intService event at global index: 98874
+  [pre-svc  idx=10] vec=00 OFF B addr=00000 val=00
+  [pre-svc  idx=11] vec=00 OFF B addr=00001 val=10
+  [pre-svc  idx=13] vec=00 SEG B addr=00002 val=00
+  [pre-svc  idx=14] vec=00 SEG B addr=00003 val=f0
+  [pre-svc  idx=28] vec=02 OFF B addr=00008 val=02
+  [pre-svc  idx=29] vec=02 OFF B addr=00009 val=10
+  [pre-svc  idx=31] vec=02 SEG B addr=0000a val=00
+  [pre-svc  idx=32] vec=02 SEG B addr=0000b val=f0
+  [pre-svc  idx=82] vec=08 OFF B addr=00020 val=08
+  [pre-svc  idx=83] vec=08 OFF B addr=00021 val=10
+  [pre-svc  idx=85] vec=08 SEG B addr=00022 val=00
+  [pre-svc  idx=86] vec=08 SEG B addr=00023 val=f0
+  [pre-svc  idx=91] vec=09 OFF B addr=00024 val=09
+  [pre-svc  idx=92] vec=09 OFF B addr=00025 val=10
+  [pre-svc  idx=94] vec=09 SEG B addr=00026 val=00
+  [pre-svc  idx=95] vec=09 SEG B addr=00027 val=f0
+  [pre-svc  idx=100] vec=0a OFF B addr=00028 val=0a
+  [pre-svc  idx=101] vec=0a OFF B addr=00029 val=10
+  [pre-svc  idx=103] vec=0a SEG B addr=0002a val=00
+  [pre-svc  idx=104] vec=0a SEG B addr=0002b val=f0
+  [pre-svc  idx=109] vec=0b OFF B addr=0002c val=0b
+  [pre-svc  idx=110] vec=0b OFF B addr=0002d val=10
+  [pre-svc  idx=112] vec=0b SEG B addr=0002e val=00
+  [pre-svc  idx=113] vec=0b SEG B addr=0002f val=f0
+  [pre-svc  idx=118] vec=0c OFF B addr=00030 val=0c
+  [pre-svc  idx=119] vec=0c OFF B addr=00031 val=10
+  [pre-svc  idx=121] vec=0c SEG B addr=00032 val=00
+  [pre-svc  idx=122] vec=0c SEG B addr=00033 val=f0
+  [pre-svc  idx=127] vec=0d OFF B addr=00034 val=0d
+  [pre-svc  idx=128] vec=0d OFF B addr=00035 val=10
+  [pre-svc  idx=130] vec=0d SEG B addr=00036 val=00
+  [pre-svc  idx=131] vec=0d SEG B addr=00037 val=f0
+  [pre-svc  idx=136] vec=0e OFF B addr=00038 val=0e
+  [pre-svc  idx=137] vec=0e OFF B addr=00039 val=10
+  [pre-svc  idx=139] vec=0e SEG B addr=0003a val=00
+  [pre-svc  idx=140] vec=0e SEG B addr=0003b val=f0
+  [pre-svc  idx=145] vec=0f OFF B addr=0003c val=0f
+  [pre-svc  idx=146] vec=0f OFF B addr=0003d val=10
+  [pre-svc  idx=148] vec=0f SEG B addr=0003e val=00
+  [pre-svc  idx=149] vec=0f SEG B addr=0003f val=f0
+  [pre-svc  idx=1018] vec=70 OFF B addr=001c0 val=70
+  [pre-svc  idx=1019] vec=70 OFF B addr=001c1 val=10
+  [pre-svc  idx=1021] vec=70 SEG B addr=001c2 val=00
+  [pre-svc  idx=1022] vec=70 SEG B addr=001c3 val=f0
+  [pre-svc  idx=1027] vec=71 OFF B addr=001c4 val=71
+  [pre-svc  idx=1028] vec=71 OFF B addr=001c5 val=10
+  [pre-svc  idx=1030] vec=71 SEG B addr=001c6 val=00
+  [pre-svc  idx=1031] vec=71 SEG B addr=001c7 val=f0
+  [pre-svc  idx=1036] vec=72 OFF B addr=001c8 val=72
+  [pre-svc  idx=1037] vec=72 OFF B addr=001c9 val=10
+  [pre-svc  idx=1039] vec=72 SEG B addr=001ca val=00
+  [pre-svc  idx=1040] vec=72 SEG B addr=001cb val=f0
+  [pre-svc  idx=1045] vec=73 OFF B addr=001cc val=73
+  [pre-svc  idx=1046] vec=73 OFF B addr=001cd val=10
+  [pre-svc  idx=1048] vec=73 SEG B addr=001ce val=00
+  [pre-svc  idx=1049] vec=73 SEG B addr=001cf val=f0
+  [pre-svc  idx=1054] vec=74 OFF B addr=001d0 val=74
+  [pre-svc  idx=1055] vec=74 OFF B addr=001d1 val=10
+  [pre-svc  idx=1057] vec=74 SEG B addr=001d2 val=00
+  [pre-svc  idx=1058] vec=74 SEG B addr=001d3 val=f0
+  [pre-svc  idx=1063] vec=75 OFF B addr=001d4 val=75
+  [pre-svc  idx=1064] vec=75 OFF B addr=001d5 val=10
+  [pre-svc  idx=1066] vec=75 SEG B addr=001d6 val=00
+  [pre-svc  idx=1067] vec=75 SEG B addr=001d7 val=f0
+  [pre-svc  idx=1072] vec=76 OFF B addr=001d8 val=76
+  [pre-svc  idx=1073] vec=76 OFF B addr=001d9 val=10
+  [pre-svc  idx=1075] vec=76 SEG B addr=001da val=00
+  [pre-svc  idx=1076] vec=76 SEG B addr=001db val=f0
+  [pre-svc  idx=1081] vec=77 OFF B addr=001dc val=77
+  [pre-svc  idx=1082] vec=77 OFF B addr=001dd val=10
+  [pre-svc  idx=1084] vec=77 SEG B addr=001de val=00
+  [pre-svc  idx=1085] vec=77 SEG B addr=001df val=f0
+  [pre-svc  idx=1162] vec=80 OFF B addr=00200 val=80
+  [pre-svc  idx=1163] vec=80 OFF B addr=00201 val=10
+  [pre-svc  idx=1165] vec=80 SEG B addr=00202 val=00
+  [pre-svc  idx=1166] vec=80 SEG B addr=00203 val=f0
+  [pre-svc  idx=21501] vec=00 OFF B addr=00000 val=ff
+  [pre-svc  idx=21502] vec=00 OFF B addr=00001 val=ef
+  [pre-svc  idx=21506] vec=00 OFF B addr=00000 val=00
+  [pre-svc  idx=21507] vec=00 OFF B addr=00001 val=10
+  [pre-svc  idx=21595] vec=00 OFF B addr=00000 val=ff
+  [pre-svc  idx=21596] vec=00 OFF B addr=00001 val=ef
+  [pre-svc  idx=21600] vec=00 OFF B addr=00000 val=00
+  [pre-svc  idx=21601] vec=00 OFF B addr=00001 val=10
+  [pre-svc  idx=50132] vec=80 OFF B addr=00200 val=14
+  [pre-svc  idx=50133] vec=80 OFF B addr=00201 val=3e
+  [pre-svc  idx=50135] vec=80 SEG B addr=00202 val=f2
+  [pre-svc  idx=50136] vec=80 SEG B addr=00203 val=19
+  [pre-svc  idx=50194] vec=00 OFF B addr=00000 val=1a
+  [pre-svc  idx=50195] vec=00 OFF B addr=00001 val=3e
+  [pre-svc  idx=50197] vec=00 SEG B addr=00002 val=f2
+  [pre-svc  idx=50198] vec=00 SEG B addr=00003 val=19
+  [pre-svc  idx=50256] vec=02 OFF B addr=00008 val=20
+  [pre-svc  idx=50257] vec=02 OFF B addr=00009 val=3e
+  [pre-svc  idx=50259] vec=02 SEG B addr=0000a val=f2
+  [pre-svc  idx=50260] vec=02 SEG B addr=0000b val=19
+  [pre-svc  idx=50395] vec=08 OFF B addr=00020 val=b4
+  [pre-svc  idx=50396] vec=08 OFF B addr=00021 val=3d
+  [pre-svc  idx=50398] vec=08 SEG B addr=00022 val=f2
+  [pre-svc  idx=50399] vec=08 SEG B addr=00023 val=19
+  [pre-svc  idx=51033] vec=09 OFF B addr=00024 val=ba
+  [pre-svc  idx=51034] vec=09 OFF B addr=00025 val=3d
+  [pre-svc  idx=51036] vec=09 SEG B addr=00026 val=f2
+  [pre-svc  idx=51037] vec=09 SEG B addr=00027 val=19
+  [pre-svc  idx=70610] vec=00 OFF B addr=00000 val=e5
+  [pre-svc  idx=70611] vec=00 OFF B addr=00001 val=c1
+  [pre-svc  idx=70615] vec=00 OFF B addr=00000 val=1a
+  [pre-svc  idx=70616] vec=00 OFF B addr=00001 val=3e
+  [pre-svc  idx=70704] vec=00 OFF B addr=00000 val=e5
+  [pre-svc  idx=70705] vec=00 OFF B addr=00001 val=c1
+  [pre-svc  idx=70709] vec=00 OFF B addr=00000 val=1a
+  [pre-svc  idx=70710] vec=00 OFF B addr=00001 val=3e
+
+## Section 3: All INT events
+Total: 314
+  INT  vec=19 from=f000:016a AX=0000 BX=1100 CX=0000 DX=f000
+  INT  vec=12 from=0000:7c00 AX=0000 BX=1100 CX=0000 DX=f000
+  INT  vec=10 from=9000:007f AX=0e45 BX=0007 CX=003c DX=f000
+  INT  vec=10 from=9000:007f AX=0e4c BX=0007 CX=003c DX=f000
+  INT  vec=10 from=9000:007f AX=0e4b BX=0007 CX=003c DX=f000
+  INT  vec=10 from=9000:007f AX=0e53 BX=0007 CX=003c DX=f000
+  INT  vec=13 from=9000:00fc AX=0201 BX=0200 CX=0002 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0002 DX=0000
+  INT  vec=13 from=9000:00fc AX=0201 BX=03ec CX=0003 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0003 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=07f4 CX=0009 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0009 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=13fa CX=0007 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0007 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=07f4 CX=0009 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0009 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0500 CX=0409 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0409 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2f BX=0007 CX=0409 DX=0000
+  INT  vec=10 from=9000:007f AX=0e6c BX=0007 CX=0409 DX=0000
+  INT  vec=10 from=9000:007f AX=0e69 BX=0007 CX=0409 DX=0000
+  INT  vec=10 from=9000:007f AX=0e6e BX=0007 CX=0409 DX=0000
+  INT  vec=10 from=9000:007f AX=0e75 BX=0007 CX=0409 DX=0000
+  INT  vec=10 from=9000:007f AX=0e78 BX=0007 CX=0409 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=07f4 CX=0009 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0009 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=1000 CX=040b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=040b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=1400 CX=040d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=040d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=1800 CX=040f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=040f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=1c00 CX=0411 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0411 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=2000 CX=0501 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0501 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=2400 CX=0503 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0503 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=2800 CX=0505 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0505 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0bf6 CX=0509 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0509 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=2c00 CX=0507 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0507 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=3000 CX=050b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=3400 CX=050d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=3800 CX=050f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=3c00 CX=0511 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0511 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=4000 CX=0501 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0501 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=4400 CX=0503 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0503 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=4800 CX=0505 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0505 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=4c00 CX=0507 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0507 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=5000 CX=0509 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0509 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=5400 CX=050b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=5800 CX=050d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=5c00 CX=050f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=050f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=6000 CX=0511 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0511 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=6400 CX=0601 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0601 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=6800 CX=0603 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0603 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=6c00 CX=0605 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0605 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=7000 CX=0607 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0607 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=7400 CX=0609 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0609 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=7800 CX=060b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=7c00 CX=060d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=8000 CX=060f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=8400 CX=0611 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0611 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=8800 CX=0601 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0601 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=8c00 CX=0603 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0603 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=9000 CX=0605 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0605 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=9400 CX=0607 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0607 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=9800 CX=0609 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0609 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=9c00 CX=060b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=a000 CX=060d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=a400 CX=060f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=060f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=a800 CX=0611 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0611 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=ac00 CX=0701 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0701 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=b000 CX=0703 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0703 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=b400 CX=0705 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0705 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=b800 CX=0707 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0707 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=bc00 CX=0709 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0709 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=c000 CX=070b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=c400 CX=070d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=c800 CX=070f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=cc00 CX=0711 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0711 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=d000 CX=0701 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0701 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=d400 CX=0703 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0703 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=d800 CX=0705 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0705 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=dc00 CX=0707 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0707 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=e000 CX=0709 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0709 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=e400 CX=070b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=e800 CX=070d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=ec00 CX=070f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=070f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=f000 CX=0711 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0711 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=f400 CX=0801 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0801 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=f800 CX=0803 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0803 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=fc00 CX=0805 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0805 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0000 CX=0807 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0807 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0400 CX=0809 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0809 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0800 CX=080b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=0c00 CX=080d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=1000 CX=080f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=1400 CX=0811 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0811 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=1800 CX=0801 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0801 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=1c00 CX=0803 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0803 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=2000 CX=0805 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0805 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=2400 CX=0807 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0807 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=2800 CX=0809 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0809 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=2c00 CX=080b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=3000 CX=080d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=3400 CX=080f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=080f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=3800 CX=0811 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0811 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=3c00 CX=0901 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0901 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=4000 CX=0903 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0903 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=4400 CX=0905 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0905 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=4800 CX=0907 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0907 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=4c00 CX=0909 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0909 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=5000 CX=090b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=5400 CX=090d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=5800 CX=090f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=5c00 CX=0911 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0911 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=6000 CX=0901 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0901 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=6400 CX=0903 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0903 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=6800 CX=0905 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0905 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=6c00 CX=0907 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0907 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=7000 CX=0909 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0909 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=7400 CX=090b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=7800 CX=090d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=7c00 CX=090f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=090f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=8000 CX=0911 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0911 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=8400 CX=0a01 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a01 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=8800 CX=0a03 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a03 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=8c00 CX=0a05 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a05 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=9000 CX=0a07 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a07 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=9400 CX=0a09 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a09 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=9800 CX=0a0b DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0b DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=9c00 CX=0a0d DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0d DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=a000 CX=0a0f DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0f DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=a400 CX=0a11 DX=0000
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a11 DX=0000
+  INT  vec=13 from=9000:00fc AX=0202 BX=a800 CX=0a01 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a01 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=ac00 CX=0a03 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a03 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=b000 CX=0a05 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a05 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=b400 CX=0a07 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a07 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=b800 CX=0a09 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a09 DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=bc00 CX=0a0b DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0b DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=c000 CX=0a0d DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0d DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=c400 CX=0a0f DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a0f DX=0100
+  INT  vec=13 from=9000:00fc AX=0202 BX=c800 CX=0a11 DX=0100
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a11 DX=0100
+  INT  vec=10 from=0120:0365 AX=0e0d BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e0a BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e45 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e4c BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e4b BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e53 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e20 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e53 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e65 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e74 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e75 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e70 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e20 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0333 AX=0f00 BX=0078 CX=0000 DX=2400
+  INT  vec=12 from=0120:032e AX=0100 BX=0078 CX=0002 DX=0000
+  INT  vec=15 from=0120:034a AX=8800 BX=0078 CX=0002 DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=0006 DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e46 BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e48 BX=0007 CX=0000 DX=0000
+  INT  vec=12 from=0120:032e AX=0100 BX=00ff CX=0000 DX=0000
+  INT  vec=10 from=9000:0365 AX=0e74 BX=0007 CX=0004 DX=0efa
+  INT  vec=15 from=9000:0460 AX=2401 BX=0004 CX=0004 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e30 BX=0007 CX=0004 DX=0e03
+  INT  vec=10 from=9000:0365 AX=0e33 BX=0007 CX=0004 DX=0e03
+  INT  vec=10 from=9000:0365 AX=0e33 BX=0007 CX=0004 DX=0e30
+  INT  vec=10 from=9000:0365 AX=0e30 BX=0007 CX=0004 DX=0e30
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=0004 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e66 BX=0007 CX=7c80 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e31 BX=0007 CX=7c04 DX=0e12
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=7c04 DX=0e12
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=7c04 DX=0e2a
+  INT  vec=10 from=9000:0365 AX=0e41 BX=0007 CX=7c04 DX=0e2a
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=7c80 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e64 BX=0007 CX=07c8 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e31 BX=0007 CX=2804 DX=0e19
+  INT  vec=10 from=9000:0365 AX=0e39 BX=0007 CX=2804 DX=0e19
+  INT  vec=10 from=9000:0365 AX=0e46 BX=0007 CX=2804 DX=0ef2
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=2804 DX=0ef2
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=2800 DX=0efa
+  INT  vec=10 from=0330:004c AX=0e49 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e4e BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e20 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e66 BX=0007 CX=0000 DX=0003
+  INT  vec=10 from=0330:004c AX=0e30 BX=0007 CX=0000 DX=0002
+  INT  vec=10 from=0330:004c AX=0e30 BX=0007 CX=0000 DX=0001
+  INT  vec=10 from=0330:004c AX=0e32 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e20 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e53 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e41 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e52 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e0d BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e0a BX=0007 CX=0000 DX=0000
+  INT  vec=15 from=0330:d8db AX=2401 BX=d88d CX=0008 DX=0001
+
+## Section 4: All trap fires
+Total: 311
+  TRAP at=f1019 vec=19 AH=00 AL=00 BX=1100 CX=0000 DX=f000 DS=0040 ES=0000
+  TRAP at=f1012 vec=12 AH=00 AL=00 BX=1100 CX=0000 DX=f000 DS=0040 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=45 BX=0007 CX=003c DX=f000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=4c BX=0007 CX=003c DX=f000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=4b BX=0007 CX=003c DX=f000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=53 BX=0007 CX=003c DX=f000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=01 BX=0200 CX=0002 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0002 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=01 BX=03ec CX=0003 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0003 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=07f4 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=13fa CX=0007 DX=0100 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0007 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=07f4 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0500 CX=0409 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0409 DX=0100 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2f BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=6c BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=69 BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=6e BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=75 BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=78 BX=0007 CX=0409 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=07f4 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0009 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1000 CX=040b DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=040b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1400 CX=040d DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=040d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1800 CX=040f DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=040f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1c00 CX=0411 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0411 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2000 CX=0501 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0501 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2400 CX=0503 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0503 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2800 CX=0505 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0505 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0bf6 CX=0509 DX=0000 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0509 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2c00 CX=0507 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0507 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3000 CX=050b DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3400 CX=050d DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3800 CX=050f DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3c00 CX=0511 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0511 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4000 CX=0501 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0501 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4400 CX=0503 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0503 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4800 CX=0505 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0505 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4c00 CX=0507 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0507 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5000 CX=0509 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0509 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5400 CX=050b DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5800 CX=050d DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5c00 CX=050f DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=050f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6000 CX=0511 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0511 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6400 CX=0601 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0601 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6800 CX=0603 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0603 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6c00 CX=0605 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0605 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7000 CX=0607 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0607 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7400 CX=0609 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0609 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7800 CX=060b DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7c00 CX=060d DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8000 CX=060f DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8400 CX=0611 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0611 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8800 CX=0601 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0601 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8c00 CX=0603 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0603 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9000 CX=0605 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0605 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9400 CX=0607 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0607 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9800 CX=0609 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0609 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9c00 CX=060b DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a000 CX=060d DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a400 CX=060f DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=060f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a800 CX=0611 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0611 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=ac00 CX=0701 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0701 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b000 CX=0703 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0703 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b400 CX=0705 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0705 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b800 CX=0707 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0707 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=bc00 CX=0709 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0709 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c000 CX=070b DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c400 CX=070d DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c800 CX=070f DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=cc00 CX=0711 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0711 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=d000 CX=0701 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0701 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=d400 CX=0703 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0703 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=d800 CX=0705 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0705 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=dc00 CX=0707 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0707 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=e000 CX=0709 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0709 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=e400 CX=070b DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=e800 CX=070d DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=ec00 CX=070f DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=070f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=f000 CX=0711 DX=0100 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0711 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=f400 CX=0801 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0801 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=f800 CX=0803 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0803 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=fc00 CX=0805 DX=0000 DS=9000 ES=0000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0805 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0000 CX=0807 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0807 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0400 CX=0809 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0809 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0800 CX=080b DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=0c00 CX=080d DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1000 CX=080f DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1400 CX=0811 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0811 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1800 CX=0801 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0801 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=1c00 CX=0803 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0803 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2000 CX=0805 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0805 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2400 CX=0807 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0807 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2800 CX=0809 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0809 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=2c00 CX=080b DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3000 CX=080d DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3400 CX=080f DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=080f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3800 CX=0811 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0811 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=3c00 CX=0901 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0901 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4000 CX=0903 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0903 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4400 CX=0905 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0905 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4800 CX=0907 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0907 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=4c00 CX=0909 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0909 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5000 CX=090b DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5400 CX=090d DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5800 CX=090f DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=5c00 CX=0911 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0911 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6000 CX=0901 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0901 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6400 CX=0903 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0903 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6800 CX=0905 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0905 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=6c00 CX=0907 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0907 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7000 CX=0909 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0909 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7400 CX=090b DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7800 CX=090d DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=7c00 CX=090f DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=090f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8000 CX=0911 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0911 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8400 CX=0a01 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a01 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8800 CX=0a03 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a03 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=8c00 CX=0a05 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a05 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9000 CX=0a07 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a07 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9400 CX=0a09 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a09 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9800 CX=0a0b DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0b DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=9c00 CX=0a0d DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0d DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a000 CX=0a0f DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0f DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a400 CX=0a11 DX=0000 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a11 DX=0000 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=a800 CX=0a01 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a01 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=ac00 CX=0a03 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a03 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b000 CX=0a05 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a05 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b400 CX=0a07 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a07 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=b800 CX=0a09 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a09 DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=bc00 CX=0a0b DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0b DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c000 CX=0a0d DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0d DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c400 CX=0a0f DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a0f DX=0100 DS=9000 ES=9000
+  TRAP at=f1013 vec=13 AH=02 AL=02 BX=c800 CX=0a11 DX=0100 DS=9000 ES=1000
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0a11 DX=0100 DS=9000 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=0d BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=0a BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=45 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=4c BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=4b BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=53 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=53 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=65 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=74 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=75 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=70 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=0000 DX=2400 DS=0120 ES=1400
+  TRAP at=f1010 vec=10 AH=0f AL=00 BX=0078 CX=0000 DX=2400 DS=0100 ES=1400
+  TRAP at=f1012 vec=12 AH=01 AL=00 BX=0078 CX=0002 DX=0000 DS=0100 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=0006 DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=2e BX=0007 CX=000a DX=0000 DS=9020 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=46 BX=0007 CX=000a DX=0000 DS=9020 ES=9000
+  TRAP at=f1010 vec=10 AH=0e AL=48 BX=0007 CX=0000 DX=0000 DS=0050 ES=0120
+  TRAP at=f1012 vec=12 AH=01 AL=00 BX=00ff CX=0000 DX=0000 DS=0100 ES=0120
+  TRAP at=f1010 vec=10 AH=0e AL=74 BX=0007 CX=0004 DX=0efa DS=1400 ES=0090
+  TRAP at=f1010 vec=10 AH=0e AL=30 BX=0007 CX=0004 DX=0e03 DS=1404 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=33 BX=0007 CX=0004 DX=0e03 DS=1404 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=33 BX=0007 CX=0004 DX=0e30 DS=1404 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=30 BX=0007 CX=0004 DX=0e30 DS=1404 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=0004 DX=0efa DS=1404 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=66 BX=0007 CX=7c80 DX=0efa DS=1400 ES=0330
+  TRAP at=f1010 vec=10 AH=0e AL=31 BX=0007 CX=7c04 DX=0e12 DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=32 BX=0007 CX=7c04 DX=0e12 DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=32 BX=0007 CX=7c04 DX=0e2a DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=41 BX=0007 CX=7c04 DX=0e2a DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=7c80 DX=0efa DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=64 BX=0007 CX=07c8 DX=0efa DS=22fe ES=122a
+  TRAP at=f1010 vec=10 AH=0e AL=31 BX=0007 CX=2804 DX=0e19 DS=2ac6 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=39 BX=0007 CX=2804 DX=0e19 DS=2ac6 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=46 BX=0007 CX=2804 DX=0ef2 DS=2ac6 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=32 BX=0007 CX=2804 DX=0ef2 DS=2ac6 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=2800 DX=0efa DS=2ac6 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=49 BX=0007 CX=0000 DX=1fc0 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=4e BX=0007 CX=0000 DX=1fc0 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=54 BX=0007 CX=0000 DX=1fc0 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=0000 DX=1fc0 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=66 BX=0007 CX=0000 DX=0003 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=30 BX=0007 CX=0000 DX=0002 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=30 BX=0007 CX=0000 DX=0001 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=32 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=20 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=53 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=54 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=41 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=52 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=54 BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=0d BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+  TRAP at=f1010 vec=10 AH=0e AL=0a BX=0007 CX=0000 DX=0000 DS=19f2 ES=19f2
+
+## Section 5: intService events + handler trace
+---- intService at index 98874 (50 before / 200 after) ----
+  [pre i=98824] INSTR 0330:9f7c (0d27c) bytes=5d 5f 5e e9 2b fc AX=0018 BX=0344 CX=0008 DX=19f2 SI=4080 DI=0072 BP=4e38 SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98825] INSTR 0330:9f7d (0d27d) bytes=5f 5e e9 2b fc 56 AX=0018 BX=0344 CX=0008 DX=19f2 SI=4080 DI=0072 BP=4e44 SP=4e3a DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98826] INSTR 0330:9f7e (0d27e) bytes=5e e9 2b fc 56 55 AX=0018 BX=0344 CX=0008 DX=19f2 SI=4080 DI=0078 BP=4e44 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98827] INSTR 0330:9f7f (0d27f) bytes=e9 2b fc 56 55 89 AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e44 SP=4e3e DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98828] INSTR 0330:9bad (0cead) bytes=57 55 89 e5 1e 8b AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e44 SP=4e3e DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98829] INSTR 0330:9bae (0ceae) bytes=55 89 e5 1e 8b 5e AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e44 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98830] INSTR 0330:9baf (0ceaf) bytes=89 e5 1e 8b 5e 06 AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e44 SP=4e3a DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98831] INSTR 0330:9bb1 (0ceb1) bytes=1e 8b 5e 06 8b 07 AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e3a SP=4e3a DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98832] INSTR 0330:9bb2 (0ceb2) bytes=8b 5e 06 8b 07 f7 AX=0018 BX=0344 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98833] INSTR 0330:9bb5 (0ceb5) bytes=8b 07 f7 67 06 03 AX=0018 BX=4080 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98834] INSTR 0330:9bb7 (0ceb7) bytes=f7 67 06 03 47 04 AX=0050 BX=4080 CX=0008 DX=19f2 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98835] INSTR 0330:9bba (0ceba) bytes=03 47 04 03 47 10 AX=0190 BX=4080 CX=0008 DX=0000 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98836] INSTR 0330:9bbd (0cebd) bytes=03 47 10 89 46 fe AX=01a3 BX=4080 CX=0008 DX=0000 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98837] INSTR 0330:9bc0 (0cec0) bytes=89 46 fe 8b 7f 12 AX=01a3 BX=4080 CX=0008 DX=0000 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98838] INSTR 0330:9bc3 (0cec3) bytes=8b 7f 12 b0 0e 89 AX=01a3 BX=4080 CX=0008 DX=0000 SI=0072 DI=0078 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98839] INSTR 0330:9bc6 (0cec6) bytes=b0 0e 89 fa ee 89 AX=01a3 BX=4080 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98840] INSTR 0330:9bc8 (0cec8) bytes=89 fa ee 89 fb 43 AX=010e BX=4080 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98841] INSTR 0330:9bca (0ceca) bytes=ee 89 fb 43 8b 46 AX=010e BX=4080 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98842] IO   OUT.b port=0000 value=0e
+  [pre i=98843] INSTR 0330:9bcb (0cecb) bytes=89 fb 43 8b 46 fe AX=010e BX=4080 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98844] INSTR 0330:9bcd (0cecd) bytes=43 8b 46 fe b1 08 AX=010e BX=0000 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98845] INSTR 0330:9bce (0cece) bytes=8b 46 fe b1 08 d3 AX=010e BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98846] INSTR 0330:9bd1 (0ced1) bytes=b1 08 d3 e8 89 da AX=01a3 BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98847] INSTR 0330:9bd3 (0ced3) bytes=d3 e8 89 da ee b0 AX=01a3 BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98848] INSTR 0330:9bd5 (0ced5) bytes=89 da ee b0 0f 89 AX=0001 BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98849] INSTR 0330:9bd7 (0ced7) bytes=ee b0 0f 89 fa ee AX=0001 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98850] IO   OUT.b port=0001 value=01
+  [pre i=98851] INSTR 0330:9bd8 (0ced8) bytes=b0 0f 89 fa ee 8a AX=0001 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98852] INSTR 0330:9bda (0ceda) bytes=89 fa ee 8a 46 fe AX=000f BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98853] INSTR 0330:9bdc (0cedc) bytes=ee 8a 46 fe 89 da AX=000f BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98854] IO   OUT.b port=0000 value=0f
+  [pre i=98855] INSTR 0330:9bdd (0cedd) bytes=8a 46 fe 89 da ee AX=000f BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98856] INSTR 0330:9be0 (0cee0) bytes=89 da ee 89 ec 5d AX=00a3 BX=0001 CX=0008 DX=0000 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98857] INSTR 0330:9be2 (0cee2) bytes=ee 89 ec 5d 5f c3 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98858] IO   OUT.b port=0001 value=a3
+  [pre i=98859] INSTR 0330:9be3 (0cee3) bytes=89 ec 5d 5f c3 57 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e38 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98860] INSTR 0330:9be5 (0cee5) bytes=5d 5f c3 57 55 89 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e3a SP=4e3a DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98861] INSTR 0330:9be6 (0cee6) bytes=5f c3 57 55 89 e5 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0000 BP=4e44 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98862] INSTR 0330:9be7 (0cee7) bytes=c3 57 55 89 e5 1e AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0078 BP=4e44 SP=4e3e DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98863] INSTR 0330:26ea (059ea) bytes=83 c4 04 89 ec 5d AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0078 BP=4e44 SP=4e40 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [pre i=98864] INSTR 0330:26ed (059ed) bytes=89 ec 5d 5e c3 89 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0078 BP=4e44 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98865] INSTR 0330:26ef (059ef) bytes=5d 5e c3 89 76 06 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0078 BP=4e44 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98866] INSTR 0330:26f0 (059f0) bytes=5e c3 89 76 06 89 AX=00a3 BX=0001 CX=0008 DX=0001 SI=0072 DI=0078 BP=4e50 SP=4e46 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98867] INSTR 0330:26f1 (059f1) bytes=c3 89 76 06 89 ec AX=00a3 BX=0001 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e48 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98868] INSTR 0330:2913 (05c13) bytes=83 c4 02 e9 58 01 AX=00a3 BX=0001 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4a DS=19f2 ES=19f2 SS=19f2 F=f206
+  [pre i=98869] INSTR 0330:2916 (05c16) bytes=e9 58 01 c7 06 c2 AX=00a3 BX=0001 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98870] INSTR 0330:2a71 (05d71) bytes=8b 5e fe e9 6a fe AX=00a3 BX=0001 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98871] INSTR 0330:2a74 (05d74) bytes=e9 6a fe b9 10 00 AX=00a3 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98872] INSTR 0330:28e1 (05be1) bytes=8a 07 98 85 c0 75 AX=00a3 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [pre i=98873] INSTR 0330:28e3 (05be3) bytes=98 85 c0 75 06 89 AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e4c DS=19f2 ES=19f2 SS=19f2 F=f202
+  >>> SVC  vec=maskable at=0330:28e4
+  [post i=98875] INSTR 0330:7d2f (0b02f) bytes=1e 56 57 89 e6 36 AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e42 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98876] INSTR 0330:7d30 (0b030) bytes=56 57 89 e6 36 8e AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e40 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98877] INSTR 0330:7d31 (0b031) bytes=57 89 e6 36 8e 5c AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e3e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98878] INSTR 0330:7d32 (0b032) bytes=89 e6 36 8e 5c 08 AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e68 DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98879] INSTR 0330:7d34 (0b034) bytes=36 8e 5c 08 83 3e AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e3c DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98880] INSTR 0330:7d38 (0b038) bytes=83 3e 02 23 01 72 AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e3c DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98881] INSTR 0330:7d3d (0b03d) bytes=72 0c 74 05 83 ee AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e3c DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f046
+  [post i=98882] INSTR 0330:7d3f (0b03f) bytes=74 05 83 ee 08 eb AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e3c DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f046
+  [post i=98883] INSTR 0330:7d46 (0b046) bytes=be 1e 40 eb 08 8b AX=0071 BX=1a39 CX=0008 DX=0001 SI=4e3c DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f046
+  [post i=98884] INSTR 0330:7d49 (0b049) bytes=eb 08 8b 36 c4 37 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f046
+  [post i=98885] INSTR 0330:7d53 (0b053) bytes=ff 06 02 23 8f 04 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f046
+  [post i=98886] INSTR 0330:7d57 (0b057) bytes=8f 04 8f 44 02 8f AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e3c DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98887] INSTR 0330:7d59 (0b059) bytes=8f 44 02 8f 44 08 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e3e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98888] INSTR 0330:7d5c (0b05c) bytes=8f 44 08 5f 1f 55 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e40 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98889] INSTR 0330:7d5f (0b05f) bytes=5f 1f 55 89 64 0a AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=0078 BP=4e50 SP=4e42 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98890] INSTR 0330:7d60 (0b060) bytes=1f 55 89 64 0a 8c AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98891] INSTR 0330:7d61 (0b061) bytes=55 89 64 0a 8c 54 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e46 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98892] INSTR 0330:7d62 (0b062) bytes=89 64 0a 8c 54 0c AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98893] INSTR 0330:7d65 (0b065) bytes=8c 54 0c 8c 44 06 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98894] INSTR 0330:7d68 (0b068) bytes=8c 44 06 89 44 04 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98895] INSTR 0330:7d6b (0b06b) bytes=89 44 04 89 f4 8c AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98896] INSTR 0330:7d6e (0b06e) bytes=89 f4 8c de 8e d6 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=4e44 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98897] INSTR 0330:7d70 (0b070) bytes=8c de 8e d6 8e c6 AX=0071 BX=1a39 CX=0008 DX=0001 SI=401e DI=3e1f BP=4e50 SP=401e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98898] INSTR 0330:7d72 (0b072) bytes=8e d6 8e c6 52 51 AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=401e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98899] INSTR 0330:7d74 (0b074) bytes=8e c6 52 51 53 50 AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=401e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98900] INSTR 0330:7d76 (0b076) bytes=52 51 53 50 8a 05 AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=401e DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98901] INSTR 0330:7d77 (0b077) bytes=51 53 50 8a 05 3c AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=401c DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98902] INSTR 0330:7d78 (0b078) bytes=53 50 8a 05 3c 10 AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=401a DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98903] INSTR 0330:7d79 (0b079) bytes=50 8a 05 3c 10 75 AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4018 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98904] INSTR 0330:7d7a (0b07a) bytes=8a 05 3c 10 75 0f AX=0071 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98905] INSTR 0330:7d7c (0b07c) bytes=3c 10 75 0f fb e8 AX=0011 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98906] INSTR 0330:7d7e (0b07e) bytes=75 0f fb e8 72 05 AX=0011 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98907] INSTR 0330:7d8f (0b08f) bytes=fb 89 e3 98 50 53 AX=0011 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f002
+  [post i=98908] INSTR 0330:7d90 (0b090) bytes=89 e3 98 50 53 50 AX=0011 BX=1a39 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98909] INSTR 0330:7d92 (0b092) bytes=98 50 53 50 e8 b0 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98910] INSTR 0330:7d93 (0b093) bytes=50 53 50 e8 b0 fe AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4016 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98911] INSTR 0330:7d94 (0b094) bytes=53 50 e8 b0 fe 58 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4014 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98912] INSTR 0330:7d95 (0b095) bytes=50 e8 b0 fe 58 5b AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4012 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98913] INSTR 0330:7d96 (0b096) bytes=e8 b0 fe 58 5b 58 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=4010 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98914] INSTR 0330:7c49 (0af49) bytes=55 89 e5 8b 46 04 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=400e DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98915] INSTR 0330:7c4a (0af4a) bytes=89 e5 8b 46 04 8b AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=4e50 SP=400c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98916] INSTR 0330:7c4c (0af4c) bytes=8b 46 04 8b 4e 06 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98917] INSTR 0330:7c4f (0af4f) bytes=8b 4e 06 89 c3 d1 AX=0011 BX=4016 CX=0008 DX=0001 SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98918] INSTR 0330:7c52 (0af52) bytes=89 c3 d1 e3 8b 97 AX=0011 BX=4016 CX=4016 DX=0001 SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98919] INSTR 0330:7c54 (0af54) bytes=d1 e3 8b 97 8c 3d AX=0011 BX=0011 CX=4016 DX=0001 SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98920] INSTR 0330:7c56 (0af56) bytes=8b 97 8c 3d 85 d2 AX=0011 BX=0022 CX=4016 DX=0001 SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98921] INSTR 0330:7c5a (0af5a) bytes=85 d2 75 0e 89 46 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98922] INSTR 0330:7c5c (0af5c) bytes=75 0e 89 46 06 c7 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98923] INSTR 0330:7c6c (0af6c) bytes=51 50 ff d2 89 ec AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=400c DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98924] INSTR 0330:7c6d (0af6d) bytes=50 ff d2 89 ec 5d AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=400a DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98925] INSTR 0330:7c6e (0af6e) bytes=ff d2 89 ec 5d c3 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=4008 DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98926] INSTR 0330:82bd (0b5bd) bytes=55 89 e5 83 3e 02 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=4006 DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98927] INSTR 0330:82be (0b5be) bytes=89 e5 83 3e 02 23 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=400c SP=4004 DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98928] INSTR 0330:82c0 (0b5c0) bytes=83 3e 02 23 01 b8 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4004 DS=19f2 ES=19f2 SS=19f2 F=f286
+  [post i=98929] INSTR 0330:82c5 (0b5c5) bytes=b8 99 0c 7e 04 50 AX=0011 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4004 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98930] INSTR 0330:82c8 (0b5c8) bytes=7e 04 50 e8 99 a8 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4004 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98931] INSTR 0330:82ca (0b5ca) bytes=50 e8 99 a8 50 e8 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4004 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98932] INSTR 0330:82cb (0b5cb) bytes=e8 99 a8 50 e8 6f AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4002 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98933] INSTR 0330:2b67 (05e67) bytes=55 89 e5 1e b8 66 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=4000 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98934] INSTR 0330:2b68 (05e68) bytes=89 e5 1e b8 66 05 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=4004 SP=3ffe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98935] INSTR 0330:2b6a (05e6a) bytes=1e b8 66 05 50 e8 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ffe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98936] INSTR 0330:2b6b (05e6b) bytes=b8 66 05 50 e8 45 AX=0c99 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ffc DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98937] INSTR 0330:2b6e (05e6e) bytes=50 e8 45 fd 8d 46 AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ffc DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98938] INSTR 0330:2b6f (05e6f) bytes=e8 45 fd 8d 46 06 AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ffa DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98939] INSTR 0330:28b7 (05bb7) bytes=56 55 89 e5 8b 76 AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ff8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98940] INSTR 0330:28b8 (05bb8) bytes=55 89 e5 8b 76 06 AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ff6 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98941] INSTR 0330:28b9 (05bb9) bytes=89 e5 8b 76 06 8a AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ffe SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98942] INSTR 0330:28bb (05bbb) bytes=8b 76 06 8a 04 84 AX=0566 BX=0022 CX=4016 DX=82bd SI=19f2 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98943] INSTR 0330:28be (05bbe) bytes=8a 04 84 c0 75 05 AX=0566 BX=0022 CX=4016 DX=82bd SI=0566 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98944] INSTR 0330:28c0 (05bc0) bytes=84 c0 75 05 89 ec AX=050a BX=0022 CX=4016 DX=82bd SI=0566 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98945] INSTR 0330:28c2 (05bc2) bytes=75 05 89 ec 5d 5e AX=050a BX=0022 CX=4016 DX=82bd SI=0566 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98946] INSTR 0330:28c9 (05bc9) bytes=46 98 50 e8 f7 fd AX=050a BX=0022 CX=4016 DX=82bd SI=0566 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98947] INSTR 0330:28ca (05bca) bytes=98 50 e8 f7 fd 83 AX=050a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98948] INSTR 0330:28cb (05bcb) bytes=50 e8 f7 fd 83 c4 AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98949] INSTR 0330:28cc (05bcc) bytes=e8 f7 fd 83 c4 02 AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3ff2 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98950] INSTR 0330:26c6 (059c6) bytes=56 55 89 e5 8b 76 AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3ff0 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98951] INSTR 0330:26c7 (059c7) bytes=55 89 e5 8b 76 06 AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3fee DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98952] INSTR 0330:26c8 (059c8) bytes=89 e5 8b 76 06 83 AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3ff4 SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98953] INSTR 0330:26ca (059ca) bytes=8b 76 06 83 fe 0a AX=000a BX=0022 CX=4016 DX=82bd SI=0567 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98954] INSTR 0330:26cd (059cd) bytes=83 fe 0a 75 0a b8 AX=000a BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98955] INSTR 0330:26d0 (059d0) bytes=75 0a b8 0d 00 50 AX=000a BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98956] INSTR 0330:26d2 (059d2) bytes=b8 0d 00 50 e8 ed AX=000a BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98957] INSTR 0330:26d5 (059d5) bytes=50 e8 ed ff 83 c4 AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98958] INSTR 0330:26d6 (059d6) bytes=e8 ed ff 83 c4 02 AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fea DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98959] INSTR 0330:26c6 (059c6) bytes=56 55 89 e5 8b 76 AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fe8 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98960] INSTR 0330:26c7 (059c7) bytes=55 89 e5 8b 76 06 AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fe6 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98961] INSTR 0330:26c8 (059c8) bytes=89 e5 8b 76 06 83 AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fec SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98962] INSTR 0330:26ca (059ca) bytes=8b 76 06 83 fe 0a AX=000d BX=0022 CX=4016 DX=82bd SI=000a DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98963] INSTR 0330:26cd (059cd) bytes=83 fe 0a 75 0a b8 AX=000d BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98964] INSTR 0330:26d0 (059d0) bytes=75 0a b8 0d 00 50 AX=000d BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98965] INSTR 0330:26dc (059dc) bytes=a1 ca 3c 85 c0 74 AX=000d BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98966] INSTR 0330:26df (059df) bytes=85 c0 74 0f 56 ff AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98967] INSTR 0330:26e1 (059e1) bytes=74 0f 56 ff 36 c6 AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98968] INSTR 0330:26e3 (059e3) bytes=56 ff 36 c6 37 ff AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98969] INSTR 0330:26e4 (059e4) bytes=ff 36 c6 37 ff d0 AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe2 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98970] INSTR 0330:26e8 (059e8) bytes=ff d0 83 c4 04 89 AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fe0 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98971] INSTR 0330:9f49 (0d249) bytes=56 57 55 89 e5 8b AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98972] INSTR 0330:9f4a (0d24a) bytes=57 55 89 e5 8b 7e AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98973] INSTR 0330:9f4b (0d24b) bytes=55 89 e5 8b 7e 0a AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98974] INSTR 0330:9f4c (0d24c) bytes=89 e5 8b 7e 0a 8b AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fe4 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98975] INSTR 0330:9f4e (0d24e) bytes=8b 7e 0a 8b 46 08 AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=3e1f BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98976] INSTR 0330:9f51 (0d251) bytes=8b 46 08 b4 00 ba AX=9f49 BX=0022 CX=4016 DX=82bd SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98977] INSTR 0330:9f54 (0d254) bytes=b4 00 ba 36 00 f7 AX=0400 BX=0022 CX=4016 DX=82bd SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98978] INSTR 0330:9f56 (0d256) bytes=ba 36 00 f7 e2 05 AX=0000 BX=0022 CX=4016 DX=82bd SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98979] INSTR 0330:9f59 (0d259) bytes=f7 e2 05 80 40 96 AX=0000 BX=0022 CX=4016 DX=0036 SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98980] INSTR 0330:9f5b (0d25b) bytes=05 80 40 96 83 ff AX=0000 BX=0022 CX=4016 DX=0000 SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f282
+  [post i=98981] INSTR 0330:9f5e (0d25e) bytes=96 83 ff 0a 75 0b AX=4080 BX=0022 CX=4016 DX=0000 SI=000d DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98982] INSTR 0330:9f5f (0d25f) bytes=83 ff 0a 75 0b b8 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=98983] INSTR 0330:9f62 (0d262) bytes=75 0b b8 0d 00 50 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98984] INSTR 0330:9f6f (0d26f) bytes=57 56 e8 a8 ff 83 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98985] INSTR 0330:9f70 (0d270) bytes=56 e8 a8 ff 83 c4 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd6 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98986] INSTR 0330:9f71 (0d271) bytes=e8 a8 ff 83 c4 04 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98987] INSTR 0330:9f1c (0d21c) bytes=56 55 89 e5 8b 76 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd2 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98988] INSTR 0330:9f1d (0d21d) bytes=55 89 e5 8b 76 06 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fd0 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98989] INSTR 0330:9f1e (0d21e) bytes=89 e5 8b 76 06 a1 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fd8 SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98990] INSTR 0330:9f20 (0d220) bytes=8b 76 06 a1 26 41 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98991] INSTR 0330:9f23 (0d223) bytes=a1 26 41 85 c0 75 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98992] INSTR 0330:9f26 (0d226) bytes=85 c0 75 0f ff 76 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=98993] INSTR 0330:9f28 (0d228) bytes=75 0f ff 76 08 56 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98994] INSTR 0330:9f2a (0d22a) bytes=ff 76 08 56 ff 54 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98995] INSTR 0330:9f2d (0d22d) bytes=56 ff 54 0c 83 c4 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fcc DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98996] INSTR 0330:9f2e (0d22e) bytes=ff 54 0c 83 c4 04 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fca DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98997] INSTR 0330:9e2e (0d12e) bytes=56 57 55 89 e5 1e AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fc8 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98998] INSTR 0330:9e2f (0d12f) bytes=57 55 89 e5 1e 1e AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fc6 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=98999] INSTR 0330:9e30 (0d130) bytes=55 89 e5 1e 1e 8b AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fc4 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99000] INSTR 0330:9e31 (0d131) bytes=89 e5 1e 1e 8b 76 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fce SP=3fc2 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99001] INSTR 0330:9e33 (0d133) bytes=1e 1e 8b 76 08 8b AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fc2 SP=3fc2 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99002] INSTR 0330:9e34 (0d134) bytes=1e 8b 76 08 8b 46 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fc2 SP=3fc0 DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99003] INSTR 0330:9e35 (0d135) bytes=8b 76 08 8b 46 0a AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99004] INSTR 0330:9e38 (0d138) bytes=8b 46 0a 8b 54 02 AX=0000 BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99005] INSTR 0330:9e3b (0d13b) bytes=8b 54 02 4a 89 56 AX=000d BX=0022 CX=4016 DX=0000 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99006] INSTR 0330:9e3e (0d13e) bytes=4a 89 56 fe 8b 3c AX=000d BX=0022 CX=4016 DX=0019 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99007] INSTR 0330:9e3f (0d13f) bytes=89 56 fe 8b 3c 83 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99008] INSTR 0330:9e42 (0d142) bytes=8b 3c 83 f8 09 75 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99009] INSTR 0330:9e44 (0d144) bytes=83 f8 09 75 03 e9 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99010] INSTR 0330:9e47 (0d147) bytes=75 03 e9 a3 00 7f AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99011] INSTR 0330:9e4c (0d14c) bytes=7f 4c 83 f8 07 74 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99012] INSTR 0330:9e9a (0d19a) bytes=83 f8 0d 74 6b 83 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99013] INSTR 0330:9e9d (0d19d) bytes=74 6b 83 f8 1b 74 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99014] INSTR 0330:9f0a (0d20a) bytes=c6 44 0b 00 c7 44 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99015] INSTR 0330:9f0e (0d20e) bytes=c7 44 04 00 00 eb AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99016] INSTR 0330:9f13 (0d213) bytes=eb a0 c7 44 0c 79 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99017] INSTR 0330:9eb5 (0d1b5) bytes=8b 46 fe 3b 44 06 AX=000d BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99018] INSTR 0330:9eb8 (0d1b8) bytes=3b 44 06 7d 10 31 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f246
+  [post i=99019] INSTR 0330:9ebb (0d1bb) bytes=7d 10 31 c0 50 56 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99020] INSTR 0330:9ecd (0d1cd) bytes=89 ec 5d 5f 5e c3 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99021] INSTR 0330:9ecf (0d1cf) bytes=5d 5f 5e c3 c6 44 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fc2 SP=3fc2 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99022] INSTR 0330:9ed0 (0d1d0) bytes=5f 5e c3 c6 44 0b AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=0050 BP=3fce SP=3fc4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99023] INSTR 0330:9ed1 (0d1d1) bytes=5e c3 c6 44 0b 00 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fce SP=3fc6 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99024] INSTR 0330:9ed2 (0d1d2) bytes=c3 c6 44 0b 00 8b AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fce SP=3fc8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99025] INSTR 0330:9f31 (0d231) bytes=83 c4 04 89 ec 5d AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fce SP=3fca DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99026] INSTR 0330:9f34 (0d234) bytes=89 ec 5d 5e c3 39 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99027] INSTR 0330:9f36 (0d236) bytes=5d 5e c3 39 f0 74 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99028] INSTR 0330:9f37 (0d237) bytes=5e c3 39 f0 74 f7 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd0 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99029] INSTR 0330:9f38 (0d238) bytes=c3 39 f0 74 f7 b8 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd2 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99030] INSTR 0330:9f74 (0d274) bytes=83 c4 04 89 76 08 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99031] INSTR 0330:9f77 (0d277) bytes=89 76 08 89 ec 5d AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99032] INSTR 0330:9f7a (0d27a) bytes=89 ec 5d 5f 5e e9 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99033] INSTR 0330:9f7c (0d27c) bytes=5d 5f 5e e9 2b fc AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99034] INSTR 0330:9f7d (0d27d) bytes=5f 5e e9 2b fc 56 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=000d BP=3fe4 SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99035] INSTR 0330:9f7e (0d27e) bytes=5e e9 2b fc 56 55 AX=0018 BX=0022 CX=4016 DX=0018 SI=4080 DI=3e1f BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99036] INSTR 0330:9f7f (0d27f) bytes=e9 2b fc 56 55 89 AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99037] INSTR 0330:9bad (0cead) bytes=57 55 89 e5 1e 8b AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99038] INSTR 0330:9bae (0ceae) bytes=55 89 e5 1e 8b 5e AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99039] INSTR 0330:9baf (0ceaf) bytes=89 e5 1e 8b 5e 06 AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fe4 SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99040] INSTR 0330:9bb1 (0ceb1) bytes=1e 8b 5e 06 8b 07 AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fda SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99041] INSTR 0330:9bb2 (0ceb2) bytes=8b 5e 06 8b 07 f7 AX=0018 BX=0022 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99042] INSTR 0330:9bb5 (0ceb5) bytes=8b 07 f7 67 06 03 AX=0018 BX=4080 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99043] INSTR 0330:9bb7 (0ceb7) bytes=f7 67 06 03 47 04 AX=0050 BX=4080 CX=4016 DX=0018 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99044] INSTR 0330:9bba (0ceba) bytes=03 47 04 03 47 10 AX=0190 BX=4080 CX=4016 DX=0000 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99045] INSTR 0330:9bbd (0cebd) bytes=03 47 10 89 46 fe AX=0190 BX=4080 CX=4016 DX=0000 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99046] INSTR 0330:9bc0 (0cec0) bytes=89 46 fe 8b 7f 12 AX=0190 BX=4080 CX=4016 DX=0000 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99047] INSTR 0330:9bc3 (0cec3) bytes=8b 7f 12 b0 0e 89 AX=0190 BX=4080 CX=4016 DX=0000 SI=000d DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99048] INSTR 0330:9bc6 (0cec6) bytes=b0 0e 89 fa ee 89 AX=0190 BX=4080 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99049] INSTR 0330:9bc8 (0cec8) bytes=89 fa ee 89 fb 43 AX=010e BX=4080 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99050] INSTR 0330:9bca (0ceca) bytes=ee 89 fb 43 8b 46 AX=010e BX=4080 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99051] IO   OUT.b port=0000 value=0e
+  [post i=99052] INSTR 0330:9bcb (0cecb) bytes=89 fb 43 8b 46 fe AX=010e BX=4080 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99053] INSTR 0330:9bcd (0cecd) bytes=43 8b 46 fe b1 08 AX=010e BX=0000 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99054] INSTR 0330:9bce (0cece) bytes=8b 46 fe b1 08 d3 AX=010e BX=0001 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99055] INSTR 0330:9bd1 (0ced1) bytes=b1 08 d3 e8 89 da AX=0190 BX=0001 CX=4016 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99056] INSTR 0330:9bd3 (0ced3) bytes=d3 e8 89 da ee b0 AX=0190 BX=0001 CX=4008 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  [post i=99057] INSTR 0330:9bd5 (0ced5) bytes=89 da ee b0 0f 89 AX=0001 BX=0001 CX=4008 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99058] INSTR 0330:9bd7 (0ced7) bytes=ee b0 0f 89 fa ee AX=0001 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99059] IO   OUT.b port=0001 value=01
+  [post i=99060] INSTR 0330:9bd8 (0ced8) bytes=b0 0f 89 fa ee 8a AX=0001 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99061] INSTR 0330:9bda (0ceda) bytes=89 fa ee 8a 46 fe AX=000f BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99062] INSTR 0330:9bdc (0cedc) bytes=ee 8a 46 fe 89 da AX=000f BX=0001 CX=4008 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99063] IO   OUT.b port=0000 value=0f
+  [post i=99064] INSTR 0330:9bdd (0cedd) bytes=8a 46 fe 89 da ee AX=000f BX=0001 CX=4008 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99065] INSTR 0330:9be0 (0cee0) bytes=89 da ee 89 ec 5d AX=0090 BX=0001 CX=4008 DX=0000 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99066] INSTR 0330:9be2 (0cee2) bytes=ee 89 ec 5d 5f c3 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99067] IO   OUT.b port=0001 value=90
+  [post i=99068] INSTR 0330:9be3 (0cee3) bytes=89 ec 5d 5f c3 57 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99069] INSTR 0330:9be5 (0cee5) bytes=5d 5f c3 57 55 89 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fda SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99070] INSTR 0330:9be6 (0cee6) bytes=5f c3 57 55 89 e5 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=0000 BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99071] INSTR 0330:9be7 (0cee7) bytes=c3 57 55 89 e5 1e AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99072] INSTR 0330:26ea (059ea) bytes=83 c4 04 89 ec 5d AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=3e1f BP=3fe4 SP=3fe0 DS=19f2 ES=19f2 SS=19f2 F=f203
+  [post i=99073] INSTR 0330:26ed (059ed) bytes=89 ec 5d 5e c3 89 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  [post i=99074] INSTR 0330:26ef (059ef) bytes=5d 5e c3 89 76 06 AX=0090 BX=0001 CX=4008 DX=0001 SI=000d DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+
+## Section 5a: IDT state reconstructed AT intService idx
+Vector | Offset | Segment | Linear  (only kernel-altered or matches 0330:7d2f)
+  00  |  3e1a  |  19f2   | 1dd3a
+  02  |  3e20  |  19f2   | 1dd40
+  08  |  3db4  |  19f2   | 1dcd4
+  09  |  3dba  |  19f2   | 1dcda
+  80  |  3e14  |  19f2   | 1dd34
+
+## Section 5b: All IO events by port
+  port=0000  in=0  out=462
+  port=0001  in=0  out=462
+  port=0021  in=2  out=2
+  port=0040  in=0  out=2
+  port=0043  in=0  out=1
+  port=0060  in=3  out=2
+  port=0061  in=1  out=2
+  port=0064  in=10  out=4
+  port=0080  in=0  out=6
+  port=02e9  in=2  out=2
+  port=02f9  in=2  out=2
+  port=0300  in=1  out=1
+  port=03e9  in=2  out=2
+  port=03f9  in=2  out=2
+  port=0510  in=0  out=2
+  port=0511  in=1  out=1
+
+## Section 5c: OUTs to PIC EOI ports (0x20, 0xA0)
+  Total: 0
+
+## Section 5d: bytes at IDT-installed handlers
+  IDT[0x00]=19f2:3e1a (lin=1dd3a):
+    1dd3a: 9a 2f 7d 30 03 11 9a 2f 7d 30 03 12 00 00 00 00
+    1dd4a: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  IDT[0x02]=19f2:3e20 (lin=1dd40):
+    1dd40: 9a 2f 7d 30 03 12 00 00 00 00 00 00 00 00 00 00
+    1dd50: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  IDT[0x08]=19f2:3db4 (lin=1dcd4):
+    1dcd4: 9a 2f 7d 30 03 00 9a 2f 7d 30 03 01 00 00 00 00
+    1dce4: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    1dcf4: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    1dd04: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  IDT[0x09]=19f2:3dba (lin=1dcda):
+    1dcda: 9a 2f 7d 30 03 01 00 00 00 00 00 00 00 00 00 00
+    1dcea: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  IDT[0x80]=19f2:3e14 (lin=1dd34):
+    1dd34: 9a 2f 7d 30 03 10 9a 2f 7d 30 03 11 9a 2f 7d 30
+    1dd44: 03 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  post-svc handler 0330:7d2f (lin=0b02f):
+    0b02f: 1e 56 57 89 e6 36 8e 5c 08 83 3e 02 23 01 72 0c
+    0b03f: 74 05 83 ee 08 eb 0d be 1e 40 eb 08 8b 36 c4 37
+    0b04f: 81 c6 6a 03 ff 06 02 23 8f 04 8f 44 02 8f 44 08
+    0b05f: 5f 1f 55 89 64 0a 8c 54 0c 8c 44 06 89 44 04 89
+
+## Section 6: Memory bytes around HLT site
+CS=0330  base offset=7e00  base linear=0b100
+  7e00: 17 89 ec 5d cf 8b 1e c4 37 8d a7 64 03 31 c0 50
+  7e10: fa eb df 55 06 57 56 8b 1e de 37 89 a7 90 00 8b
+  7e20: 1e c4 37 8b a7 90 00 5e 5f 07 5d c3 89 e0 c3 f4
+  7e30: c3 06 31 c0 8e c0 bb 20 00 26 8b 07 a3 fe 22 26
+  7e40: 8b 47 02 a3 00 23 07 c3 89 e3 8b 57 06 8b 4f 04
+  7e50: 8b 5f 02 d1 e3 d1 e3 1e 31 c0 8e d8 9c fa 89 0f
+  7e60: 89 57 02 9d 1f c3 56 55 89 e5 1e 8b 76 06 56 b8
+  7e70: 0c 23 50 e8 4e 06 b8 14 00 50 b8 04 23 50 56 e8
+  7e80: 48 4e 83 c4 0a 85 c0 75 09 89 46 fe e8 76 ff 8b
+  7e90: 46 fe 89 ec 5d 5e c3 55 89 e5 1e ff 76 08 ff 76
+  7ea0: 06 ff 76 04 e8 23 4e 83 c4 06 85 c0 75 09 89 46
+  7eb0: fe e8 51 ff 8b 46 fe 89 ec 5d c3 55 89 e5 8b 5e
+
+## Section 7: Last 60 INT 10h calls (so we can locate the print code)
+Total INT 10h: 188
+  INT  vec=10 from=9000:007f AX=0e2e BX=0007 CX=0a11 DX=0100
+  INT  vec=10 from=0120:0365 AX=0e0d BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e0a BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e45 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e4c BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e4b BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e53 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e20 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e53 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e65 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e74 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e75 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e70 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e20 BX=0007 CX=0000 DX=2400
+  INT  vec=10 from=0120:0333 AX=0f00 BX=0078 CX=0000 DX=2400
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=0006 DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e2e BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e46 BX=0007 CX=000a DX=0000
+  INT  vec=10 from=0120:0365 AX=0e48 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=9000:0365 AX=0e74 BX=0007 CX=0004 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e30 BX=0007 CX=0004 DX=0e03
+  INT  vec=10 from=9000:0365 AX=0e33 BX=0007 CX=0004 DX=0e03
+  INT  vec=10 from=9000:0365 AX=0e33 BX=0007 CX=0004 DX=0e30
+  INT  vec=10 from=9000:0365 AX=0e30 BX=0007 CX=0004 DX=0e30
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=0004 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e66 BX=0007 CX=7c80 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e31 BX=0007 CX=7c04 DX=0e12
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=7c04 DX=0e12
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=7c04 DX=0e2a
+  INT  vec=10 from=9000:0365 AX=0e41 BX=0007 CX=7c04 DX=0e2a
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=7c80 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e64 BX=0007 CX=07c8 DX=0efa
+  INT  vec=10 from=9000:0365 AX=0e31 BX=0007 CX=2804 DX=0e19
+  INT  vec=10 from=9000:0365 AX=0e39 BX=0007 CX=2804 DX=0e19
+  INT  vec=10 from=9000:0365 AX=0e46 BX=0007 CX=2804 DX=0ef2
+  INT  vec=10 from=9000:0365 AX=0e32 BX=0007 CX=2804 DX=0ef2
+  INT  vec=10 from=9000:0365 AX=0e20 BX=0007 CX=2800 DX=0efa
+  INT  vec=10 from=0330:004c AX=0e49 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e4e BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e20 BX=0007 CX=0000 DX=1fc0
+  INT  vec=10 from=0330:004c AX=0e66 BX=0007 CX=0000 DX=0003
+  INT  vec=10 from=0330:004c AX=0e30 BX=0007 CX=0000 DX=0002
+  INT  vec=10 from=0330:004c AX=0e30 BX=0007 CX=0000 DX=0001
+  INT  vec=10 from=0330:004c AX=0e32 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e20 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e53 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e41 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e52 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e54 BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e0d BX=0007 CX=0000 DX=0000
+  INT  vec=10 from=0330:004c AX=0e0a BX=0007 CX=0000 DX=0000
+
+## Section 8: Last 80 instruction events
+  INSTR 0330:8468 (0b768) bytes=89 07 8e da c3 8c AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fb6 SP=3fae DS=b800 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:846a (0b76a) bytes=8e da c3 8c d9 89 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fb6 SP=3fae DS=b800 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:846c (0b76c) bytes=c3 8c d9 89 e3 8b AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fb6 SP=3fae DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9d7c (0d07c) bytes=89 ec 5d c3 56 57 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fb6 SP=3fb0 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9d7e (0d07e) bytes=5d c3 56 57 55 89 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fb6 SP=3fb6 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9d7f (0d07f) bytes=c3 56 57 55 89 e5 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fb8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9e92 (0d192) bytes=ff 44 04 83 c4 04 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fba DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9e95 (0d195) bytes=83 c4 04 eb 5f 83 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fba DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9e98 (0d198) bytes=eb 5f 83 f8 0d 74 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9ef9 (0d1f9) bytes=8d 45 ff 3b 44 04 AX=073a BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9efc (0d1fc) bytes=3b 44 04 7d b4 c6 AX=004f BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9eff (0d1ff) bytes=7d b4 c6 44 0b 01 AX=004f BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9eb5 (0d1b5) bytes=8b 46 fe 3b 44 06 AX=004f BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9eb8 (0d1b8) bytes=3b 44 06 7d 10 31 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9ebb (0d1bb) bytes=7d 10 31 c0 50 56 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9ecd (0d1cd) bytes=89 ec 5d 5f 5e c3 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fbe DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9ecf (0d1cf) bytes=5d 5f 5e c3 c6 44 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fc2 SP=3fc2 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9ed0 (0d1d0) bytes=5f 5e c3 c6 44 0b AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=0050 BP=3fce SP=3fc4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9ed1 (0d1d1) bytes=5e c3 c6 44 0b 00 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fce SP=3fc6 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9ed2 (0d1d2) bytes=c3 c6 44 0b 00 8b AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fce SP=3fc8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f31 (0d231) bytes=83 c4 04 89 ec 5d AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fce SP=3fca DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f34 (0d234) bytes=89 ec 5d 5e c3 39 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f36 (0d236) bytes=5d 5e c3 39 f0 74 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fce SP=3fce DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f37 (0d237) bytes=5e c3 39 f0 74 f7 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd0 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f38 (0d238) bytes=c3 39 f0 74 f7 b8 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd2 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f74 (0d274) bytes=83 c4 04 89 76 08 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9f77 (0d277) bytes=89 76 08 89 ec 5d AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9f7a (0d27a) bytes=89 ec 5d 5f 5e e9 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9f7c (0d27c) bytes=5d 5f 5e e9 2b fc AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fd8 SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9f7d (0d27d) bytes=5f 5e e9 2b fc 56 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=003a BP=3fe4 SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9f7e (0d27e) bytes=5e e9 2b fc 56 55 AX=0018 BX=0558 CX=4008 DX=19f2 SI=4080 DI=3e1f BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9f7f (0d27f) bytes=e9 2b fc 56 55 89 AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bad (0cead) bytes=57 55 89 e5 1e 8b AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bae (0ceae) bytes=55 89 e5 1e 8b 5e AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9baf (0ceaf) bytes=89 e5 1e 8b 5e 06 AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fe4 SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bb1 (0ceb1) bytes=1e 8b 5e 06 8b 07 AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fda SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bb2 (0ceb2) bytes=8b 5e 06 8b 07 f7 AX=0018 BX=0558 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bb5 (0ceb5) bytes=8b 07 f7 67 06 03 AX=0018 BX=4080 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bb7 (0ceb7) bytes=f7 67 06 03 47 04 AX=0050 BX=4080 CX=4008 DX=19f2 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bba (0ceba) bytes=03 47 04 03 47 10 AX=0280 BX=4080 CX=4008 DX=0000 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:9bbd (0cebd) bytes=03 47 10 89 46 fe AX=02ad BX=4080 CX=4008 DX=0000 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bc0 (0cec0) bytes=89 46 fe 8b 7f 12 AX=02ad BX=4080 CX=4008 DX=0000 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bc3 (0cec3) bytes=8b 7f 12 b0 0e 89 AX=02ad BX=4080 CX=4008 DX=0000 SI=003a DI=3e1f BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bc6 (0cec6) bytes=b0 0e 89 fa ee 89 AX=02ad BX=4080 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bc8 (0cec8) bytes=89 fa ee 89 fb 43 AX=020e BX=4080 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bca (0ceca) bytes=ee 89 fb 43 8b 46 AX=020e BX=4080 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bcb (0cecb) bytes=89 fb 43 8b 46 fe AX=020e BX=4080 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bcd (0cecd) bytes=43 8b 46 fe b1 08 AX=020e BX=0000 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bce (0cece) bytes=8b 46 fe b1 08 d3 AX=020e BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bd1 (0ced1) bytes=b1 08 d3 e8 89 da AX=02ad BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bd3 (0ced3) bytes=d3 e8 89 da ee b0 AX=02ad BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:9bd5 (0ced5) bytes=89 da ee b0 0f 89 AX=0002 BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9bd7 (0ced7) bytes=ee b0 0f 89 fa ee AX=0002 BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9bd8 (0ced8) bytes=b0 0f 89 fa ee 8a AX=0002 BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9bda (0ceda) bytes=89 fa ee 8a 46 fe AX=000f BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9bdc (0cedc) bytes=ee 8a 46 fe 89 da AX=000f BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9bdd (0cedd) bytes=8a 46 fe 89 da ee AX=000f BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be0 (0cee0) bytes=89 da ee 89 ec 5d AX=00ad BX=0001 CX=4008 DX=0000 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be2 (0cee2) bytes=ee 89 ec 5d 5f c3 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be3 (0cee3) bytes=89 ec 5d 5f c3 57 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fd8 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be5 (0cee5) bytes=5d 5f c3 57 55 89 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fda SP=3fda DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be6 (0cee6) bytes=5f c3 57 55 89 e5 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=0000 BP=3fe4 SP=3fdc DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:9be7 (0cee7) bytes=c3 57 55 89 e5 1e AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=3e1f BP=3fe4 SP=3fde DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:26ea (059ea) bytes=83 c4 04 89 ec 5d AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=3e1f BP=3fe4 SP=3fe0 DS=19f2 ES=19f2 SS=19f2 F=f203
+  INSTR 0330:26ed (059ed) bytes=89 ec 5d 5e c3 89 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:26ef (059ef) bytes=5d 5e c3 89 76 06 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=3e1f BP=3fe4 SP=3fe4 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:26f0 (059f0) bytes=5e c3 89 76 06 89 AX=00ad BX=0001 CX=4008 DX=0001 SI=003a DI=3e1f BP=3fec SP=3fe6 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:26f1 (059f1) bytes=c3 89 76 06 89 ec AX=00ad BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fe8 DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:28cf (05bcf) bytes=83 c4 02 eb ea 56 AX=00ad BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fea DS=19f2 ES=19f2 SS=19f2 F=f206
+  INSTR 0330:28d2 (05bd2) bytes=eb ea 56 57 55 89 AX=00ad BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:28be (05bbe) bytes=8a 04 84 c0 75 05 AX=00ad BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:28c0 (05bc0) bytes=84 c0 75 05 89 ec AX=0000 BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:28c2 (05bc2) bytes=75 05 89 ec 5d 5e AX=0000 BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:28c4 (05bc4) bytes=89 ec 5d 5e c3 46 AX=0000 BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:28c6 (05bc6) bytes=5d 5e c3 46 98 50 AX=0000 BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3fec SP=3fec DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:28c7 (05bc7) bytes=5e c3 46 98 50 e8 AX=0000 BX=0001 CX=4008 DX=0001 SI=0565 DI=3e1f BP=3ffe SP=3fee DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:28c8 (05bc8) bytes=c3 46 98 50 e8 f7 AX=0000 BX=0001 CX=4008 DX=0001 SI=19f2 DI=3e1f BP=3ffe SP=3ff0 DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:2b5f (05e5f) bytes=83 c4 02 e8 ca 52 AX=0000 BX=0001 CX=4008 DX=0001 SI=19f2 DI=3e1f BP=3ffe SP=3ff2 DS=19f2 ES=19f2 SS=19f2 F=f246
+  INSTR 0330:2b62 (05e62) bytes=e8 ca 52 eb fb 55 AX=0000 BX=0001 CX=4008 DX=0001 SI=19f2 DI=3e1f BP=3ffe SP=3ff4 DS=19f2 ES=19f2 SS=19f2 F=f202
+  INSTR 0330:7e2f (0b12f) bytes=f4 c3 06 31 c0 8e AX=0000 BX=0001 CX=4008 DX=0001 SI=19f2 DI=3e1f BP=3ffe SP=3ff2 DS=19f2 ES=19f2 SS=19f2 F=f202
+
+## Section 9: Last 30 IO events
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=a6
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=a7
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=a8
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=a9
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=aa
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=ab
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=ac
+  IO   OUT.b port=0000 value=0e
+  IO   OUT.b port=0001 value=02
+  IO   OUT.b port=0000 value=0f
+  IO   OUT.b port=0001 value=ad
+
+## Section 10: Console output
+bytes=187
+  text="ELKS....../linux.................................................................................................................\r\nELKS Setup .........FHt0330 f122A d19F2 INT f002 START\r\n"
+
+## Section 11: Final CPU state
+  CS:IP = 0330:7e30
+  AX=0000 BX=0001 CX=4008 DX=0001
+  SI=19f2 DI=3e1f BP=3ffe SP=3ff2
+  DS=19f2 ES=19f2 SS=19f2
+  FLAGS=f202  halted=true  IF=true

@@ -1,0 +1,19 @@
+{
+  "name": "emu86",
+  "version": "0.0.1",
+  "description": "A browser-oriented TypeScript x86 emulator framework. Roadmap: 8086 → 80286 real mode.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:sst": "vitest run tests/sst"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  }
+}
