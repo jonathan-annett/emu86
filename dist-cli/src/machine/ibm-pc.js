@@ -98,12 +98,19 @@ export class IBMPCMachine {
             onChannel0RisingEdge: () => this.pic.assertIRQ(0),
             ...(warn ? { warn } : {}),
         });
-        // ---- 8042 PS/2 keyboard controller (headless) ----
+        // ---- 8042 PS/2 keyboard controller ----
         // Sits at ports 0x60 / 0x64. ELKS Setup polls bit 0 of 0x64 (OBF) and
         // then issues the A20 enable command (0xD1 → 0xDF) before jumping into
         // protected-mode-style setup; without a handler here, those polls never
-        // see OBF=0 and the boot stalls. Headless: no real keyboard input.
-        this.keyboardController = new KeyboardController8042(warn ? { warn } : {});
+        // see OBF=0 and the boot stalls. The IRQ 1 callback wires injected
+        // scancodes (host stdin → ScancodeTranslator → injectScancodes) to
+        // PIC IRQ 1, the same way PIT channel 0 → IRQ 0 is wired above.
+        // Headless callers (no input plumbing) leave the queue empty; nothing
+        // ever fires IRQ 1 and the device behaves identically to Phase 4.
+        this.keyboardController = new KeyboardController8042({
+            ...(warn ? { warn } : {}),
+            onIRQ1: () => this.pic.assertIRQ(1),
+        });
         // ---- Bus registration ----
         this.pic.registerOn(this.bus);
         this.pit.registerOn(this.bus);

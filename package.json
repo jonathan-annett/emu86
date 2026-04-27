@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:sst": "vitest run tests/sst"
+    "test:sst": "vitest run tests/sst",
+    "start:elks": "tsc -p tsconfig.cli.json && node dist-cli/tools/elks/run.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

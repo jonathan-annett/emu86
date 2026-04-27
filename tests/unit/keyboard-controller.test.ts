@@ -273,6 +273,78 @@ describe('8042 reset()', () => {
 // Unknown commands
 // ============================================================
 
+// ============================================================
+// Phase 7: scancode injection + IRQ 1 firing
+// ============================================================
+
+describe('8042 scancode injection (Phase 7)', () => {
+  it('injectScancode with empty buffer transitions OBF to 1 and fires IRQ 1', () => {
+    let irqFired = 0;
+    const kbc = new KeyboardController8042({ onIRQ1: () => irqFired++ });
+    expect(kbc.outputBufferFull).toBe(false);
+    kbc.injectScancode(0x1E);                 // 'a' press
+    expect(kbc.outputBufferFull).toBe(true);
+    expect(kbc.readByte(STATUS) & 0x01).toBe(0x01);
+    expect(irqFired).toBe(1);
+    expect(kbc.readByte(DATA)).toBe(0x1E);
+  });
+
+  it('reading port 0x60 clears OBF when no more scancodes are queued', () => {
+    const kbc = new KeyboardController8042();
+    kbc.injectScancode(0x1E);
+    kbc.readByte(DATA);
+    expect(kbc.outputBufferFull).toBe(false);
+    expect(kbc.readByte(STATUS) & 0x01).toBe(0);
+    expect(kbc.readByte(DATA)).toBe(0x00);    // empty-buffer fallback
+  });
+
+  it('second injection while buffer is full queues; on read, dequeues and re-fires IRQ 1', () => {
+    let irqFired = 0;
+    const kbc = new KeyboardController8042({ onIRQ1: () => irqFired++ });
+    kbc.injectScancode(0x1E);
+    expect(irqFired).toBe(1);
+    kbc.injectScancode(0x9E);                 // 'a' release — queued, no IRQ yet
+    expect(irqFired).toBe(1);
+    expect(kbc.pendingScancodeCount).toBe(1);
+    expect(kbc.readByte(DATA)).toBe(0x1E);    // drain first
+    expect(irqFired).toBe(2);                 // IRQ 1 re-asserted for the next byte
+    expect(kbc.pendingScancodeCount).toBe(0);
+    expect(kbc.readByte(DATA)).toBe(0x9E);    // drain second
+    expect(kbc.outputBufferFull).toBe(false);
+  });
+
+  it('injectScancodes: a multi-byte sequence drains correctly across reads', () => {
+    let irqFired = 0;
+    const kbc = new KeyboardController8042({ onIRQ1: () => irqFired++ });
+    // Ctrl-A wrap: Ctrl-down, 'a', 'a'-release, Ctrl-up
+    kbc.injectScancodes([0x1D, 0x1E, 0x9E, 0x9D]);
+    expect(kbc.pendingScancodeCount).toBe(3);
+    const drained: number[] = [];
+    for (let i = 0; i < 4; i++) drained.push(kbc.readByte(DATA));
+    expect(drained).toEqual([0x1D, 0x1E, 0x9E, 0x9D]);
+    expect(irqFired).toBe(4);
+    expect(kbc.outputBufferFull).toBe(false);
+    expect(kbc.pendingScancodeCount).toBe(0);
+  });
+
+  it('reset clears any queued scancodes and the output buffer', () => {
+    let irqFired = 0;
+    const kbc = new KeyboardController8042({ onIRQ1: () => irqFired++ });
+    kbc.injectScancodes([0x1E, 0x9E, 0x30]);
+    expect(kbc.pendingScancodeCount).toBe(2);
+    kbc.reset();
+    expect(kbc.pendingScancodeCount).toBe(0);
+    expect(kbc.outputBufferFull).toBe(false);
+    expect(kbc.readByte(STATUS) & 0x01).toBe(0);
+  });
+
+  it('without onIRQ1 callback, injection still works (headless tests)', () => {
+    const kbc = new KeyboardController8042();
+    kbc.injectScancode(0x1E);
+    expect(kbc.readByte(DATA)).toBe(0x1E);
+  });
+});
+
 describe('8042 unknown command tolerance', () => {
   let warnings: string[];
   let kbc: KeyboardController8042;

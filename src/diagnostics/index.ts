@@ -18,3 +18,14 @@ export {
   type TraceRunOptions,
   type TraceRunResult,
 } from './trace-runner.js';
+export {
+  installCGAMirror,
+  CapturingCGASink,
+  OneShotPrefixSink,
+  CLEAR_AND_HOME,
+  CGA_TEXT_BASE,
+  CGA_TEXT_END,
+  CGA_TEXT_COLS,
+  type CGAMirrorSink,
+  type InstallCGAMirrorOptions,
+} from './cga-mirror.js';

@@ -53,6 +53,20 @@ import type { IOBus, PortHandler } from '../core/io.js';
 export interface KeyboardController8042Options {
   /** Optional warning sink for unsupported commands. Default: silent. */
   warn?: (msg: string) => void;
+  /**
+   * Callback fired on the empty → full transition of the output buffer
+   * (i.e., when a queued scancode becomes visible to the CPU). The
+   * machine wires this to `pic.assertIRQ(1)` so the keyboard IRQ is
+   * raised the same way a real 8042 would. Default: silent (tests can
+   * call `injectScancode` without an IRQ wired).
+   *
+   * The controller fires this once per OBF-empty-to-full transition: a
+   * burst of injected scancodes raises IRQ 1 once for the first byte,
+   * then again every time the CPU drains the buffer and another queued
+   * byte takes its place. This matches real 8042 behaviour where each
+   * delivered byte produces one falling edge on the IRQ 1 line.
+   */
+  onIRQ1?: () => void;
 }
 
 /**
@@ -126,10 +140,19 @@ export class KeyboardController8042 implements PortHandler {
   /** Cached A20 flag derived from `_outputPort`. */
   private _a20Enabled: boolean = (DEFAULT_OUTPUT_PORT & 0x02) !== 0;
 
+  /**
+   * Host-side queue of scancodes waiting to enter the output buffer.
+   * The 8042's "output buffer" is a single byte; bursts that arrive
+   * faster than the CPU drains them sit here until OBF clears.
+   */
+  private readonly _scancodeQueue: number[] = [];
+
   private readonly warn: (msg: string) => void;
+  private readonly onIRQ1: () => void;
 
   constructor(options: KeyboardController8042Options = {}) {
     this.warn = options.warn ?? (() => { /* silent */ });
+    this.onIRQ1 = options.onIRQ1 ?? (() => { /* silent */ });
   }
 
   // ============================================================
@@ -190,6 +213,50 @@ export class KeyboardController8042 implements PortHandler {
     this._commandByte = DEFAULT_COMMAND_BYTE;
     this._outputPort = DEFAULT_OUTPUT_PORT;
     this._a20Enabled = (DEFAULT_OUTPUT_PORT & 0x02) !== 0;
+    this._scancodeQueue.length = 0;
+  }
+
+  // ============================================================
+  // Scancode injection (Phase 7 — host-driven keyboard input)
+  // ============================================================
+
+  /**
+   * Queue a scancode for delivery to the CPU. If the output buffer is
+   * empty the byte goes straight in and OBF rises (firing IRQ 1 if a
+   * callback is wired); otherwise it joins the host-side queue and
+   * surfaces when the CPU next drains the buffer by reading port 0x60.
+   *
+   * Scancodes are bytes in PC/AT set 1 — see `ScancodeTranslator` for
+   * the host-side stdin → scancode mapping. The controller does not
+   * interpret them, so multi-byte sequences (Ctrl-modifier wrapping,
+   * E0-prefixed extended scancodes) work just as well as single bytes
+   * provided the caller delivers them in order.
+   */
+  injectScancode(byte: number): void {
+    const v = byte & 0xFF;
+    if (this._outputBufferFull) {
+      this._scancodeQueue.push(v);
+      return;
+    }
+    this._outputBuffer = v;
+    this._outputBufferFull = true;
+    this.onIRQ1();
+  }
+
+  /**
+   * Convenience for delivering a multi-byte sequence (e.g., a Ctrl-A
+   * combo: Ctrl-down, 'a', 'a'-release, Ctrl-up). The first byte that
+   * lands in an empty output buffer raises IRQ 1; later bytes wait in
+   * the queue and raise IRQ 1 again as the CPU drains them one at a
+   * time.
+   */
+  injectScancodes(bytes: Iterable<number>): void {
+    for (const b of bytes) this.injectScancode(b);
+  }
+
+  /** Number of scancodes still waiting in the host-side queue. */
+  get pendingScancodeCount(): number {
+    return this._scancodeQueue.length;
   }
 
   // ============================================================
@@ -210,6 +277,16 @@ export class KeyboardController8042 implements PortHandler {
       const v = this._outputBuffer & 0xFF;
       this._outputBufferFull = false;
       this._outputBuffer = 0;
+      // Promote the next queued scancode if the host has more pending.
+      // OBF goes empty → full again, so IRQ 1 fires for the new byte
+      // exactly as a real 8042 would on the next falling edge from the
+      // keyboard line.
+      const next = this._scancodeQueue.shift();
+      if (next !== undefined) {
+        this._outputBuffer = next & 0xFF;
+        this._outputBufferFull = true;
+        this.onIRQ1();
+      }
       return v;
     }
     // No byte queued. Real hardware varies — many controllers return 0
