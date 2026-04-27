@@ -1,6 +1,13 @@
 import { CPU8086 } from '../cpu8086/cpu.js';
 import { TrapRegistry } from '../cpu8086/trap-registry.js';
-import { KeyboardController8042, PIC8259, PIT8254 } from '../devices/index.js';
+import {
+  KeyboardController8042,
+  PIC8259,
+  PIT8254,
+  UART16550,
+  COM1_BASE,
+  COM1_IRQ,
+} from '../devices/index.js';
 import { BasicInterruptController } from '../interrupts/controller.js';
 import { BasicIOBus } from '../io/io-bus.js';
 import { PagedMemory } from '../memory/paged-memory.js';
@@ -90,6 +97,12 @@ export interface IBMPCMachineConfig {
    * when `loadBios` is true.
    */
   hostClock?: HostClock;
+  /**
+   * Optional sink for outgoing UART (COM1) bytes. The harness wires this
+   * to stdout (or to a capturing buffer in tests). Default: bytes are
+   * dropped — tests that don't exercise serial don't need to set this.
+   */
+  uartTransmit?: (byte: number) => void;
 }
 
 /**
@@ -132,6 +145,14 @@ export class IBMPCMachine {
    * reads as 0 and the A20 enable command sequence is accepted.
    */
   readonly keyboardController: KeyboardController8042;
+  /**
+   * NS16550A-class UART at COM1 (ports 0x3F8-0x3FF) with IRQ 4 wired
+   * into the PIC. Phase 8 added it so ELKS's serial driver can probe and
+   * use a real serial console. The TX sink defaults to no-op; harnesses
+   * that want bytes to flow somewhere wire `uartTransmit` in the config.
+   * RX bytes are pushed via `uart.injectByte` / `injectBytes`.
+   */
+  readonly uart: UART16550;
   readonly runLoop: RunLoop;
   /**
    * Trap registry holding every BIOS service handler. Defined when
@@ -199,10 +220,24 @@ export class IBMPCMachine {
       onIRQ1: () => this.pic.assertIRQ(1),
     });
 
+    // ---- 16550A UART at COM1 (Phase 8) ----
+    // IRQ 4 wired to the PIC, mirroring the keyboard's IRQ 1 wiring. The
+    // TX sink and RX injection are configurable; tests that don't drive
+    // serial leave both unset and the device behaves as a quiescent
+    // UART (no bytes in or out).
+    const uartTransmit = config.uartTransmit;
+    this.uart = new UART16550({
+      basePort: COM1_BASE,
+      ...(warn ? { warn } : {}),
+      ...(uartTransmit ? { onTransmit: uartTransmit } : {}),
+      onIRQ4: () => this.pic.assertIRQ(COM1_IRQ),
+    });
+
     // ---- Bus registration ----
     this.pic.registerOn(this.bus);
     this.pit.registerOn(this.bus);
     this.keyboardController.registerOn(this.bus);
+    this.uart.registerOn(this.bus);
 
     // ---- BIOS ROM + trap registry (optional but on by default) ----
     // Build the BIOS first so the CPU can be constructed with the trap
@@ -268,6 +303,7 @@ export class IBMPCMachine {
     this.pic.reset();
     this.pit.reset();
     this.keyboardController.reset();
+    this.uart.reset();
     this.clock.reset();
   }
 
