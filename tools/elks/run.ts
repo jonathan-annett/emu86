@@ -13,6 +13,11 @@
  * Or via the npm script:
  *   npm run start:elks
  *
+ * Optional secondary disk (Phase 11):
+ *   --hdb <path>            mount as /dev/hdb (hard disk class)
+ *   --fd1 <path>            mount as /dev/fd1 (floppy class)
+ *   --secondary-class <c>   override class detection (`floppy` | `hard-disk`)
+ *
  * The default image is `reference/elks-images/fd1440-minix.img` — the
  * Phase 6 baseline. `maxInstructions` is optional; omit (or pass 0 / a
  * negative value) for unbounded operation, which is what an interactive
@@ -65,14 +70,11 @@ import {
 
 const DEFAULT_IMAGE = 'reference/elks-images/fd1440-minix.img';
 
-const FD1440 = { cylinders: 80, heads: 2, sectorsPerTrack: 18 };
-const FD1200 = { cylinders: 80, heads: 2, sectorsPerTrack: 15 };
-
-function geometryForSize(bytes: number): { cylinders: number; heads: number; sectorsPerTrack: number } | null {
-  if (bytes === 1474560) return FD1440;
-  if (bytes === 1228800) return FD1200;
-  return null;
-}
+import {
+  loadDiskFromPath,
+  parseSecondaryFlags,
+  type DiskClass,
+} from './secondary-disk.js';
 
 function loadDisk(imagePath: string): InMemoryDisk {
   const abs = resolve(imagePath);
@@ -82,15 +84,7 @@ function loadDisk(imagePath: string): InMemoryDisk {
       `Place an ELKS floppy image at that path, or pass a different one as the first argument.`,
     );
   }
-  const bytes = readFileSync(abs);
-  const geom = geometryForSize(bytes.length);
-  if (!geom) {
-    throw new Error(
-      `Unrecognised image size ${bytes.length} bytes — only 1.44M (1474560) and ` +
-      `1.2M (1228800) floppy images are wired up.`,
-    );
-  }
-  return new InMemoryDisk({ geometry: geom, contents: bytes });
+  return loadDiskFromPath(abs);
 }
 
 /**
@@ -146,26 +140,40 @@ class QuitPrefix {
   }
 }
 
-function printBanner(image: string): void {
+function printBanner(image: string, secondary: string | null): void {
   process.stdout.write('\x1b[2J\x1b[H');         // clear, cursor home
   process.stdout.write('emu86 — ELKS in a terminal\n');
   process.stdout.write(`Image: ${image}\n`);
+  if (secondary !== null) {
+    process.stdout.write(`Secondary: ${secondary}\n`);
+  }
   process.stdout.write('Quit:  Ctrl-A x   |   Send literal Ctrl-A: Ctrl-A Ctrl-A\n');
   process.stdout.write('Booting...\n\n');
 }
 
 async function main(): Promise<void> {
-  const image = process.argv[2] ?? DEFAULT_IMAGE;
-  const maxArg = Number(process.argv[3] ?? '0');
+  const parsed = parseSecondaryFlags(process.argv.slice(2));
+  const image = parsed.positional[0] ?? DEFAULT_IMAGE;
+  const maxArg = Number(parsed.positional[1] ?? '0');
   const maxInstructions = Number.isFinite(maxArg) && maxArg > 0 ? maxArg : Infinity;
 
   const disk = loadDisk(image);
+  const secondary = parsed.secondary
+    ? loadDiskFromPath(parsed.secondary.path)
+    : null;
+  const secondaryClass: DiskClass | undefined = parsed.secondary?.diskClass ?? undefined;
 
-  printBanner(image);
+  printBanner(image, parsed.secondary?.path ?? null);
 
   const console_ = new NodeConsole();
   const machine = new IBMPCMachine({
     disk,
+    ...(secondary
+      ? {
+          secondaryDisk: secondary,
+          ...(secondaryClass ? { secondaryDiskClass: secondaryClass } : {}),
+        }
+      : {}),
     console: console_,
     hostClock: new NodeHostClock(),
     cyclesPerPitTick: 4,

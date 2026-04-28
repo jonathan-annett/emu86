@@ -34,11 +34,96 @@ import { BiosDataArea, BDA, EQUIPMENT_DEFAULT, MEMORY_SIZE_KB_DEFAULT } from './
 export interface BiosContext {
   console: Console;
   disk: Disk | null;
+  /**
+   * Class of the primary attached disk. Determines the boot drive number
+   * INT 19h stamps into DL (`0x00` for floppy, `0x80` for hard-disk) and
+   * the per-class index assigned to the primary slot inside the INT 13h
+   * dispatch table.
+   *
+   * Defaulted (in `IBMPCMachine`) to `'floppy'` for backwards-compat with
+   * the pre-Phase-10 single-floppy harness; the worker host derives it
+   * from geometry for HD images. Ignored when `disk` is null.
+   */
+  diskClass: 'floppy' | 'hard-disk';
+  /**
+   * Optional secondary disk (Phase 11). When present, BIOS INT 13h
+   * dispatches DL=0x01 (if floppy) or DL=0x81 (if HD) to this slot, and
+   * AH=0x08 reports the per-class drive count up to two.
+   */
+  secondaryDisk?: Disk | null;
+  /**
+   * Class of the secondary disk. Required when `secondaryDisk` is non-null.
+   * Determines whether the secondary surfaces as a floppy (DL=0x01) or an
+   * HD (DL=0x81).
+   */
+  secondaryDiskClass?: 'floppy' | 'hard-disk';
   hostClock: HostClock;
   /** Diagnostic sink for unimplemented subfunctions. Default silent. */
   warn: (msg: string) => void;
   /** Optional EOI port (for INT 8 timer handler). Default 0x20. */
   eoiPort: number;
+}
+
+/** Base BIOS drive number for a class — 0x00 for floppy, 0x80 for HD. */
+function classBase(cls: 'floppy' | 'hard-disk'): number {
+  return cls === 'hard-disk' ? 0x80 : 0x00;
+}
+
+/** Drive number assigned to the currently-attached primary disk by class. */
+function bootDriveNumber(cls: 'floppy' | 'hard-disk'): number {
+  return classBase(cls);
+}
+
+interface ResolvedSlot {
+  disk: Disk;
+  cls: 'floppy' | 'hard-disk';
+}
+
+/**
+ * Map a BIOS drive number to the disk slot that should service it, or
+ * `null` if no attached disk owns that drive number.
+ *
+ * Routing rule (Phase 11): per-class indexing. Floppies fill DL=0x00,
+ * 0x01... in slot order (primary, secondary); HDs fill DL=0x80, 0x81...
+ * the same way. A request for an unfilled slot returns `null` and the
+ * caller should signal "drive not present" (CF=1, AH=0x01) per the ELKS
+ * kernel's silent-skip probe behaviour (cite: ELKS
+ * `arch/i86/drivers/block/bios.c:205-250`).
+ *
+ * Examples (with primary=HD@0x80, secondary=floppy):
+ *   DL=0x80 → primary (HD)
+ *   DL=0x00 → secondary (the only floppy)
+ *   DL=0x81 → null
+ *   DL=0x01 → null
+ */
+function routeDrive(ctx: BiosContext, dl: number): ResolvedSlot | null {
+  // Build the per-class slot list in primary-first order.
+  const slots: ResolvedSlot[] = [];
+  if (ctx.disk) slots.push({ disk: ctx.disk, cls: ctx.diskClass });
+  const sec = ctx.secondaryDisk ?? null;
+  if (sec) {
+    const secCls = ctx.secondaryDiskClass ?? 'floppy';
+    slots.push({ disk: sec, cls: secCls });
+  }
+  const wantClass: 'floppy' | 'hard-disk' = (dl & 0x80) ? 'hard-disk' : 'floppy';
+  const base = classBase(wantClass);
+  const wantIndex = dl - base;
+  if (wantIndex < 0 || wantIndex > 0x7F) return null;
+  let seen = -1;
+  for (const s of slots) {
+    if (s.cls !== wantClass) continue;
+    seen++;
+    if (seen === wantIndex) return s;
+  }
+  return null;
+}
+
+/** Count of attached disks of a given class. Caps at 2 (the slot limit). */
+function classCount(ctx: BiosContext, cls: 'floppy' | 'hard-disk'): number {
+  let n = 0;
+  if (ctx.disk && ctx.diskClass === cls) n++;
+  if (ctx.secondaryDisk && (ctx.secondaryDiskClass ?? 'floppy') === cls) n++;
+  return n;
 }
 
 /** Convenience: a curried handler ready for `TrapRegistry.register`. */
@@ -276,29 +361,30 @@ export function int13Handler(cpu: CPU8086, ctx: BiosContext): void {
     case 0x03:
     case 0x04: {
       // Read / Write / Verify Sectors.
-      if (!ctx.disk) {
-        setDiskStatus(cpu, bda, DISK_STATUS_DRIVE_NOT_READY);
-        cpu.regs.AL = 0;
-        return;
-      }
       const dl = cpu.regs.DL;
-      // For now we accept any drive number that maps to drive 0/0x80 and
-      // route to the single attached disk. Multi-drive support is a future
-      // brief.
-      if (dl !== 0x00 && dl !== 0x80) {
-        setDiskStatus(cpu, bda, DISK_STATUS_BAD_COMMAND);
+      // Phase 11: route by drive number — the request may be for the
+      // primary or the secondary slot, or for an unfilled slot. An
+      // unfilled slot bounces with BAD_COMMAND (the ELKS kernel reads CF
+      // only and silently skips on error).
+      const slot = routeDrive(ctx, dl);
+      if (!slot) {
+        if (!ctx.disk && !ctx.secondaryDisk) {
+          setDiskStatus(cpu, bda, DISK_STATUS_DRIVE_NOT_READY);
+        } else {
+          setDiskStatus(cpu, bda, DISK_STATUS_BAD_COMMAND);
+        }
         cpu.regs.AL = 0;
         return;
       }
       const count = cpu.regs.AL;
-      const lbaBase = chsToLba(ctx.disk.geometry, cpu.regs.CH, cpu.regs.CL, cpu.regs.DH);
+      const lbaBase = chsToLba(slot.disk.geometry, cpu.regs.CH, cpu.regs.CL, cpu.regs.DH);
       const bufSeg = cpu.regs.ES;
       const bufOff = cpu.regs.BX;
       let done = 0;
       try {
         for (let i = 0; i < count; i++) {
           const lba = lbaBase + i;
-          if (lba >= ctx.disk.sectorCount) {
+          if (lba >= slot.disk.sectorCount) {
             throw new Error('out of range');
           }
           if (ah === 0x03) {
@@ -307,10 +393,10 @@ export function int13Handler(cpu: CPU8086, ctx: BiosContext): void {
             for (let j = 0; j < SECTOR_SIZE; j++) {
               sec[j] = cpu.memory.readByte(linearAddress(bufSeg, (bufOff + i * SECTOR_SIZE + j) & 0xFFFF));
             }
-            ctx.disk.writeSector(lba, sec);
+            slot.disk.writeSector(lba, sec);
           } else {
             // Read or Verify: read the sector. For Verify we discard.
-            const sec = ctx.disk.readSector(lba);
+            const sec = slot.disk.readSector(lba);
             if (ah === 0x02) {
               for (let j = 0; j < SECTOR_SIZE; j++) {
                 cpu.memory.writeByte(linearAddress(bufSeg, (bufOff + i * SECTOR_SIZE + j) & 0xFFFF), sec[j]!);
@@ -334,21 +420,50 @@ export function int13Handler(cpu: CPU8086, ctx: BiosContext): void {
       return;
     }
     case 0x08: {
-      // Get Drive Parameters (HD style). DL = drive number.
-      if (!ctx.disk) {
-        setDiskStatus(cpu, bda, DISK_STATUS_DRIVE_NOT_READY);
+      // Get Drive Parameters. DL = drive number.
+      //
+      // Reply shape (RBIL int 13h ah=08h):
+      //   AH = 00 (success), CF = 0
+      //   CH = low 8 bits of last cylinder
+      //   CL = high 2 bits of cyl in bits 7-6, sectors per track in bits 5-0
+      //   DH = last head (heads - 1)
+      //   DL = number of drives of this class attached (1 or 2)
+      //   BL = drive type byte (floppy: 0x04 for 1.44 MB; HD: 0x00)
+      //   ES:DI = pointer to drive parameter table (we leave it untouched
+      //           for floppies — RBIL allows that — and zero it for HDs,
+      //           which also signal "no DPT" with ES:DI = 0).
+      //
+      // Phase 11: per-drive geometry, per-class drive-count. The ELKS
+      // kernel calls AH=08h with DL=0x00 (or 0x80) to get the drive
+      // count, then iterates through DL=base+i to fetch each drive's
+      // CHS — see ELKS arch/i86/drivers/block/bios.c:205-250. A request
+      // for a drive that doesn't exist returns CF=1 + AH=0x01 and the
+      // kernel silently skips it.
+      const dl = cpu.regs.DL;
+      const slot = routeDrive(ctx, dl);
+      if (!slot) {
+        if (!ctx.disk && !ctx.secondaryDisk) {
+          setDiskStatus(cpu, bda, DISK_STATUS_DRIVE_NOT_READY);
+        } else {
+          setDiskStatus(cpu, bda, DISK_STATUS_BAD_COMMAND);
+        }
         cpu.regs.BL = 0; cpu.regs.CH = 0; cpu.regs.CL = 0; cpu.regs.DH = 0; cpu.regs.DL = 0;
         return;
       }
-      const g = ctx.disk.geometry;
+      const g = slot.disk.geometry;
       const maxCyl = g.cylinders - 1;        // last cylinder (0-based)
       const maxHead = g.heads - 1;
-      const maxSec = g.sectorsPerTrack;       // sectors per track (1-based, fits in 6 bits)
+      const spt = g.sectorsPerTrack;          // sectors per track (1-based, fits in 6 bits)
       cpu.regs.CH = maxCyl & 0xFF;
-      cpu.regs.CL = (maxSec & 0x3F) | ((maxCyl >> 2) & 0xC0);
+      cpu.regs.CL = (spt & 0x3F) | ((maxCyl >> 2) & 0xC0);
       cpu.regs.DH = maxHead;
-      cpu.regs.DL = 1;                        // one drive attached
-      cpu.regs.BL = 0x04;                     // 1.44 MB type code (8086tiny convention)
+      cpu.regs.DL = classCount(ctx, slot.cls);
+      cpu.regs.BL = slot.cls === 'hard-disk' ? 0x00 : 0x04;
+      if (slot.cls === 'hard-disk') {
+        // HDs have no BIOS drive parameter table; zero ES:DI per RBIL.
+        cpu.regs.ES = 0;
+        cpu.regs.DI = 0;
+      }
       setDiskStatus(cpu, bda, DISK_STATUS_OK);
       return;
     }
@@ -445,7 +560,11 @@ export function int19Handler(cpu: CPU8086, ctx: BiosContext): void {
     setReturnCF(cpu, true);
     return;
   }
-  const driveNumber = 0x00;     // floppy. (HD boot: 0x80; we always boot from drive 0.)
+  // Drive number to stamp into DL — 0x00 for floppy, 0x80 for HD. The ELKS
+  // kernel reads DL after boot-sector load to pick `/dev/fd0` vs `/dev/hda`
+  // (cite: arch/i86/drivers/block/bios.c:446-473, `bios_conv_bios_drive` —
+  // the high bit is the discriminator).
+  const driveNumber = bootDriveNumber(ctx.diskClass);
   // Read sector 0 (CHS 0,0,1 = LBA 0) into 0x0000:0x7C00.
   let bootSector: Uint8Array;
   try {

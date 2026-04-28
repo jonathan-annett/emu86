@@ -49,7 +49,7 @@ interface Harness {
   ctx: BiosContext;
 }
 
-function makeHarness(opts: { withDisk?: boolean } = {}): Harness {
+function makeHarness(opts: { withDisk?: boolean; diskClass?: 'floppy' | 'hard-disk'; diskGeometry?: { cylinders: number; heads: number; sectorsPerTrack: number } } = {}): Harness {
   const memory = new PagedMemory({ addressSpaceSize: 0x100000 });
   const bus = new BasicIOBus();
   const cpu = new CPU8086(memory, bus);
@@ -66,15 +66,18 @@ function makeHarness(opts: { withDisk?: boolean } = {}): Harness {
   const console_ = new InMemoryConsole();
   // Always create a disk for the harness's `disk` field so callers can stage
   // sectors. The handler-visible disk in `ctx` follows the `withDisk` flag.
-  const disk = new InMemoryDisk({
-    geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 18 },
-  });
+  const geometry = opts.diskGeometry ?? { cylinders: 80, heads: 2, sectorsPerTrack: 18 };
+  const disk = new InMemoryDisk({ geometry });
   const hostClock = new InMemoryHostClock();
   const warnings: string[] = [];
+
+  const diskClass: 'floppy' | 'hard-disk' =
+    opts.diskClass ?? (geometry.heads >= 4 ? 'hard-disk' : 'floppy');
 
   const ctx: BiosContext = {
     console: console_,
     disk: opts.withDisk === false ? null : disk,
+    diskClass,
     hostClock,
     warn: (m) => warnings.push(m),
     eoiPort: 0x20,

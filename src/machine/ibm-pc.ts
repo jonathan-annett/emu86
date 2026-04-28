@@ -92,6 +92,40 @@ export interface IBMPCMachineConfig {
    */
   disk?: Disk;
   /**
+   * Class of the attached disk — `'floppy'` for the 1.44/1.2 MB diskette
+   * shapes (BIOS drive `0x00`), `'hard-disk'` for ELKS HD images (BIOS
+   * drive `0x80`). Determines the boot drive number the BIOS stamps into
+   * `DL` at INT 19h, the AH=0x08 reply shape, and the drive-number filter
+   * in the INT 13h read/write path.
+   *
+   * Defaults to inferring from `disk.geometry.heads` (≥ 4 → hard-disk).
+   * Pre-Phase-10 callers that pass only floppy geometries see no change.
+   */
+  diskClass?: 'floppy' | 'hard-disk';
+  /**
+   * Optional secondary disk (Phase 11). When present, the BIOS surfaces
+   * it as an additional drive — DL=0x01 if it's a floppy (and primary is
+   * either floppy or absent), or DL=0x81 if it's an HD. The ELKS kernel
+   * probes it via INT 13h AH=08h and registers `/dev/hdb` or `/dev/fd1`
+   * accordingly.
+   *
+   * Routing rule: per-class indexing. Floppies and HDs are numbered
+   * separately (floppies start at 0x00, HDs at 0x80) and slots are
+   * assigned in primary-first order. So an HD primary + floppy secondary
+   * gives the floppy DL=0x00, not 0x01.
+   *
+   * Same drive-number filter for INT 13h read/write applies; a request
+   * for an absent slot returns CF=1 + AH=0x01 (the kernel skips silently).
+   */
+  secondaryDisk?: Disk;
+  /**
+   * Class of the secondary disk. Defaults to inferring from
+   * `secondaryDisk.geometry.heads` the same way `diskClass` does.
+   * Required when `secondaryDisk` is set and ambiguous — explicit pin
+   * always wins.
+   */
+  secondaryDiskClass?: 'floppy' | 'hard-disk';
+  /**
    * Host clock used by INT 1Ah. Default {@link NodeHostClock} (real wall
    * time). Tests usually pass an {@link InMemoryHostClock}. Only consulted
    * when `loadBios` is true.
@@ -168,6 +202,22 @@ export class IBMPCMachine {
   readonly console: Console | null;
   /** Disk wired to INT 13h / 19h. May be null even when the BIOS is loaded. */
   readonly disk: Disk | null;
+  /**
+   * Class of the attached disk — see {@link IBMPCMachineConfig.diskClass}.
+   * Always `'floppy'` when `disk` is null (irrelevant in that case).
+   */
+  readonly diskClass: 'floppy' | 'hard-disk';
+  /**
+   * Optional secondary disk wired to INT 13h. Null when absent (the
+   * common single-disk case). Phase 11.
+   */
+  readonly secondaryDisk: Disk | null;
+  /**
+   * Class of the secondary disk — see
+   * {@link IBMPCMachineConfig.secondaryDiskClass}. Always `'floppy'`
+   * when `secondaryDisk` is null (irrelevant in that case).
+   */
+  readonly secondaryDiskClass: 'floppy' | 'hard-disk';
   /** Host clock wired to INT 1Ah, or `null` when the BIOS is disabled. */
   readonly hostClock: HostClock | null;
 
@@ -250,19 +300,42 @@ export class IBMPCMachine {
     let bios: BuiltBiosRom | null = null;
     let consoleRef: Console | null = null;
     let diskRef: Disk | null = null;
+    let secondaryDiskRef: Disk | null = null;
     let clockRef: HostClock | null = null;
+    let diskClassRef: 'floppy' | 'hard-disk' = 'floppy';
+    let secondaryDiskClassRef: 'floppy' | 'hard-disk' = 'floppy';
     if (loadBios) {
       bios = buildBiosRom();
       traps = new TrapRegistry();
       consoleRef = config.console ?? new InMemoryConsole();
       diskRef = config.disk ?? null;
+      secondaryDiskRef = config.secondaryDisk ?? null;
       clockRef = config.hostClock ?? new NodeHostClock();
+      // Disk-class precedence: explicit config > geometry inference (heads ≥ 4
+      // means HD) > default 'floppy'. The default is irrelevant when no disk
+      // is attached, but keeps the field non-nullable for callers.
+      if (config.diskClass !== undefined) {
+        diskClassRef = config.diskClass;
+      } else if (diskRef !== null) {
+        diskClassRef = diskRef.geometry.heads >= 4 ? 'hard-disk' : 'floppy';
+      }
+      // Same precedence for the secondary slot. When no secondary is
+      // attached the field is irrelevant but kept non-nullable so the
+      // BiosContext can read it without a guard.
+      if (config.secondaryDiskClass !== undefined) {
+        secondaryDiskClassRef = config.secondaryDiskClass;
+      } else if (secondaryDiskRef !== null) {
+        secondaryDiskClassRef = secondaryDiskRef.geometry.heads >= 4 ? 'hard-disk' : 'floppy';
+      }
     }
     this.bios = bios;
     this.traps = traps;
     this.console = consoleRef;
     this.disk = diskRef;
+    this.secondaryDisk = secondaryDiskRef;
     this.hostClock = clockRef;
+    this.diskClass = diskClassRef;
+    this.secondaryDiskClass = secondaryDiskClassRef;
 
     // ---- CPU (needs memory + bus + controller, and trap registry if BIOS is on) ----
     this.cpu = traps !== null
@@ -277,6 +350,9 @@ export class IBMPCMachine {
       const ctx: BiosContext = {
         console: consoleRef!,
         disk: diskRef,
+        diskClass: diskClassRef,
+        secondaryDisk: secondaryDiskRef,
+        secondaryDiskClass: secondaryDiskClassRef,
         hostClock: clockRef!,
         warn: warn ?? (() => { /* silent default */ }),
         eoiPort: 0x20,

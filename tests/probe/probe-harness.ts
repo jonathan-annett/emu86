@@ -1,0 +1,427 @@
+/**
+ * Probe harness (Phase 12).
+ *
+ * Reusable infrastructure for "boot ELKS, run a script, capture its
+ * output". Each future investigation (Phase 13 toolchain survey, kernel-
+ * feature probes, bug repros) becomes a small `runProbe()` call with a
+ * different shell-script payload.
+ *
+ * # End-to-end pipeline
+ *
+ *   1. Build a FAT12 floppy containing the probe script (and any extra
+ *      files), via {@link buildProbeDisk}.
+ *   2. Construct an {@link IBMPCMachine} with the primary serial-console
+ *      image and the probe disk attached as the secondary slot
+ *      (`/dev/fd1`, floppy class).
+ *   3. Run the boot loop until a `# ` shell prompt appears in the UART
+ *      TX byte stream.
+ *   4. Inject the command line:
+ *
+ *          mount /dev/fd1 /mnt && sh /mnt/<probe.sh>; echo __PROBE_DONE__\n
+ *
+ *      The chained `;` after the `&&` means the sentinel-echo always
+ *      fires — even if mount or the script itself fails — so the harness
+ *      always sees terminal output rather than hanging on a partial
+ *      transcript.
+ *   5. Run until `__PROBE_DONE__` appears in TX or the instruction
+ *      budget is exhausted.
+ *   6. Slice the captured transcript into `bootStdout`, the probe-launch
+ *      command-echo region, the probe's stdout window, and return.
+ *
+ * The harness is a pure function: input config in, result out, no
+ * filesystem writes, no global state. Unit tests can exercise its
+ * parsing logic without booting; integration tests can run it against
+ * real ELKS images.
+ *
+ * # Sentinel choice
+ *
+ * `__PROBE_DONE__` is intentionally weird — leading double-underscore +
+ * uppercase + trailing double-underscore. ELKS's normal kernel banner,
+ * mount messages, and shell prompts produce nothing matching this
+ * pattern. (We grep `txAfterBoot` for the string in unit tests against
+ * real boot transcripts to confirm.) If a probe script wants to print
+ * `__PROBE_DONE__` itself, the harness's split rule (everything up to
+ * but not including the LAST occurrence of the sentinel) is what kicks
+ * in — but in practice no probe needs to embed the sentinel in its
+ * output.
+ *
+ * # Boot vs probe stdout boundary
+ *
+ * The full UART transcript contains, in order:
+ *
+ *   1. Kernel banner / mount messages / `# ` initial prompt — `bootStdout`.
+ *   2. The shell echoing the injected command line back through the tty
+ *      line discipline, ending with `\n`.
+ *   3. Any output produced by the script before its trailing
+ *      `echo __PROBE_DONE__`.
+ *   4. The line `__PROBE_DONE__\n`.
+ *   5. A trailing `# ` prompt as the shell waits for more input.
+ *
+ * `stdout` is the substring between the end of the injected command-
+ * line echo and the start of the sentinel — i.e. region 3 above. We
+ * find region 2 by looking for the marker `mount /dev/fd1 /mnt &&`
+ * followed by a newline; everything after that line and before
+ * `__PROBE_DONE__` is the probe's output.
+ *
+ * # Why floppy class for the probe disk
+ *
+ * `/dev/fd1` works on a generic floppy-class secondary slot without
+ * partition-table probing. Using HD class would force the kernel
+ * through MBR-detection paths (Phase 10.1) which our small FAT12
+ * volume isn't equipped for. Floppy class has no such probe — the
+ * kernel just opens the device when userland calls `mount`.
+ *
+ * # UART RX FIFO chunking
+ *
+ * The 16550A FIFO holds 16 bytes (`uart-16550.ts:62-63`). Phase 11.6
+ * solved this by feeding ≤12-byte chunks then running ~200K
+ * instructions to drain. We reuse the same pattern via
+ * {@link injectLine}. The slightly-smaller chunk (12 vs 16) is a
+ * paranoia margin for edge cases where the line discipline hasn't
+ * quite caught up.
+ */
+
+import {
+  buildProbeDisk,
+  FD1440_GEOMETRY,
+  type ProbeDiskFile,
+} from './probe-disk.js';
+import { IBMPCMachine } from '../../src/machine/ibm-pc.js';
+import { InMemoryDisk } from '../../src/disk/disk.js';
+import { InMemoryConsole } from '../../src/console/console.js';
+import { InMemoryHostClock } from '../../src/host-clock/host-clock.js';
+import { Tracer, traceRun } from '../../src/diagnostics/index.js';
+
+/** Sentinel string echoed by the probe-launch line; marks "probe done". */
+export const PROBE_SENTINEL = '__PROBE_DONE__';
+
+/** Default instruction budget for the entire probe run (boot + probe). */
+export const DEFAULT_TIMEOUT_INSTRUCTIONS = 100_000_000;
+
+/** Default cap on captured TX bytes — protects against megabyte-output probes. */
+export const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024;
+
+/** Instruction budget for the boot phase (until the first `# ` prompt). */
+const BOOT_INSTRUCTION_BUDGET = 8_000_000;
+
+/** Per-chunk drain budget while injecting bytes over UART RX. */
+const RX_CHUNK_DRAIN_INSTRUCTIONS = 200_000;
+
+/** Chunk size for UART RX feeding (≤16 to fit the FIFO; 12 = paranoia margin). */
+const RX_CHUNK_SIZE = 12;
+
+export interface ProbeScript {
+  /** 8.3 filename, e.g. `probe.sh`. Lives in the root of the probe disk. */
+  readonly filename: string;
+  /**
+   * Shell script body. No shebang required — the harness invokes it via
+   * `sh /mnt/<filename>`. Strings are written as ASCII (LF preserved).
+   */
+  readonly script: string;
+  /** Additional files staged at the FAT12 root alongside the script. */
+  readonly extraFiles?: readonly ProbeDiskFile[];
+}
+
+export interface ProbeRequest {
+  /**
+   * Primary boot image. Either a path on disk (read at call time) or
+   * the bytes directly. The image must be configured for serial console
+   * (`console=ttyS0` in `/bootopts`) and reach a `# ` prompt; today the
+   * canonical such image is `fd1440-minix-serial.img`.
+   *
+   * The brief calls out: probe scripts that need device nodes
+   * (`/dev/rd0`, `/dev/hd*`) require a MINIX root, because FAT12 can't
+   * store device nodes. The MINIX serial floppy (Phase 11.6) is the
+   * standard primary.
+   */
+  readonly primaryImage: string | Uint8Array;
+  readonly probe: ProbeScript;
+  /** Default {@link DEFAULT_TIMEOUT_INSTRUCTIONS}. */
+  readonly timeoutInstructions?: number;
+  /** Default {@link DEFAULT_MAX_OUTPUT_BYTES}. */
+  readonly maxOutputBytes?: number;
+}
+
+export interface ProbeResult {
+  /** Probe stdout — the bytes the script wrote between launch and sentinel. */
+  readonly stdout: string;
+  /** Entire UART TX transcript since boot — verbatim. */
+  readonly fullTranscript: string;
+  /** Pre-probe boot output: kernel banner, mount messages, prompt. */
+  readonly bootStdout: string;
+  /** True if the sentinel never appeared and the budget ran out. */
+  readonly timedOut: boolean;
+  /** True if the transcript contained a kernel panic / oops. */
+  readonly kernelPanicked: boolean;
+  /** True if the captured TX hit `maxOutputBytes` and was truncated. */
+  readonly truncated: boolean;
+  /** Total instructions consumed across boot and probe phases. */
+  readonly instructionsUsed: number;
+}
+
+/** Boot the VM, run a probe, capture its output. See module header for details. */
+export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
+  // Resolve primary bytes synchronously. The async signature is for
+  // forward compatibility (e.g. fetch-based image loading in a future
+  // browser variant) — today the work is purely sync.
+  const primaryBytes = await resolvePrimaryBytes(req.primaryImage);
+  const timeoutInstructions = req.timeoutInstructions ?? DEFAULT_TIMEOUT_INSTRUCTIONS;
+  const maxOutputBytes = req.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+
+  // ---- build probe disk -------------------------------------------------
+  const files: ProbeDiskFile[] = [
+    { name: req.probe.filename, content: req.probe.script },
+    ...(req.probe.extraFiles ?? []),
+  ];
+  const probeDisk = buildProbeDisk(files);
+
+  // ---- construct machine ------------------------------------------------
+  const txBytes: number[] = [];
+  let truncated = false;
+
+  const primaryDisk = new InMemoryDisk({
+    geometry: inferGeometry(primaryBytes.length),
+    contents: primaryBytes,
+  });
+  const probeInMemDisk = new InMemoryDisk({
+    geometry: probeDisk.geometry,
+    contents: probeDisk.bytes,
+  });
+
+  const m = new IBMPCMachine({
+    disk: primaryDisk,
+    secondaryDisk: probeInMemDisk,
+    secondaryDiskClass: 'floppy',
+    console: new InMemoryConsole(),
+    hostClock: new InMemoryHostClock(),
+    cyclesPerPitTick: 4,
+    uartTransmit: (byte: number) => {
+      if (txBytes.length >= maxOutputBytes) {
+        truncated = true;
+        return;
+      }
+      txBytes.push(byte);
+    },
+  });
+  m.reset();
+
+  const tracer = new Tracer({ capacity: 50_000, kinds: ['intService', 'trap'] });
+  let instructionsUsed = 0;
+
+  // ---- phase 1: boot to # prompt ----------------------------------------
+  const bootBudget = Math.min(BOOT_INSTRUCTION_BUDGET, timeoutInstructions);
+  const r1 = traceRun(m, { tracer, maxInstructions: bootBudget });
+  instructionsUsed += r1.executed;
+  const txAfterBoot = bytesToString(txBytes);
+  const reachedPrompt = /# *$/.test(txAfterBoot);
+  if (!reachedPrompt) {
+    return {
+      stdout: '',
+      fullTranscript: txAfterBoot,
+      bootStdout: txAfterBoot,
+      timedOut: true,
+      kernelPanicked: detectKernelPanic(txAfterBoot),
+      truncated,
+      instructionsUsed,
+    };
+  }
+  const bootStdoutLength = txBytes.length;
+
+  // ---- phase 2: inject the probe-launch line ----------------------------
+  const launchLine = buildLaunchLine(req.probe.filename);
+  injectLine(m, tracer, launchLine, (used) => {
+    instructionsUsed += used;
+  });
+
+  // ---- phase 3: run until sentinel or timeout ---------------------------
+  const remainingBudget = Math.max(0, timeoutInstructions - instructionsUsed);
+  const sentinelOutcome = runUntilSentinel(m, tracer, txBytes, remainingBudget);
+  instructionsUsed += sentinelOutcome.instructionsUsed;
+
+  // ---- assemble result --------------------------------------------------
+  const fullTranscript = bytesToString(txBytes);
+  const bootStdout = bytesToString(txBytes.slice(0, bootStdoutLength));
+  const stdout = extractProbeStdout(fullTranscript, req.probe.filename);
+
+  return {
+    stdout,
+    fullTranscript,
+    bootStdout,
+    timedOut: !sentinelOutcome.sawSentinel,
+    kernelPanicked: detectKernelPanic(fullTranscript),
+    truncated,
+    instructionsUsed,
+  };
+}
+
+/**
+ * Build the probe-launch shell line. The `&&` between mount and `sh`
+ * means the script only runs if mount succeeded; the `;` before
+ * `echo __PROBE_DONE__` means the sentinel always fires regardless.
+ *
+ * The trailing `\n` is the line terminator the shell needs to dispatch.
+ */
+export function buildLaunchLine(probeFilename: string): string {
+  // Filenames are 8.3-uppercased on disk, but ELKS's FAT driver returns
+  // lowercase by default for entries that have no name-case bits set —
+  // the original-case bits in NT-reserved are an outside-spec extension
+  // we don't use. So `probe.sh` written → mounted as `probe.sh`. To be
+  // robust against FAT case differences, we pass the original input
+  // filename verbatim — ELKS's FAT driver matches case-insensitively
+  // when looking up files.
+  return `mount /dev/fd1 /mnt && sh /mnt/${probeFilename}; echo ${PROBE_SENTINEL}\n`;
+}
+
+/**
+ * Slice the captured transcript to extract the probe's stdout. See the
+ * module header for the boundary rules.
+ *
+ * Algorithm:
+ *   1. Find the LAST occurrence of the launch-command's `mount /dev/fd1`
+ *      prefix in the transcript (the kernel echoes the injected line back
+ *      through the tty discipline). The line we want is the echo line
+ *      right after the boot-time `# ` prompt.
+ *   2. From that position, advance to the end of the line (next `\n`).
+ *   3. Find the LAST occurrence of `__PROBE_DONE__` after the launch.
+ *   4. Return the slice between (2) and (3), with one trailing `\n`
+ *      stripped if present (it's the boundary between the probe's last
+ *      line and the sentinel echo).
+ *
+ * If the sentinel is missing (timeout case), return everything from
+ * end-of-launch-line to end-of-transcript.
+ */
+export function extractProbeStdout(transcript: string, probeFilename: string): string {
+  const launchPrefix = `mount /dev/fd1 /mnt && sh /mnt/${probeFilename}`;
+  const launchIdx = transcript.lastIndexOf(launchPrefix);
+  if (launchIdx < 0) return '';
+  const launchLineEnd = transcript.indexOf('\n', launchIdx);
+  if (launchLineEnd < 0) return '';
+  const stdoutStart = launchLineEnd + 1;
+  const sentinelIdx = transcript.lastIndexOf(PROBE_SENTINEL);
+  const stdoutEnd = sentinelIdx >= stdoutStart ? sentinelIdx : transcript.length;
+  let slice = transcript.slice(stdoutStart, stdoutEnd);
+  // Strip one trailing newline if present (it separates the probe's last
+  // line from the sentinel-echo line; not part of the probe's output).
+  if (slice.endsWith('\n')) slice = slice.slice(0, -1);
+  return slice;
+}
+
+/**
+ * Inject `line` into the UART RX FIFO in ≤RX_CHUNK_SIZE-byte chunks,
+ * draining the kernel's tty line discipline between chunks. Mirrors the
+ * Phase 11.6 pattern from `elks-ramdisk-serial.test.ts`.
+ */
+function injectLine(
+  m: IBMPCMachine,
+  tracer: Tracer,
+  line: string,
+  onInstructions: (used: number) => void,
+): void {
+  for (let off = 0; off < line.length; off += RX_CHUNK_SIZE) {
+    const chunk = line.slice(off, off + RX_CHUNK_SIZE);
+    for (let i = 0; i < chunk.length; i++) {
+      m.uart.injectByte(chunk.charCodeAt(i));
+    }
+    const r = traceRun(m, { tracer, maxInstructions: RX_CHUNK_DRAIN_INSTRUCTIONS });
+    onInstructions(r.executed);
+  }
+}
+
+interface SentinelRunOutcome {
+  sawSentinel: boolean;
+  instructionsUsed: number;
+}
+
+/**
+ * Run the machine in slices, checking after each slice for the sentinel
+ * in the captured TX bytes. Slicing keeps the check cheap (only re-scan
+ * the new bytes) and bounds latency to the per-slice budget.
+ */
+function runUntilSentinel(
+  m: IBMPCMachine,
+  tracer: Tracer,
+  txBytes: number[],
+  totalBudget: number,
+): SentinelRunOutcome {
+  const SLICE = 1_000_000;
+  let used = 0;
+  let txCursor = 0;
+  let pending = '';
+  while (used < totalBudget) {
+    const slice = Math.min(SLICE, totalBudget - used);
+    const r = traceRun(m, { tracer, maxInstructions: slice });
+    used += r.executed;
+    // Append new TX bytes to a rolling string and check for the sentinel.
+    if (txBytes.length > txCursor) {
+      pending += bytesToString(txBytes.slice(txCursor));
+      txCursor = txBytes.length;
+      if (pending.includes(PROBE_SENTINEL)) {
+        return { sawSentinel: true, instructionsUsed: used };
+      }
+      // Cap the rolling buffer — only keep enough tail to detect a
+      // sentinel that crosses slice boundaries.
+      const keep = PROBE_SENTINEL.length;
+      if (pending.length > keep) {
+        pending = pending.slice(-keep);
+      }
+    }
+    // If the run loop hit a hard error, no further progress is possible.
+    if (r.reason === 'error') break;
+  }
+  return { sawSentinel: false, instructionsUsed: used };
+}
+
+/**
+ * Detect a kernel panic / oops in the transcript. ELKS's panic path
+ * prints `panic:` (lowercase) — see `elks/init/main.c`'s panic helper.
+ * "Oops" appears for unhandled exceptions. We treat either as a hard
+ * failure so the harness can surface it explicitly.
+ */
+function detectKernelPanic(transcript: string): boolean {
+  return /\bpanic:|\bOops\b|kernel panic/i.test(transcript);
+}
+
+async function resolvePrimaryBytes(image: string | Uint8Array): Promise<Uint8Array> {
+  if (typeof image !== 'string') return image;
+  const { readFile } = await import('node:fs/promises');
+  const buf = await readFile(image);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/**
+ * Map a primary-image byte length to a known floppy/HD geometry. This is
+ * a stripped-down sibling of `worker-host.ts:inferFromSize` — kept local
+ * to avoid pulling browser-side code into a Node test path.
+ */
+function inferGeometry(byteLength: number): { cylinders: number; heads: number; sectorsPerTrack: number } {
+  switch (byteLength) {
+    case 1474560: // 1.44 MB floppy
+      return { cylinders: 80, heads: 2, sectorsPerTrack: 18 };
+    case 1228800: // 1.2 MB floppy
+      return { cylinders: 80, heads: 2, sectorsPerTrack: 15 };
+    case 32514048: // ELKS hd32 (no MBR)
+    case 32546304: // ELKS hd32 (with MBR)
+      return { cylinders: 63, heads: 16, sectorsPerTrack: 63 };
+    default:
+      throw new Error(
+        `Unsupported primary image size ${byteLength} bytes — runProbe ` +
+          `expects a 1.44 MB floppy, 1.2 MB floppy, or ELKS hd32 image.`,
+      );
+  }
+}
+
+function bytesToString(bytes: readonly number[] | Uint8Array): string {
+  // Caller passes ASCII bytes; using fromCharCode is faster than
+  // TextDecoder for the typical-sized transcripts we deal with.
+  let s = '';
+  const CHUNK = 0x4000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = Array.from(bytes.slice(i, i + CHUNK) as ArrayLike<number>);
+    s += String.fromCharCode(...slice);
+  }
+  return s;
+}
+
+// Re-export probe-disk types so callers only import from the harness module.
+export type { ProbeDiskFile } from './probe-disk.js';
+export { FD1440_GEOMETRY };

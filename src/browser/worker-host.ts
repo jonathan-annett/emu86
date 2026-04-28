@@ -38,7 +38,9 @@
 
 import type {
   BootConfig,
+  DiskClass,
   DiskGeometry,
+  DiskSlotSpec,
   MainToWorkerMessage,
   WorkerToMainMessage,
 } from './protocol.js';
@@ -51,13 +53,76 @@ import {
   type CGAMirrorSink,
 } from '../diagnostics/cga-mirror.js';
 
-const FD1440: DiskGeometry = { cylinders: 80, heads: 2, sectorsPerTrack: 18 };
-const FD1200: DiskGeometry = { cylinders: 80, heads: 2, sectorsPerTrack: 15 };
+/**
+ * Size → (geometry, diskClass) lookup. The published-ELKS HD shapes were
+ * traced in Phase 10:
+ *
+ *   - 32,514,048 / 32,546,304 — `hd32-{fat,minix}.img` and `hd32mbr-*.img`
+ *   - 67,107,840 / 67,140,096 — `hd64-minix.img` and `hd64mbr-*.img`
+ *
+ * The "mbr" variants are 32,256 bytes (1 track of 63 spt × 512) larger —
+ * one extra track for the MBR. They ship in this brief because the
+ * geometry table doesn't care about boot semantics; the MBR boot path
+ * is a separate concern (Phase 10.1). For sizes that don't fit a clean
+ * 16-head × 63-spt CHS shape, we round up the cylinder count so the
+ * image fits inside the disk's sector capacity (`InMemoryDisk` zero-pads
+ * the trailing region — invisible to a kernel that reads only the
+ * filesystem region).
+ *
+ * Floppy sizes use 80 × 2 × {15,18} as before (matches
+ * `tools/elks/run-serial.ts`).
+ */
+interface SizeTableEntry {
+  bytes: number;
+  geometry: DiskGeometry;
+  diskClass: DiskClass;
+}
 
-function geometryForSize(bytes: number): DiskGeometry | null {
-  if (bytes === 1474560) return FD1440;
-  if (bytes === 1228800) return FD1200;
+const SIZE_TABLE: readonly SizeTableEntry[] = [
+  // ---- Floppies ----
+  { bytes: 1474560, geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 18 }, diskClass: 'floppy' },     // 1.44 MB
+  { bytes: 1228800, geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 15 }, diskClass: 'floppy' },     // 1.2 MB
+  // ---- ELKS hard disks ----
+  // 32 MB partitionless: exact fit at 63 × 16 × 63.
+  { bytes: 32514048, geometry: { cylinders: 63, heads: 16, sectorsPerTrack: 63 }, diskClass: 'hard-disk' },
+  // 32 MB MBR variant: +1 track. 64 × 16 × 63 = 33,030,144 ≥ 32,546,304.
+  { bytes: 32546304, geometry: { cylinders: 64, heads: 16, sectorsPerTrack: 63 }, diskClass: 'hard-disk' },
+  // 64 MB partitionless: 130 × 16 × 63 = 67,092,480 < image; round up to 131.
+  { bytes: 67107840, geometry: { cylinders: 131, heads: 16, sectorsPerTrack: 63 }, diskClass: 'hard-disk' },
+  // 64 MB MBR variant: 131 × 16 × 63 = 67,608,576 ≥ 67,140,096.
+  { bytes: 67140096, geometry: { cylinders: 131, heads: 16, sectorsPerTrack: 63 }, diskClass: 'hard-disk' },
+];
+
+export interface SizeInference {
+  geometry: DiskGeometry;
+  diskClass: DiskClass;
+}
+
+/**
+ * Match an image byte-count against the size table. Returns null on miss —
+ * callers must then fall back to an explicit `BootConfig.geometry`.
+ *
+ * Exported for `tests/unit/disk-geometry.test.ts`.
+ */
+export function inferFromSize(bytes: number): SizeInference | null {
+  for (const entry of SIZE_TABLE) {
+    if (entry.bytes === bytes) {
+      return { geometry: entry.geometry, diskClass: entry.diskClass };
+    }
+  }
   return null;
+}
+
+/**
+ * Heuristic: heads ≥ 4 means hard-disk class, else floppy. Floppy formats
+ * top out at 2 heads (3.5"/5.25" double-sided); HDs start at 4 heads on
+ * the small end (early ST-225 had 4) and only grow from there. Documented
+ * in the brief.
+ *
+ * Exported for `tests/unit/disk-geometry.test.ts`.
+ */
+export function classFromGeometry(g: DiskGeometry): DiskClass {
+  return g.heads >= 4 ? 'hard-disk' : 'floppy';
 }
 
 /** Drop-everything sink for the CGA mirror — Phase 9 doesn't render it. */
@@ -92,6 +157,11 @@ export interface WorkerHostOptions {
    */
   haltSpinCycles?: number;
   maxHaltSpins?: number;
+}
+
+interface ResolvedSlot {
+  disk: InMemoryDisk;
+  diskClass: DiskClass;
 }
 
 export interface RunResult {
@@ -276,32 +346,17 @@ export class WorkerHost {
     this.#teardownMachine();
     this.#stopping = false;
 
-    let bytes: Uint8Array;
-    if (config.imageBytes) {
-      bytes = config.imageBytes;
-    } else if (config.imageUrl) {
-      if (!this.#fetchImage) {
-        throw new Error(
-          'WorkerHost: imageUrl supplied but no fetchImage callback configured',
-        );
-      }
-      bytes = await this.#fetchImage(config.imageUrl);
-    } else {
-      throw new Error(
-        'WorkerHost: boot config must carry imageBytes or imageUrl',
-      );
-    }
+    const primary = await this.#resolveSlot('primary', {
+      imageUrl: config.imageUrl,
+      imageBytes: config.imageBytes,
+      geometry: config.geometry,
+      diskClass: config.diskClass,
+    });
 
-    const geometry = config.geometry ?? geometryForSize(bytes.length);
-    if (!geometry) {
-      throw new Error(
-        `WorkerHost: unrecognised image size ${bytes.length} bytes — only ` +
-        `1.44M (1474560) and 1.2M (1228800) floppy images are wired up. ` +
-        `Pass an explicit geometry in the boot config to override.`,
-      );
+    let secondary: ResolvedSlot | null = null;
+    if (config.secondary) {
+      secondary = await this.#resolveSlot('secondary', config.secondary);
     }
-
-    const disk = new InMemoryDisk({ geometry, contents: bytes });
 
     const browserConsole = new BrowserConsole({
       txSink: (byte: number) => this.#txBuffer.push(byte),
@@ -309,7 +364,14 @@ export class WorkerHost {
     this.#console = browserConsole;
 
     const machine = new IBMPCMachine({
-      disk,
+      disk: primary.disk,
+      diskClass: primary.diskClass,
+      ...(secondary
+        ? {
+            secondaryDisk: secondary.disk,
+            secondaryDiskClass: secondary.diskClass,
+          }
+        : {}),
       console: browserConsole,
       hostClock: new NodeHostClock(),
       cyclesPerPitTick: 4,
@@ -325,6 +387,48 @@ export class WorkerHost {
     this.#machine = machine;
     machine.reset();
     this.#post({ type: 'ready' });
+  }
+
+  /**
+   * Resolve one disk slot's spec into a constructed InMemoryDisk plus
+   * its derived class. Centralises the fetch / size-infer / explicit-
+   * override logic shared between primary and secondary slots.
+   *
+   * `slotName` is purely diagnostic — it surfaces in error messages so
+   * a failing secondary slot doesn't masquerade as a broken primary.
+   */
+  async #resolveSlot(slotName: 'primary' | 'secondary', spec: DiskSlotSpec): Promise<ResolvedSlot> {
+    let bytes: Uint8Array;
+    if (spec.imageBytes) {
+      bytes = spec.imageBytes;
+    } else if (spec.imageUrl) {
+      if (!this.#fetchImage) {
+        throw new Error(
+          `WorkerHost: ${slotName} disk imageUrl supplied but no fetchImage callback configured`,
+        );
+      }
+      bytes = await this.#fetchImage(spec.imageUrl);
+    } else {
+      throw new Error(
+        `WorkerHost: ${slotName} disk spec must carry imageBytes or imageUrl`,
+      );
+    }
+    let geometry: DiskGeometry | undefined = spec.geometry;
+    let diskClass: DiskClass | undefined = spec.diskClass;
+    if (!geometry) {
+      const inferred = inferFromSize(bytes.length);
+      if (!inferred) {
+        throw new Error(
+          `WorkerHost: ${slotName} disk: unrecognised image size ${bytes.length} bytes. ` +
+          `Pass an explicit geometry (and optionally diskClass) in the spec to override.`,
+        );
+      }
+      geometry = inferred.geometry;
+      diskClass ??= inferred.diskClass;
+    }
+    diskClass ??= classFromGeometry(geometry);
+    const disk = new InMemoryDisk({ geometry, contents: bytes });
+    return { disk, diskClass };
   }
 
   #drainRx(browserConsole: BrowserConsole, machine: IBMPCMachine): void {

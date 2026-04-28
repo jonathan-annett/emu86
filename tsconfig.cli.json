@@ -7,6 +7,6 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/**/*", "tests/sst/baseline-cli.ts", "tests/sst/probe-cli.ts", "tests/sst/loader.ts", "tests/sst/runner.ts", "tests/sst/types.ts", "tests/sst/flag-masks.ts", "tests/integration/probe.ts", "tests/integration/diag-probe.ts", "tests/integration/long-probe.ts", "tests/integration/input-probe.ts", "tools/elks/run.ts", "tools/elks/run-serial.ts", "tools/elks-build/build-serial-image.ts"],
+  "include": ["src/**/*", "tests/sst/baseline-cli.ts", "tests/sst/probe-cli.ts", "tests/sst/loader.ts", "tests/sst/runner.ts", "tests/sst/types.ts", "tests/sst/flag-masks.ts", "tests/integration/probe.ts", "tests/integration/diag-probe.ts", "tests/integration/long-probe.ts", "tests/integration/input-probe.ts", "tools/elks/run.ts", "tools/elks/run-serial.ts", "tools/elks-build/build-serial-image.ts", "tools/elks-build/fetch-hd-image.ts"],
   "exclude": ["node_modules", "dist", "dist-cli"]
 }

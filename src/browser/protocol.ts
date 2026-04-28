@@ -13,9 +13,10 @@
  */
 
 /**
- * Floppy geometries we recognise when inferring from image size. Mirrors
- * `tools/elks/run-serial.ts`'s table; we keep the union narrow because the
- * canonical browser image is the 1.44 MB serial-console build.
+ * CHS geometries we recognise when inferring from image size. Mirrors
+ * `tools/elks/run-serial.ts`'s floppy table, plus ELKS HD shapes added in
+ * Phase 10. The set is deliberately narrow — explicit geometry in
+ * BootConfig is the override path for anything we don't recognise.
  */
 export interface DiskGeometry {
   cylinders: number;
@@ -24,21 +25,61 @@ export interface DiskGeometry {
 }
 
 /**
- * Boot configuration. Either `imageUrl` (worker fetches via HTTP) or
- * `imageBytes` (main thread already has the bytes — useful for tests and
- * for any future "upload your own image" affordance).
+ * Disk class — picked up by the BIOS to choose the boot drive number
+ * (0x00 for floppy, 0x80 for HD) and the AH=0x08 return shape.
  *
- * If both are set, `imageBytes` wins.
+ * The worker host derives this from geometry today (heads ≥ 4 → HD), but
+ * exposing it on BootConfig lets a future caller pin it explicitly when
+ * the size table can't infer (e.g., user-uploaded image with bespoke
+ * geometry).
+ */
+export type DiskClass = 'floppy' | 'hard-disk';
+
+/**
+ * Source spec for one disk slot. Exactly one of `imageUrl` / `imageBytes`
+ * is required; if both are set, `imageBytes` wins. Geometry and class
+ * are optional and inferred from image size when omitted.
+ */
+export interface DiskSlotSpec {
+  imageUrl?: string;
+  imageBytes?: Uint8Array;
+  geometry?: DiskGeometry;
+  diskClass?: DiskClass;
+}
+
+/**
+ * Boot configuration. The flat `imageUrl/imageBytes/geometry/diskClass`
+ * fields describe the primary disk (back-compat with the pre-Phase-11
+ * single-disk shape — every test that constructs a BootConfig the old
+ * way keeps working unmodified). The optional `secondary` field adds a
+ * second mounted disk surfaced to the kernel as `/dev/hdb` (or `/dev/fd1`)
+ * — userland mounts it on demand; the BIOS does not auto-boot from it.
+ *
+ * Either `imageUrl` (worker fetches via HTTP) or `imageBytes` (main thread
+ * already has the bytes — useful for tests and uploads). If both are set,
+ * `imageBytes` wins.
  */
 export interface BootConfig {
   imageUrl?: string;
   imageBytes?: Uint8Array;
   /**
    * Optional explicit geometry. If absent, the worker infers from the
-   * image size. The serial harness only recognises 1.44 MB (1474560) and
-   * 1.2 MB (1228800); anything else needs an explicit geometry.
+   * image size against its built-in floppy + ELKS HD table; anything
+   * else needs an explicit geometry.
    */
   geometry?: DiskGeometry;
+  /**
+   * Optional explicit disk class. If absent, derived from the (explicit
+   * or inferred) geometry — heads ≥ 4 means hard-disk, else floppy.
+   */
+  diskClass?: DiskClass;
+  /**
+   * Optional secondary disk (Phase 11). When set, the worker constructs
+   * an `IBMPCMachine` with both disks attached and the BIOS routes INT
+   * 13h calls per slot/class. Same geometry-inference rules as the
+   * primary apply.
+   */
+  secondary?: DiskSlotSpec;
 }
 
 // ============================================================
