@@ -101,8 +101,24 @@ export const DEFAULT_TIMEOUT_INSTRUCTIONS = 100_000_000;
 /** Default cap on captured TX bytes — protects against megabyte-output probes. */
 export const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024;
 
-/** Instruction budget for the boot phase (until the first `# ` prompt). */
-const BOOT_INSTRUCTION_BUDGET = 8_000_000;
+/**
+ * Default instruction budget for the boot phase (until the first `# ` prompt).
+ *
+ * Phase 12 shipped this hard-coded at 8M, sufficient for a 1.44 MB MINIX
+ * floppy. Phase 13's HD32 survey hit the wall — `hd32-minix.img` boots in
+ * ~14M instructions on its own (`elks-integration/elks-hd-minix-boot.test.ts`
+ * uses 16M boot + 4M userland). Phase 12.1 raises the default to 32M:
+ *
+ *   - 16M is empirically sufficient for HD32 boot.
+ *   - 32M doubles that for headroom (slower fixtures, future HD64 work).
+ *   - Trivial probes (1.44 MB MINIX floppy) still complete in ~5-6M, so the
+ *     larger ceiling only changes wall-time on probes that actually need it.
+ *   - A pathological probe that hangs in early boot now spends at most ~32M
+ *     instructions (a few seconds of host wall-time at typical emulation
+ *     rates) before being declared `timeoutPhase: 'boot'`. Caller-tunable
+ *     for tighter or looser bounds.
+ */
+export const DEFAULT_BOOT_INSTRUCTION_BUDGET = 32_000_000;
 
 /** Per-chunk drain budget while injecting bytes over UART RX. */
 const RX_CHUNK_DRAIN_INSTRUCTIONS = 200_000;
@@ -138,9 +154,31 @@ export interface ProbeRequest {
   readonly probe: ProbeScript;
   /** Default {@link DEFAULT_TIMEOUT_INSTRUCTIONS}. */
   readonly timeoutInstructions?: number;
+  /**
+   * Instruction budget for the boot phase only — until the first `# `
+   * prompt. Default {@link DEFAULT_BOOT_INSTRUCTION_BUDGET}. Capped by
+   * `timeoutInstructions` (the boot budget can't exceed the total).
+   *
+   * Floppy primaries fit comfortably in the 8M Phase 12 default; HD
+   * primaries need 16-32M. Phase 12.1 raised the default so most
+   * callers don't need to set this explicitly.
+   */
+  readonly bootInstructionBudget?: number;
   /** Default {@link DEFAULT_MAX_OUTPUT_BYTES}. */
   readonly maxOutputBytes?: number;
 }
+
+/**
+ * Which phase a timeout occurred in. `null` on a successful run.
+ *
+ * - `'boot'`: the boot phase consumed `bootInstructionBudget` without
+ *   reaching a `# ` prompt. The probe never started.
+ * - `'probe'`: boot reached the prompt and the launch line was injected,
+ *   but the sentinel didn't appear within the remaining
+ *   `timeoutInstructions`. The script may have hung, crashed silently, or
+ *   simply needed more budget.
+ */
+export type TimeoutPhase = 'boot' | 'probe' | null;
 
 export interface ProbeResult {
   /** Probe stdout — the bytes the script wrote between launch and sentinel. */
@@ -151,6 +189,13 @@ export interface ProbeResult {
   readonly bootStdout: string;
   /** True if the sentinel never appeared and the budget ran out. */
   readonly timedOut: boolean;
+  /**
+   * Which phase the timeout happened in, or `null` on success. Lets
+   * callers distinguish "boot didn't finish" (the probe never ran)
+   * from "probe didn't finish" (the script hung or needed more budget).
+   * Phase 12.1 addition. Always `null` when `timedOut === false`.
+   */
+  readonly timeoutPhase: TimeoutPhase;
   /** True if the transcript contained a kernel panic / oops. */
   readonly kernelPanicked: boolean;
   /** True if the captured TX hit `maxOutputBytes` and was truncated. */
@@ -166,6 +211,7 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
   // browser variant) — today the work is purely sync.
   const primaryBytes = await resolvePrimaryBytes(req.primaryImage);
   const timeoutInstructions = req.timeoutInstructions ?? DEFAULT_TIMEOUT_INSTRUCTIONS;
+  const bootInstructionBudget = req.bootInstructionBudget ?? DEFAULT_BOOT_INSTRUCTION_BUDGET;
   const maxOutputBytes = req.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
 
   // ---- build probe disk -------------------------------------------------
@@ -209,7 +255,7 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
   let instructionsUsed = 0;
 
   // ---- phase 1: boot to # prompt ----------------------------------------
-  const bootBudget = Math.min(BOOT_INSTRUCTION_BUDGET, timeoutInstructions);
+  const bootBudget = Math.min(bootInstructionBudget, timeoutInstructions);
   const r1 = traceRun(m, { tracer, maxInstructions: bootBudget });
   instructionsUsed += r1.executed;
   const txAfterBoot = bytesToString(txBytes);
@@ -220,6 +266,7 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
       fullTranscript: txAfterBoot,
       bootStdout: txAfterBoot,
       timedOut: true,
+      timeoutPhase: 'boot',
       kernelPanicked: detectKernelPanic(txAfterBoot),
       truncated,
       instructionsUsed,
@@ -242,12 +289,14 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
   const fullTranscript = bytesToString(txBytes);
   const bootStdout = bytesToString(txBytes.slice(0, bootStdoutLength));
   const stdout = extractProbeStdout(fullTranscript, req.probe.filename);
+  const timedOut = !sentinelOutcome.sawSentinel;
 
   return {
     stdout,
     fullTranscript,
     bootStdout,
-    timedOut: !sentinelOutcome.sawSentinel,
+    timedOut,
+    timeoutPhase: timedOut ? 'probe' : null,
     kernelPanicked: detectKernelPanic(fullTranscript),
     truncated,
     instructionsUsed,
@@ -389,23 +438,41 @@ async function resolvePrimaryBytes(image: string | Uint8Array): Promise<Uint8Arr
 }
 
 /**
- * Map a primary-image byte length to a known floppy/HD geometry. This is
- * a stripped-down sibling of `worker-host.ts:inferFromSize` — kept local
- * to avoid pulling browser-side code into a Node test path.
+ * Map a primary-image byte length to a known floppy/HD geometry.
+ *
+ * Mirrors the entries in `src/browser/worker-host.ts:SIZE_TABLE` — kept
+ * local to avoid pulling browser-side code into a Node test path. When
+ * adding a new size, mirror the entry in both places.
+ *
+ * Phase 12.1 unblocked the HD32-MBR variant (whose 32,546,304 bytes needs
+ * `64×16×63 = 33,030,144` capacity, not the `63×16×63 = 32,514,048` of
+ * the no-MBR variant — sharing the smaller geometry caused
+ * `InMemoryDisk` to reject the larger image at construction). Same phase
+ * added the two HD64 sizes.
+ *
+ * Exported for unit tests; also useful for callers that want to validate
+ * an image's size before calling `runProbe`.
  */
-function inferGeometry(byteLength: number): { cylinders: number; heads: number; sectorsPerTrack: number } {
+export function inferGeometry(byteLength: number): { cylinders: number; heads: number; sectorsPerTrack: number } {
   switch (byteLength) {
     case 1474560: // 1.44 MB floppy
       return { cylinders: 80, heads: 2, sectorsPerTrack: 18 };
     case 1228800: // 1.2 MB floppy
       return { cylinders: 80, heads: 2, sectorsPerTrack: 15 };
-    case 32514048: // ELKS hd32 (no MBR)
-    case 32546304: // ELKS hd32 (with MBR)
+    case 32514048: // ELKS hd32 partitionless (no MBR) — 63×16×63 exact fit.
       return { cylinders: 63, heads: 16, sectorsPerTrack: 63 };
+    case 32546304: // ELKS hd32 MBR variant — +1 track of MBR overhead.
+      // 64 × 16 × 63 = 33,030,144 ≥ 32,546,304 (one track of slack).
+      return { cylinders: 64, heads: 16, sectorsPerTrack: 63 };
+    case 67107840: // ELKS hd64 partitionless — round up to 131 cylinders.
+      // 130 × 16 × 63 = 67,092,480 < image; 131 × 16 × 63 = 67,608,576 ≥ image.
+      return { cylinders: 131, heads: 16, sectorsPerTrack: 63 };
+    case 67140096: // ELKS hd64 MBR variant — same 131×16×63 fits.
+      return { cylinders: 131, heads: 16, sectorsPerTrack: 63 };
     default:
       throw new Error(
         `Unsupported primary image size ${byteLength} bytes — runProbe ` +
-          `expects a 1.44 MB floppy, 1.2 MB floppy, or ELKS hd32 image.`,
+          `expects a 1.44 MB floppy, 1.2 MB floppy, ELKS hd32, or ELKS hd64 image.`,
       );
   }
 }

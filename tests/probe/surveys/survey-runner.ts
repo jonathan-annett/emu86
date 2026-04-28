@@ -507,6 +507,7 @@ function nullProbeResult(): ProbeResult {
     fullTranscript: '',
     bootStdout: '',
     timedOut: true,
+    timeoutPhase: 'boot',
     kernelPanicked: false,
     truncated: false,
     instructionsUsed: 0,
