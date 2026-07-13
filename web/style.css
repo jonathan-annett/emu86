@@ -552,3 +552,66 @@ header code {
 .about-link:hover {
   text-decoration: underline;
 }
+
+/* ------------------------------------------------------------------ */
+/* Landing showcase banner (2026-07-15)                                 */
+/* ------------------------------------------------------------------ */
+
+#showcase-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  z-index: 15;
+  max-width: min(44rem, calc(100vw - 2rem));
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.9rem;
+  background: #101a10;
+  border: 1px solid #2a4a2a;
+  border-radius: 6px;
+  color: #a0c8a0;
+  font-size: 0.85rem;
+}
+
+#showcase-banner.is-news {
+  background: #12210f;
+  border-color: #33ff66;
+  color: #d8f0d8;
+  box-shadow: 0 0 18px rgba(51, 255, 102, 0.25);
+}
+
+#showcase-banner.is-news strong {
+  color: #33ff66;
+  letter-spacing: 0.05em;
+}
+
+.showcase-refresh {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  background: #1d3a1d;
+  color: #d8f0d8;
+  border: 1px solid #33ff66;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.showcase-refresh:hover,
+.showcase-refresh:focus-visible {
+  background: #275227;
+  outline: 2px solid #33ff66;
+  outline-offset: 1px;
+}
+
+.showcase-dismiss {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  color: #a0c8a0;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}

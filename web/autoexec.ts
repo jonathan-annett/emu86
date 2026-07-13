@@ -1,35 +1,49 @@
 /**
- * Boot-script runner (Phase 14 — boot scripts / autoexec).
+ * Boot-script runner (Phase 14 — boot scripts; landing-showcase
+ * directives added 2026-07-15).
  *
  * Types a user-authored script into the guest console at boot,
  * prompt-aware: each line waits for the guest to show a prompt before
  * it is sent, so the same script works regardless of how long the boot
- * takes — no timers, no blind delays. Purpose (Jonathan, 2026-07-14):
+ * takes — no timers on the waiting side. Original purpose (Jonathan):
  * speed up the manual testing loop — `root` + `net start ne0` typed
- * hands-free puts every tab on the TAN.
+ * hands-free puts every tab on the TAN. The landing showcase grew it
+ * into a stage direction language.
  *
- * Script format, one keystroke line per line:
+ * Script format, one line per line:
  *
  *   - A plain line is sent (with a trailing newline) once the guest
  *     shows a prompt: `login:`, `Password:`, `# ` or `$ `.
  *   - `@expect some text` — the NEXT line waits for `some text` to
  *     appear in the output (since the last send) instead of a prompt.
- *     Useful for output that isn't a prompt, e.g. waiting for ktcp's
- *     `ip 10.0.2.` line before a telnet.
- *   - Blank lines are skipped. Everything else is typed verbatim —
- *     including `#`-prefixed lines (the ELKS shell treats them as
- *     comments anyway, so scripts can carry their own annotations).
+ *   - `@type` / `@instant` — switch how lines are SENT: clackety mode
+ *     types character by character at fake-human cadence, firing
+ *     `onKeystroke` per character (the keyboard-FX hook); instant mode
+ *     (default) sends whole lines.
+ *   - `@here` … `@end` — a no-wait block: the enclosed lines are sent
+ *     in sequence WITHOUT waiting for prompts between them. This is
+ *     the heredoc device: ELKS sh prompts `> ` for continuation lines
+ *     (probed 2026-07-15), which the prompt matcher rightly ignores —
+ *     a human typing a heredoc doesn't wait for anything either.
+ *   - `@turbo` / `@authentic` — fire the `setSpeed` hook (live CPU
+ *     speed change) when the script reaches them; no send. The
+ *     showcase compiles in turbo and reveals in authentic.
+ *   - Blank lines are skipped OUTSIDE @here blocks, kept inside them
+ *     (source files have blank lines). Other `#`-prefixed lines are
+ *     typed verbatim — the ELKS shell treats them as comments.
  *
  * Mechanics: `feed()` receives decoded guest TX. Output accumulates
  * (bounded) since the last send; default prompts match its tail, so a
  * prompt split across two TX batches still fires. The buffer resets on
  * every send — the prompt that triggered line N can't also trigger
- * line N+1; a fresh prompt must be printed by the guest. Injection
- * goes through the ordinary rx path, so the worker host's UART FIFO
+ * line N+1. While clackety typing is in flight, matching is suspended
+ * (the guest's own echo of our keystrokes must not satisfy anything).
+ * Injection rides the ordinary rx path, so the worker host's UART FIFO
  * pacing (M2.5) applies unchanged.
  *
- * If an expected prompt never appears the runner simply never fires —
- * it holds no timers and goes inert when the script is exhausted.
+ * The scheduler and inter-key delays are injectable so tests drive
+ * typing deterministically; defaults are setTimeout and a humanish
+ * randomized cadence.
  */
 
 /** Prompts that release the next plain line: getty, login, sh. */
@@ -38,74 +52,194 @@ const DEFAULT_PROMPT = /(login: ?|Password: ?|[#$] )$/;
 /** Output retained since the last send — plenty for any boot chatter. */
 const BUFFER_CAP = 65_536;
 
+export type SpeedDirective = 'authentic' | 'turbo';
+
 interface Step {
   /** Substring to wait for (from `@expect`), or null for a prompt. */
   readonly expect: string | null;
-  readonly text: string;
+  /** Send without waiting for anything (a @here block line). */
+  readonly nowait: boolean;
+  /** Send character by character with keystroke FX. */
+  readonly typed: boolean;
+  /** Line to send; null for pure-action steps. */
+  readonly text: string | null;
+  /** Side effect to run when the script reaches this step. */
+  readonly speed?: SpeedDirective;
 }
 
 export interface AutoexecOptions {
   script: string;
   /** Sink for keystrokes — main.ts wires this to the worker rx path. */
   send: (text: string) => void;
+  /** Fired once per character in clackety (@type) mode — keyboard FX. */
+  onKeystroke?: (char: string) => void;
+  /** Fired by @turbo/@authentic — main.ts posts set-speed. */
+  setSpeed?: (mode: SpeedDirective) => void;
+  /** Timer injection (tests). Default setTimeout. */
+  schedule?: (ms: number, fn: () => void) => void;
+  /** Inter-key delay in ms for @type mode (tests inject a constant). */
+  typeDelayMs?: () => number;
+}
+
+/** Humanish cadence: quick base with jitter, a beat after newlines. */
+function defaultTypeDelay(): number {
+  return 35 + Math.random() * 105;
 }
 
 export class AutoexecRunner {
   readonly #steps: Step[];
   readonly #send: (text: string) => void;
+  readonly #onKeystroke: (char: string) => void;
+  readonly #setSpeed: (mode: SpeedDirective) => void;
+  readonly #schedule: (ms: number, fn: () => void) => void;
+  readonly #typeDelayMs: () => number;
   #next = 0;
   #buffer = '';
+  #typing = false;
 
   constructor(opts: AutoexecOptions) {
     this.#send = opts.send;
+    this.#onKeystroke = opts.onKeystroke ?? (() => { /* silent keys */ });
+    this.#setSpeed = opts.setSpeed ?? (() => { /* no speed control wired */ });
+    this.#schedule = opts.schedule ?? ((ms, fn) => { setTimeout(fn, ms); });
+    this.#typeDelayMs = opts.typeDelayMs ?? defaultTypeDelay;
     this.#steps = parseScript(opts.script);
   }
 
-  /** True while lines remain to be sent. */
+  /** True while lines remain to be sent (or typing is in flight). */
   get active(): boolean {
-    return this.#next < this.#steps.length;
+    return this.#typing || this.#next < this.#steps.length;
   }
 
-  /** Number of lines already sent — for banners/diagnostics. */
+  /** Number of steps already dispatched — for banners/diagnostics. */
   get sent(): number {
     return this.#next;
   }
 
-  /** Feed decoded guest output; sends any lines whose wait is satisfied. */
+  /** Feed decoded guest output; dispatches any steps whose wait is satisfied. */
   feed(chunk: string): void {
     if (!this.active) return;
     this.#buffer = (this.#buffer + chunk).slice(-BUFFER_CAP);
+    if (this.#typing) return; // our own echo must not satisfy anything
+    this.#advance();
+  }
 
-    // A single chunk can satisfy several steps only via fresh output
-    // between sends — the buffer reset below guarantees one send per
-    // satisfied wait, so a plain loop is safe.
+  /**
+   * Dispatch as many steps as are currently runnable: action steps and
+   * no-wait sends chain; a waited step stops the chain until fresh
+   * output satisfies it; a typed send suspends the chain until the
+   * last character lands.
+   */
+  #advance(): void {
     for (;;) {
       const step = this.#steps[this.#next];
       if (step === undefined) return;
-      const satisfied =
-        step.expect !== null
-          ? this.#buffer.includes(step.expect)
-          : DEFAULT_PROMPT.test(this.#buffer);
-      if (!satisfied) return;
+
+      if (step.speed !== undefined) {
+        this.#next++;
+        this.#setSpeed(step.speed);
+        continue;
+      }
+
+      if (!step.nowait) {
+        const satisfied =
+          step.expect !== null
+            ? this.#buffer.includes(step.expect)
+            : DEFAULT_PROMPT.test(this.#buffer);
+        if (!satisfied) return;
+      }
+
       this.#buffer = '';
       this.#next++;
-      this.#send(`${step.text}\n`);
+      const text = step.text ?? '';
+      if (step.typed) {
+        this.#typeOut(`${text}\n`);
+        return; // #typeOut resumes the chain when the last char lands
+      }
+      this.#send(`${text}\n`);
+      // Chain onward ONLY into a heredoc-body line (nowait, not a
+      // speed action): the heredoc flows without prompts. Anything
+      // else — a waited command, or a @turbo/@authentic that should
+      // reflect this command COMPLETING — waits for the next prompt.
+      // (Without this, @authentic after a build fired the instant the
+      // build was *sent*, not when it finished.)
+      const nxt = this.#steps[this.#next];
+      if (nxt !== undefined && nxt.nowait && nxt.speed === undefined) continue;
+      return;
     }
+  }
+
+  /**
+   * Clackety mode: one character per scheduled tick, FX per key.
+   *
+   * Buffer discipline is subtle and was got wrong once (found by
+   * driving the real demo script against a real boot):
+   *
+   *   - The guest ECHOES every character we type, so mid-typing the
+   *     buffer fills with our own line — which must never satisfy the
+   *     next step's wait. Hence matching is suspended while typing.
+   *   - But the command only RUNS at the newline, and a fast command's
+   *     whole reply (output + fresh prompt) can land inside the final
+   *     inter-key delay. Clearing the buffer when typing *ends* would
+   *     therefore discard the very prompt the next step waits for, and
+   *     the script would hang forever mid-show.
+   *
+   * So the buffer is cleared exactly when the newline goes out: the
+   * echo before it is dropped, everything the command says after it is
+   * kept.
+   */
+  #typeOut(text: string): void {
+    this.#typing = true;
+    const typeAt = (idx: number): void => {
+      if (idx >= text.length) {
+        this.#typing = false;
+        this.#advance(); // chain onward; a trailing prompt may already be here
+        return;
+      }
+      const ch = text.charAt(idx);
+      this.#send(ch);
+      if (ch === '\n') {
+        // Command committed: drop our own echo, keep whatever it says.
+        this.#buffer = '';
+      } else {
+        this.#onKeystroke(ch);
+      }
+      // A beat after newlines — humans glance at the screen.
+      const delay = ch === '\n' ? this.#typeDelayMs() * 3 : this.#typeDelayMs();
+      this.#schedule(delay, () => typeAt(idx + 1));
+    };
+    typeAt(0);
   }
 }
 
 function parseScript(script: string): Step[] {
   const steps: Step[] = [];
   let pendingExpect: string | null = null;
+  let typed = false;
+  let inHere = false;
   for (const raw of script.split('\n')) {
     const line = raw.replace(/\r$/, '');
-    if (line.trim() === '') continue;
-    if (line.startsWith('@expect ')) {
-      pendingExpect = line.slice('@expect '.length);
-      continue;
+    if (!inHere) {
+      if (line.trim() === '') continue;
+      if (line === '@type') { typed = true; continue; }
+      if (line === '@instant') { typed = false; continue; }
+      if (line === '@here') { inHere = true; continue; }
+      if (line === '@turbo' || line === '@authentic') {
+        steps.push({ expect: null, nowait: true, typed: false, text: null, speed: line.slice(1) as SpeedDirective });
+        continue;
+      }
+      if (line.startsWith('@expect ')) {
+        pendingExpect = line.slice('@expect '.length);
+        continue;
+      }
+      steps.push({ expect: pendingExpect, nowait: false, typed, text: line });
+      pendingExpect = null;
+    } else {
+      if (line === '@end') { inHere = false; continue; }
+      // Inside @here: everything verbatim (blank lines included) and
+      // no prompt waits — the heredoc continuation prompt is `> `.
+      steps.push({ expect: null, nowait: true, typed, text: line });
     }
-    steps.push({ expect: pendingExpect, text: line });
-    pendingExpect = null;
   }
   return steps;
 }

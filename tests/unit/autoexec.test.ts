@@ -103,3 +103,128 @@ describe('AutoexecRunner', () => {
     expect(sent).toEqual(['root\n', 'net start ne0\n']);
   });
 });
+
+describe('AutoexecRunner — showcase directives (2026-07-15)', () => {
+  interface TypedRig {
+    runner: AutoexecRunner;
+    sent: string[];
+    keys: string[];
+    speeds: string[];
+    /** Run queued type-timers to completion. */
+    drain: () => void;
+  }
+
+  function makeTypedRunner(script: string): TypedRig {
+    const sent: string[] = [];
+    const keys: string[] = [];
+    const speeds: string[] = [];
+    const queue: Array<() => void> = [];
+    const runner = new AutoexecRunner({
+      script,
+      send: (t) => sent.push(t),
+      onKeystroke: (c) => keys.push(c),
+      setSpeed: (m) => speeds.push(m),
+      schedule: (_ms, fn) => queue.push(fn),
+      typeDelayMs: () => 1,
+    });
+    return {
+      runner, sent, keys, speeds,
+      drain: () => { while (queue.length > 0) queue.shift()!(); },
+    };
+  }
+
+  it('@type sends character by character with a keystroke per key', () => {
+    const rig = makeTypedRunner('@type\nls -l\n');
+    rig.runner.feed('# ');
+    rig.drain();
+    expect(rig.sent.join('')).toBe('ls -l\n');
+    expect(rig.sent.length).toBe(6); // 5 chars + newline, one send each
+    expect(rig.keys.join('')).toBe('ls -l'); // newline is not a clack
+  });
+
+  it('the guest echo of our own keystrokes never satisfies the next step', () => {
+    const rig = makeTypedRunner('@type\necho hi\necho bye\n');
+    rig.runner.feed('# ');
+    // The guest echoes each character back as we type it. That echo is
+    // dropped when the newline commits the command (see #typeOut), so
+    // only what the command SAYS can release the next line.
+    rig.runner.feed('echo hi');
+    rig.drain();
+    expect(rig.sent.join('')).toBe('echo hi\n'); // line 2 still waiting
+    rig.runner.feed('hi\r\n# ');                  // the command replies
+    rig.drain();
+    expect(rig.sent.join('')).toBe('echo hi\necho bye\n');
+  });
+
+  it('@here block lines flow without prompt waits (the heredoc shape)', () => {
+    const rig = makeTypedRunner([
+      "cat > h.c << 'EOF'",
+      '@here',
+      'int main(void)',
+      '',
+      'EOF',
+      '@end',
+      'cc h.c',
+      '',
+    ].join('\n'));
+    rig.runner.feed('# ');
+    rig.drain();
+    // cat line + all three block lines (blank kept) sent with no
+    // further prompts; the compile line still waits for a fresh #.
+    expect(rig.sent.join('')).toBe("cat > h.c << 'EOF'\nint main(void)\n\nEOF\n");
+    rig.runner.feed('# ');
+    rig.drain();
+    expect(rig.sent.join('')).toContain('cc h.c\n');
+  });
+
+  it('@turbo/@authentic fire in script order around the sends', () => {
+    const rig = makeTypedRunner('@turbo\nmake\n@authentic\n./hello\n');
+    rig.runner.feed('# ');
+    rig.drain();
+    expect(rig.speeds).toEqual(['turbo']);
+    expect(rig.sent.join('')).toBe('make\n');
+    rig.runner.feed('# ');
+    rig.drain();
+    expect(rig.speeds).toEqual(['turbo', 'authentic']);
+    expect(rig.sent.join('')).toBe('make\n./hello\n');
+  });
+
+  it('@instant returns to whole-line sends', () => {
+    const rig = makeTypedRunner('@type\nls\n@instant\npwd\n');
+    rig.runner.feed('# ');
+    rig.drain();
+    rig.runner.feed('# ');
+    rig.drain();
+    expect(rig.sent).toContain('pwd\n'); // one send, whole line
+    expect(rig.keys.join('')).toBe('ls'); // no clacks for instant lines
+  });
+});
+
+describe('AutoexecRunner — the lost-prompt race (found by the demo probe)', () => {
+  it('a prompt arriving DURING the final keystroke delay is not discarded', () => {
+    const sent: string[] = [];
+    const queue: Array<() => void> = [];
+    const runner = new AutoexecRunner({
+      script: '@type\necho hi\necho bye\n',
+      send: (t) => sent.push(t),
+      schedule: (_ms, fn) => queue.push(fn),
+      typeDelayMs: () => 1,
+    });
+    runner.feed('# ');
+
+    // 'echo hi\n' is 8 characters: typeAt(0) ran synchronously, so 7
+    // more ticks send the rest — leaving ONLY the completion tick
+    // queued. The newline is already out, so the guest runs the
+    // command and its whole reply lands inside that final delay.
+    for (let i = 0; i < 7; i++) queue.shift()!();
+    expect(sent.join('')).toBe('echo hi\n');
+    runner.feed('hi\r\n# ');
+
+    // Completion tick fires. Old behavior cleared the buffer here and
+    // the script hung forever waiting for a prompt that had already
+    // come and gone. Line 2 must now go out.
+    queue.shift()!();
+    while (queue.length > 0) queue.shift()!();
+    expect(sent.join('')).toBe('echo hi\necho bye\n');
+  });
+});

@@ -52,7 +52,10 @@ import { THEMES } from './themes.js';
 import { ImageLibrary } from './image-library.js';
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
+import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
+import { SEED_DEMO_SCRIPT } from './settings.js';
+import { listReleases, downloadAsset } from './github-releases.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -111,6 +114,16 @@ async function init(): Promise<void> {
     (id) => library.hasImage(id),
   );
 
+  // Landing showcase: profiles stored before the demo script was
+  // seeded gain it here (id-keyed; absent-only, so user edits win).
+  if (!settings.bootScripts.some((s) => s.id === SEED_DEMO_SCRIPT.id)) {
+    settings = {
+      ...settings,
+      bootScripts: [...settings.bootScripts, SEED_DEMO_SCRIPT],
+    };
+    saveSettings(settings);
+  }
+
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
   term.writeln(`emu86 — ELKS in the browser [${buildLabel}]`);
@@ -143,8 +156,12 @@ async function init(): Promise<void> {
   // Boot script (Phase 14 — autoexec): a prompt-aware runner types the
   // active script into the console as the guest becomes ready. Fed from
   // the same TX stream the terminal renders; sends through the same rx
-  // path as the keyboard, so the M2.5 FIFO pacing applies.
+  // path as the keyboard, so the M2.5 FIFO pacing applies. Clackety
+  // (@type) keystrokes get a synthesized click; @turbo/@authentic post
+  // live speed changes (session-scoped — the stored setting is not
+  // touched).
   const txDecoder = new TextDecoder();
+  const keyClick = createKeyClick();
   const autoexec = activeScript !== undefined
     ? new AutoexecRunner({
         script: activeScript.text,
@@ -153,6 +170,11 @@ async function init(): Promise<void> {
             type: 'rx',
             bytes: new TextEncoder().encode(text),
           };
+          worker.postMessage(msg);
+        },
+        onKeystroke: keyClick,
+        setSpeed: (mode) => {
+          const msg: MainToWorkerMessage = { type: 'set-speed', mode };
           worker.postMessage(msg);
         },
       })
@@ -276,7 +298,111 @@ async function init(): Promise<void> {
     },
   });
 
+  // Landing showcase (2026-07-15): while the bundled floppy runs,
+  // stream the 32 MB HD image through /gh-assets into the library in
+  // the background; when it lands, break the news and stage the next
+  // reload to boot it with the demo script. First-run shape only — a
+  // profile that already picked a boot image is never hijacked.
+  void stageShowcase();
+
+  async function stageShowcase(): Promise<void> {
+    if (settings.imageSource.kind !== 'bundled') return;
+
+    const status = ensureShowcaseBanner();
+    try {
+      let imageId: string | null = null;
+      const existing = (await library.listImages()).find(
+        (m) => m.name === 'hd32-minix.img',
+      );
+      if (existing !== undefined) {
+        imageId = existing.id; // downloaded on an earlier visit, never staged
+      } else {
+        const releases = await listReleases({ includePrereleases: false, prereleaseLimit: 0 });
+        const asset = releases
+          .flatMap((r) => r.assets)
+          .find((a) => a.name === 'hd32-minix.img');
+        if (asset === undefined) return;
+        status.show(`fetching a hard disk… 0 / ${Math.round(asset.sizeBytes / 1048576)} MB`);
+        const bytes = await downloadAsset(asset.downloadUrl, (p) => {
+          const total = p.total ?? asset.sizeBytes;
+          status.show(
+            `fetching a hard disk… ${Math.round(p.loaded / 1048576)} / ${Math.round(total / 1048576)} MB`,
+          );
+        });
+        imageId = await library.addImage('hd32-minix.img', bytes, 'github', 'likely-works');
+      }
+
+      // Stage the show — but re-check: the user may have chosen a
+      // machine (or a script) while the download ran; their choice wins.
+      if (settings.imageSource.kind !== 'bundled') { status.hide(); return; }
+      const nextScript =
+        settings.activeBootScriptId === null
+          ? SEED_DEMO_SCRIPT.id
+          : settings.activeBootScriptId;
+      settings = {
+        ...settings,
+        imageSource: { kind: 'library', id: imageId },
+        activeBootScriptId: nextScript,
+      };
+      saveSettings(settings);
+      status.breakingNews();
+    } catch (err) {
+      // Rate limits / offline / quota: the showcase is a bonus, not a
+      // requirement. The floppy machine keeps running.
+      console.warn('[emu86] showcase staging failed:', err);
+      status.hide();
+    }
+  }
+
   // Page unload cleans up workers automatically; no manual teardown needed.
+}
+
+/**
+ * The showcase status chip / breaking-news banner (bottom of the
+ * viewport). One element, three states: hidden, progress, news.
+ */
+function ensureShowcaseBanner(): {
+  show: (text: string) => void;
+  breakingNews: () => void;
+  hide: () => void;
+} {
+  const el = document.createElement('div');
+  el.id = 'showcase-banner';
+  el.hidden = true;
+  document.body.appendChild(el);
+
+  return {
+    show(text: string): void {
+      el.hidden = false;
+      el.classList.remove('is-news');
+      el.textContent = text;
+    },
+    breakingNews(): void {
+      el.hidden = false;
+      el.classList.add('is-news');
+      el.innerHTML = '';
+      const msg = document.createElement('span');
+      msg.innerHTML =
+        '<strong>BREAKING NEWS:</strong> this machine just grew a 32&nbsp;MB ' +
+        'hard disk with a C compiler on it. Refresh to boot ELKS from disk — ' +
+        'and watch it write, build, and run a program for you.';
+      const refresh = document.createElement('button');
+      refresh.type = 'button';
+      refresh.className = 'showcase-refresh';
+      refresh.textContent = 'Refresh now';
+      refresh.addEventListener('click', () => location.reload());
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'showcase-dismiss';
+      dismiss.setAttribute('aria-label', 'Dismiss');
+      dismiss.textContent = '×';
+      dismiss.addEventListener('click', () => { el.hidden = true; });
+      el.append(msg, refresh, dismiss);
+    },
+    hide(): void {
+      el.hidden = true;
+    },
+  };
 }
 
 async function buildBootMessage(

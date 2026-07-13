@@ -96,12 +96,50 @@ export const SEED_BOOT_SCRIPT: BootScript = {
   text: 'root\nnet start ne0\n',
 };
 
+/**
+ * The landing showcase (2026-07-15): logs in, joins the LAN, then
+ * clackety-types a C program and builds it with the guest's own
+ * cpp→c86→as→ld toolchain (exact flags from the image's
+ * /usr/src/Makefile — see HELLO_WORLD_COMPILE_REPORT.md). Compiles in
+ * turbo, reveals in authentic. "hello human" is an homage to
+ * retro.sophtwhere.com, the eldest sibling, whose DOS demo types into
+ * `debug` — this one types into a compiler. Editable like any script.
+ */
+export const SEED_DEMO_SCRIPT: BootScript = {
+  id: 'seed-demo-hello-human',
+  name: 'the show (compile "hello human")',
+  text: [
+    'root',
+    'net start ne0',
+    '@turbo',
+    '@type',
+    "cat > hello.c << 'EOF'",
+    '@here',
+    '#include <stdio.h>',
+    '',
+    'int main(void)',
+    '{',
+    '    printf("hello human\\n");',
+    '    return 0;',
+    '}',
+    'EOF',
+    '@end',
+    'cpp -0 -I/usr/include -I/usr/include/c86 hello.c -o hello.i',
+    'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no hello.i hello.as',
+    'as -0 -j hello.as -o hello.o',
+    'ld -0 -i -L/usr/lib -o hello hello.o -lc86',
+    '@authentic',
+    './hello',
+    '',
+  ].join('\n'),
+};
+
 export const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   themeName: 'default-dark',
   imageSource: { kind: 'bundled' },
   secondaryImageSource: null,
-  bootScripts: [SEED_BOOT_SCRIPT],
+  bootScripts: [SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT],
   activeBootScriptId: null,
   cpuSpeed: 'authentic',
 };
