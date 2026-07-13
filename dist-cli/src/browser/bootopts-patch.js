@@ -47,6 +47,14 @@ export const SERIAL_CONSOLE_LINE = 'console=ttyS0,9600';
  */
 export const SERIAL_RUNLEVEL_LINE = '3';
 /**
+ * NIC configuration the patch appends (Phase 14 M3b). The kernel's
+ * default ne0 probe expects IRQ 12 — unreachable behind emu86's single
+ * master PIC — while the emulated NE2000 sits at 0x300/IRQ 5. With
+ * this line, `net start ne0` in the browser xterm just works against
+ * the worker's LAN (switch + gateway at 10.0.2.2).
+ */
+export const NE0_BOOTOPTS_LINE = 'ne0=5,0x300,,0x80';
+/**
  * Locate the /bootopts block. Returns the byte offset of the marker, or
  * null when the image has no marker (non-ELKS images, or a marker so
  * close to the end that a full 1024-byte block can't follow — treated
@@ -85,11 +93,12 @@ export function hasSerialConsole(image) {
 }
 /**
  * Return a copy of `image` whose /bootopts block gained
- * {@link SERIAL_CONSOLE_LINE} and {@link SERIAL_RUNLEVEL_LINE}.
- * Existing lines are preserved verbatim except active `console=` lines
- * and bare runlevel digits, which are dropped so exactly one claim of
- * each remains. Returns null when the image has no /bootopts block
- * (caller boots it unpatched — nothing sensible to edit).
+ * {@link SERIAL_CONSOLE_LINE}, {@link NE0_BOOTOPTS_LINE}, and
+ * {@link SERIAL_RUNLEVEL_LINE}. Existing lines are preserved verbatim
+ * except active `console=`/`ne0=` lines and bare runlevel digits,
+ * which are dropped so exactly one claim of each remains. Returns
+ * null when the image has no /bootopts block (caller boots it
+ * unpatched — nothing sensible to edit).
  *
  * Throws if the resulting text exceeds the 1024-byte region — can only
  * happen on an image whose block is already nearly full.
@@ -107,9 +116,10 @@ export function patchBootoptsForSerial(image) {
     }
     const kept = lines.filter((line) => {
         const t = line.trim();
-        return !t.startsWith('console=') && !/^[0-9]$/.test(t);
+        return !t.startsWith('console=') && !t.startsWith('ne0=') && !/^[0-9]$/.test(t);
     });
     kept.push(SERIAL_CONSOLE_LINE);
+    kept.push(NE0_BOOTOPTS_LINE);
     kept.push(SERIAL_RUNLEVEL_LINE);
     const text = kept.join('\n') + '\n';
     if (text.length > BOOTOPTS_SIZE - 1) {

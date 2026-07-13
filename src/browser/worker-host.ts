@@ -57,6 +57,7 @@ import {
   patchBootoptsForSerial,
 } from './bootopts-patch.js';
 import { EthernetSwitch, type SwitchPort } from '../net/switch.js';
+import { LanGateway } from '../net/gateway.js';
 
 /**
  * Size → (geometry, diskClass) lookup. The published-ELKS HD shapes were
@@ -193,6 +194,7 @@ export class WorkerHost {
   #txBuffer: number[] = [];
   #network: EthernetSwitch | null = null;
   #nicPort: SwitchPort | null = null;
+  #gateway: LanGateway | null = null;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -218,6 +220,15 @@ export class WorkerHost {
    */
   get network(): EthernetSwitch | null {
     return this.#network;
+  }
+
+  /**
+   * The LAN's gateway pseudo-host at 10.0.2.2 (Phase 14 M3b) —
+   * answers ARP and ICMP echo at the address /etc/net.cfg already
+   * points the guest at. Null before the first boot.
+   */
+  get gateway(): LanGateway | null {
+    return this.#gateway;
   }
 
   /**
@@ -393,6 +404,14 @@ export class WorkerHost {
       },
     });
     this.#nicPort = nicPort;
+    // M3b: the gateway lives at 10.0.2.2 — the address the guest's
+    // /etc/net.cfg already routes to. ARP + ICMP echo for now; DNS
+    // and the HTTP gateway grow onto the same LAN later. welcomePing
+    // makes `netstat` show life immediately after `net start ne0`
+    // (ELKS has no ping client of its own).
+    const gateway = new LanGateway({ welcomePing: true });
+    gateway.attachTo(network);
+    this.#gateway = gateway;
 
     const machine = new IBMPCMachine({
       disk: primary.disk,
@@ -531,6 +550,10 @@ export class WorkerHost {
     if (this.#nicPort) {
       this.#nicPort.detach();
       this.#nicPort = null;
+    }
+    if (this.#gateway) {
+      this.#gateway.detach();
+      this.#gateway = null;
     }
     this.#network = null;
     this.#machine = null;

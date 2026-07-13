@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   BOOTOPTS_MARKER,
   BOOTOPTS_SIZE,
+  NE0_BOOTOPTS_LINE,
   SERIAL_CONSOLE_LINE,
   SERIAL_RUNLEVEL_LINE,
   findBootopts,
@@ -89,8 +90,9 @@ describe('bootopts-patch', () => {
     const lines = text.split('\n').filter((l) => l !== '');
     expect(lines[0]).toBe('## /bootopts 1023 max');
     expect(lines).toContain('hma=kernel');
-    expect(lines).toContain('#ne0=12,0x300,,0x80');
-    expect(lines[lines.length - 2]).toBe(SERIAL_CONSOLE_LINE);
+    expect(lines).toContain('#ne0=12,0x300,,0x80'); // commented example survives
+    expect(lines[lines.length - 3]).toBe(SERIAL_CONSOLE_LINE);
+    expect(lines[lines.length - 2]).toBe(NE0_BOOTOPTS_LINE);
     expect(lines[lines.length - 1]).toBe(SERIAL_RUNLEVEL_LINE);
     expect(hasSerialConsole(patched)).toBe(true);
   });
