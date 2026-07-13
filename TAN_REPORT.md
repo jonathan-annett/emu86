@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-14 (session continuing from 2026-07-13)
 **Brief:** `emu86-phase14-brief.md` M3-tabs ("tab 1 can telnet to tab 2. that will be gold")
-**Outcome:** ✅ **Gold delivered.** Two full WorkerHost machines — exactly what two browser tabs run — boot the stock image on one shared Tab Area Network, lease themselves unique identities, join with the guest's own `net start ne0`, and then **machine A telnets to machine B and receives B's real login prompt**, served by B's unmodified telnetd over real ktcp-to-ktcp TCP. No host-side TCP engine exists anywhere; only ethernet frames moved. En route, the milestone surfaced a genuine distributed-systems bug (ktcp's connect clock vs. cross-tab ARP latency) whose fix — lease-directory proxy-ARP — makes the TAN robust for real browser tabs, not just tests.
+**Outcome:** ✅ **Gold delivered — and human-verified in real browser tabs** (Jonathan, 2026-07-14: two tabs, real BroadcastChannel, telnet across — "seems to work"). Two full WorkerHost machines — exactly what two browser tabs run — boot the stock image on one shared Tab Area Network, lease themselves unique identities, join with the guest's own `net start ne0`, and then **machine A telnets to machine B and receives B's real login prompt**, served by B's unmodified telnetd over real ktcp-to-ktcp TCP. No host-side TCP engine exists anywhere; only ethernet frames moved. En route, the milestone surfaced a genuine distributed-systems bug (ktcp's connect clock vs. cross-tab ARP latency) whose fix — lease-directory proxy-ARP — makes the TAN robust for real browser tabs, not just tests.
 
 ---
 
