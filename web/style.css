@@ -203,6 +203,35 @@ header code {
   font-size: 0.85rem;
 }
 
+.emu86-input-text {
+  flex: 1;
+  padding: 0.25rem 0.4rem;
+  background: #0c0c0c;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.emu86-textarea {
+  width: 100%;
+  padding: 0.35rem 0.4rem;
+  background: #0c0c0c;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 3px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 0.9rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.emu86-bootscript-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .emu86-button {
   padding: 0.3rem 0.7rem;
   background: #2a2a2a;

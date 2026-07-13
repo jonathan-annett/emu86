@@ -38,6 +38,17 @@ export type ImageSource =
   | { kind: 'bundled' }
   | { kind: 'library'; id: string };
 
+/**
+ * A named boot script (Phase 14 — autoexec). `text` is the keystroke
+ * script `web/autoexec.ts` runs at boot; see that module for the line
+ * format. Small editable text — localStorage-sized by construction.
+ */
+export interface BootScript {
+  id: string;
+  name: string;
+  text: string;
+}
+
 export interface Settings {
   /** Pixels. xterm.js takes a number. */
   fontSize: number;
@@ -54,16 +65,37 @@ export interface Settings {
    * `{ kind: 'library', id }`.
    */
   secondaryImageSource: { kind: 'library'; id: string } | null;
+  /** Named autoexec scripts (Phase 14 — boot scripts). */
+  bootScripts: BootScript[];
+  /**
+   * Script to run at boot, or null for none. Applies on next reload,
+   * like image-source changes. Default null — booting stays silent
+   * until the user opts in.
+   */
+  activeBootScriptId: string | null;
 }
 
 export const FONT_SIZE_MIN = 8;
 export const FONT_SIZE_MAX = 32;
+
+/**
+ * Seeded example script (editable/deletable like any other): logs in
+ * and joins the LAN — the testing-loop boilerplate the feature exists
+ * to eliminate. Not active by default.
+ */
+export const SEED_BOOT_SCRIPT: BootScript = {
+  id: 'seed-network',
+  name: 'network (root + net start ne0)',
+  text: 'root\nnet start ne0\n',
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   themeName: 'default-dark',
   imageSource: { kind: 'bundled' },
   secondaryImageSource: null,
+  bootScripts: [SEED_BOOT_SCRIPT],
+  activeBootScriptId: null,
 };
 
 const STORAGE_KEY = 'emu86.settings.v1';
@@ -97,6 +129,17 @@ function isValidSecondarySource(
   return obj.kind === 'library'
     && typeof obj.id === 'string'
     && obj.id.length > 0;
+}
+
+function isValidBootScripts(v: unknown): v is BootScript[] {
+  if (!Array.isArray(v)) return false;
+  return v.every((s) => {
+    if (s === null || typeof s !== 'object') return false;
+    const obj = s as { id?: unknown; name?: unknown; text?: unknown };
+    return typeof obj.id === 'string' && obj.id.length > 0
+      && typeof obj.name === 'string'
+      && typeof obj.text === 'string';
+  });
 }
 
 /**
@@ -144,8 +187,25 @@ export function loadSettings(): Settings {
   const secondaryImageSource = isValidSecondarySource(obj.secondaryImageSource)
     ? obj.secondaryImageSource
     : DEFAULT_SETTINGS.secondaryImageSource;
+  const bootScripts = isValidBootScripts(obj.bootScripts)
+    ? obj.bootScripts
+    : DEFAULT_SETTINGS.bootScripts.map((s) => ({ ...s }));
+  // The active id must reference an existing script; a dangling id
+  // (deleted script) degrades to "no script" rather than a boot error.
+  const activeBootScriptId =
+    typeof obj.activeBootScriptId === 'string'
+      && bootScripts.some((s) => s.id === obj.activeBootScriptId)
+      ? obj.activeBootScriptId
+      : null;
 
-  return { fontSize, themeName, imageSource, secondaryImageSource };
+  return {
+    fontSize,
+    themeName,
+    imageSource,
+    secondaryImageSource,
+    bootScripts,
+    activeBootScriptId,
+  };
 }
 
 /**

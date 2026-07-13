@@ -88,10 +88,38 @@ describe('settings', () => {
       themeName: 'solarized-dark',
       imageSource: { kind: 'library', id: 'image-id-1' },
       secondaryImageSource: { kind: 'library', id: 'secondary-id-1' },
+      bootScripts: [{ id: 'bs-1', name: 'network', text: 'root\nnet start ne0\n' }],
+      activeBootScriptId: 'bs-1',
     };
     saveSettings(target);
     const loaded = loadSettings();
     expect(loaded).toEqual(target);
+  });
+
+  it('boot scripts: malformed list falls back to the seed; dangling active id degrades to null', () => {
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        bootScripts: [{ id: 'x' }],       // missing name/text → invalid list
+        activeBootScriptId: 'x',
+      }),
+    );
+    const loaded = loadSettings();
+    expect(loaded.bootScripts).toEqual(DEFAULT_SETTINGS.bootScripts);
+    expect(loaded.activeBootScriptId).toBeNull();
+
+    // Valid list, but the active id references a deleted script → null,
+    // not a boot error.
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        bootScripts: [{ id: 'a', name: 'one', text: 'ls\n' }],
+        activeBootScriptId: 'gone',
+      }),
+    );
+    const loaded2 = loadSettings();
+    expect(loaded2.bootScripts).toHaveLength(1);
+    expect(loaded2.activeBootScriptId).toBeNull();
   });
 
   it('per-field fallback: invalid field reverts to default, others preserved', () => {
@@ -145,6 +173,8 @@ describe('settings', () => {
       themeName: 'amber-crt',
       imageSource: { kind: 'bundled' },
       secondaryImageSource: null,
+      bootScripts: [],
+      activeBootScriptId: null,
     };
     saveSettings(target);
     docTarget.removeEventListener(SETTINGS_CHANGED_EVENT, handler);
@@ -158,6 +188,8 @@ describe('settings', () => {
       themeName: 'default-dark',
       imageSource: { kind: 'library', id: 'present-id' },
       secondaryImageSource: null,
+      bootScripts: [],
+      activeBootScriptId: null,
     });
     const original = loadSettings();
 
@@ -232,6 +264,8 @@ describe('settings', () => {
       themeName: 'default-dark',
       imageSource: { kind: 'bundled' },
       secondaryImageSource: { kind: 'library', id: 'gone-secondary' },
+      bootScripts: [],
+      activeBootScriptId: null,
     });
     const stale = loadSettings();
     const fixed = await validateImageSourceAgainstLibrary(

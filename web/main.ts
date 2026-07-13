@@ -47,6 +47,7 @@ import {
 import { THEMES } from './themes.js';
 import { ImageLibrary } from './image-library.js';
 import { mountSettingsModal } from './settings-modal.js';
+import { AutoexecRunner } from './autoexec.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -112,6 +113,12 @@ async function init(): Promise<void> {
     const secondaryLabel = await describeImageSource(library, settings.secondaryImageSource);
     term.writeln(`Secondary: ${secondaryLabel}`);
   }
+  const activeScript = settings.bootScripts.find(
+    (s) => s.id === settings.activeBootScriptId,
+  );
+  if (activeScript !== undefined) {
+    term.writeln(`Boot script: ${activeScript.name}`);
+  }
   term.writeln('Booting...');
   term.writeln('');
 
@@ -123,10 +130,31 @@ async function init(): Promise<void> {
     name: 'emu86-worker',
   });
 
+  // Boot script (Phase 14 — autoexec): a prompt-aware runner types the
+  // active script into the console as the guest becomes ready. Fed from
+  // the same TX stream the terminal renders; sends through the same rx
+  // path as the keyboard, so the M2.5 FIFO pacing applies.
+  const txDecoder = new TextDecoder();
+  const autoexec = activeScript !== undefined
+    ? new AutoexecRunner({
+        script: activeScript.text,
+        send: (text) => {
+          const msg: MainToWorkerMessage = {
+            type: 'rx',
+            bytes: new TextEncoder().encode(text),
+          };
+          worker.postMessage(msg);
+        },
+      })
+    : null;
+
   worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
     const msg = event.data;
     if (msg.type === 'tx') {
       term.write(msg.bytes);
+      if (autoexec !== null && autoexec.active) {
+        autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
+      }
       return;
     }
     if (msg.type === 'ready') {

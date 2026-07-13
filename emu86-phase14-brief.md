@@ -323,6 +323,42 @@ right-speed instantly); (2) browser throughput — larger batches and a
 MessageChannel yield instead of clamped setTimeout(0). Display load
 from full-screen ANSI is secondary and mostly follows from (1).
 
+### Boot scripts / autoexec (scope addendum, 2026-07-14 — landed; see BOOT_SCRIPTS_REPORT.md)
+
+Jonathan's ask: customize the boot without touching the image — "a
+script that injects keystrokes at boot… then it can be edited," motive
+"to speed up the testing." Named, editable scripts stored in settings
+(localStorage — small text, synchronous, same tenant as font/theme);
+at boot the active script is typed into the console by a prompt-aware
+runner (`web/autoexec.ts`): it waits for `login:` / `Password:` /
+`# `/`$ ` before each line — no blind delays — and an `@expect <text>`
+directive waits for arbitrary output (e.g. the `ktcp: ip` line before
+a telnet). Injection rides the existing rx path, so the M2.5 FIFO
+pacing applies unchanged. UI: a Boot script section in the settings
+modal (picker + editor); one seeded example (`root` + `net start ne0`)
+so every tab can join the TAN hands-free. Scripts apply on reload,
+like image-source changes.
+
+**Back burner (Jonathan, 2026-07-14, same conversation): two richer
+boot-customization layers, deliberately deferred in favour of the
+keystroke scripts above.**
+
+1. **Golden boot overlays.** Boot a tab "writable," customize the
+   machine, save — a sector diff vs the post-bootopts-patch boot bytes
+   lands in IDB keyed by base image id; every later boot of that image
+   composes base → overlay → per-tab bootopts stamp. No live COW, no
+   write-behind: the diff happens once at save time (both byte arrays
+   are in memory). Compose order keeps overlays generic while
+   LOCALIP/DNSIP stay per-tab. Caveat to honour: pin the overlay to
+   its base image identity — composing across a re-fetched/different
+   base is garbage.
+2. **Shared "NAS" in IndexedDB.** A persistent store all tabs can
+   reach. Natural ELKS-authentic shape: an FTP pseudo-host on the LAN
+   (the image ships an ftp client; `net start` already runs ftpd the
+   other way) backed by an IDB file store — no kernel fs work, and
+   TAN tabs share it by construction. Wants M3d-era TCP listener
+   maturity; revisit then.
+
 **Back burner (Jonathan, 2026-07-14): guest UART ↔ real hardware over
 the browser.** Wire a guest serial port to a physical device so ELKS
 can talk to gadgets like ESP32s running console interfaces. Browser
