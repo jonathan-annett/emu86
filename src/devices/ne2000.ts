@@ -175,6 +175,14 @@ export class NE2000 implements PortHandler {
   /** Tracks the (ISR & IMR) level for edge-triggered onIRQ delivery. */
   #irqLevel = false;
 
+  // Diagnostics: injectFrame outcomes. Callers routinely discard the
+  // boolean (fire-and-forget wire semantics), so silent drops need a
+  // counter to be visible at all.
+  rxAccepted = 0;
+  rxDropped = 0;
+  /** Count of onIRQ edge deliveries (0→1 transitions of ISR&IMR). */
+  irqEdges = 0;
+
   constructor(opts: NE2000Options = {}) {
     this.basePort = opts.basePort ?? NE2K_BASE;
     this.#onTransmit = opts.onTransmit ?? (() => { /* unplugged */ });
@@ -218,11 +226,21 @@ export class NE2000 implements PortHandler {
    * ISR.OVW exactly like a real ring collision with BOUNDARY).
    */
   injectFrame(frame: Uint8Array): boolean {
-    if (!this.running) return false;
-    if ((this.#rcr & 0x20) !== 0) return false; // monitor mode (PROM read window)
-    if (this.#pstart === 0 || this.#pstop <= this.#pstart) return false;
+    if (!this.running) {
+      this.rxDropped++;
+      return false;
+    }
+    if ((this.#rcr & 0x20) !== 0) {
+      this.rxDropped++;
+      return false; // monitor mode (PROM read window)
+    }
+    if (this.#pstart === 0 || this.#pstop <= this.#pstart) {
+      this.rxDropped++;
+      return false;
+    }
     if (frame.length > MAX_FRAME) {
       this.#warn(`ne2000: dropping oversized injected frame (${frame.length} B)`);
+      this.rxDropped++;
       return false;
     }
 
@@ -232,6 +250,7 @@ export class NE2000 implements PortHandler {
     const ringPages = this.#pstop - this.#pstart;
     if (pages >= ringPages) {
       this.#raiseISR(ISR_OVW);
+      this.rxDropped++;
       return false;
     }
 
@@ -243,6 +262,7 @@ export class NE2000 implements PortHandler {
       if (page >= this.#pstop) page = this.#pstart + (page - this.#pstop);
       if (page === this.#bnry) {
         this.#raiseISR(ISR_OVW);
+        this.rxDropped++;
         return false;
       }
     }
@@ -255,6 +275,7 @@ export class NE2000 implements PortHandler {
     // 8390 raises overflow when CURR would advance onto BNRY.
     if (next === this.#bnry) {
       this.#raiseISR(ISR_OVW);
+      this.rxDropped++;
       return false;
     }
 
@@ -275,8 +296,24 @@ export class NE2000 implements PortHandler {
 
     this.#curr = next;
     this.#rsr = 0x01;
+    this.rxAccepted++;
     this.#raiseISR(ISR_PRX);
     return true;
+  }
+
+
+  /** Diagnostic snapshot of receive-path state. */
+  inspectRx(): {
+    running: boolean; curr: number; bnry: number; pstart: number; pstop: number;
+    isr: number; imr: number; rcr: number; accepted: number; dropped: number;
+    irqEdges: number;
+  } {
+    return {
+      running: this.running, curr: this.#curr, bnry: this.#bnry,
+      pstart: this.#pstart, pstop: this.#pstop, isr: this.#isr,
+      imr: this.#imr, rcr: this.#rcr, accepted: this.rxAccepted, dropped: this.rxDropped,
+      irqEdges: this.irqEdges,
+    };
   }
 
   // ============================================================
@@ -541,7 +578,10 @@ export class NE2000 implements PortHandler {
 
   #updateIRQ(): void {
     const level = (this.#isr & this.#imr & 0x7f) !== 0;
-    if (level && !this.#irqLevel) this.#onIRQ();
+    if (level && !this.#irqLevel) {
+      this.irqEdges++;
+      this.#onIRQ();
+    }
     this.#irqLevel = level;
   }
 }

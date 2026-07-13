@@ -103,23 +103,32 @@ export function hasSerialConsole(image) {
  * Throws if the resulting text exceeds the 1024-byte region — can only
  * happen on an image whose block is already nearly full.
  */
-export function patchBootoptsForSerial(image) {
+export function patchBootoptsForSerial(image, extraLines = []) {
     const offset = findBootopts(image);
     if (offset === null)
         return null;
     const lines = readBlockLines(image, offset);
     // Drop trailing blank lines so the appended options don't float after
     // padding artifacts; drop active console= lines and bare runlevel
-    // digits (commented ones stay).
+    // digits (commented ones stay). Active lines sharing a KEY= prefix
+    // with an extraLine (e.g. LOCALIP= from the TAN lease) are dropped
+    // too, so exactly one claim of each key remains.
     while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') {
         lines.pop();
     }
+    const extraKeys = extraLines
+        .map((l) => l.split('=')[0])
+        .filter((k) => k !== undefined && k !== '')
+        .map((k) => `${k}=`);
     const kept = lines.filter((line) => {
         const t = line.trim();
-        return !t.startsWith('console=') && !t.startsWith('ne0=') && !/^[0-9]$/.test(t);
+        if (t.startsWith('console=') || t.startsWith('ne0=') || /^[0-9]$/.test(t))
+            return false;
+        return !extraKeys.some((k) => t.startsWith(k));
     });
     kept.push(SERIAL_CONSOLE_LINE);
     kept.push(NE0_BOOTOPTS_LINE);
+    kept.push(...extraLines);
     kept.push(SERIAL_RUNLEVEL_LINE);
     const text = kept.join('\n') + '\n';
     if (text.length > BOOTOPTS_SIZE - 1) {

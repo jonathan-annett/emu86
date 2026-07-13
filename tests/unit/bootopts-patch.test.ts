@@ -113,6 +113,22 @@ describe('bootopts-patch', () => {
     expect(lines.filter((l) => /^[0-9]$/.test(l.trim()))).toEqual([SERIAL_RUNLEVEL_LINE]);
   });
 
+  it('appends extraLines before the runlevel and drops same-key actives (TAN LOCALIP)', () => {
+    const image = makeImage(
+      `${BOOTOPTS_MARKER}\nhma=kernel\nLOCALIP=10.0.2.15\n#LOCALIP=10.0.2.16\n`,
+      512,
+    );
+    const patched = patchBootoptsForSerial(image, ['LOCALIP=10.0.2.42']);
+    expect(patched).not.toBeNull();
+    if (patched === null) return;
+    const lines = blockText(patched, 512).split('\n').filter((l) => l !== '');
+    expect(lines).toContain('LOCALIP=10.0.2.42');
+    expect(lines).not.toContain('LOCALIP=10.0.2.15'); // old active dropped
+    expect(lines).toContain('#LOCALIP=10.0.2.16');    // comment survives
+    expect(lines[lines.length - 1]).toBe(SERIAL_RUNLEVEL_LINE);
+    expect(lines[lines.length - 2]).toBe('LOCALIP=10.0.2.42');
+  });
+
   it('throws when the block has no room for the extra line', () => {
     const full =
       `${BOOTOPTS_MARKER}\n` + 'x'.repeat(BOOTOPTS_SIZE - BOOTOPTS_MARKER.length - 4);

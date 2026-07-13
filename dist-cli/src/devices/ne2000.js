@@ -137,6 +137,13 @@ export class NE2000 {
     #dmaRemaining = 0;
     /** Tracks the (ISR & IMR) level for edge-triggered onIRQ delivery. */
     #irqLevel = false;
+    // Diagnostics: injectFrame outcomes. Callers routinely discard the
+    // boolean (fire-and-forget wire semantics), so silent drops need a
+    // counter to be visible at all.
+    rxAccepted = 0;
+    rxDropped = 0;
+    /** Count of onIRQ edge deliveries (0→1 transitions of ISR&IMR). */
+    irqEdges = 0;
     constructor(opts = {}) {
         this.basePort = opts.basePort ?? NE2K_BASE;
         this.#onTransmit = opts.onTransmit ?? (() => { });
@@ -176,14 +183,21 @@ export class NE2000 {
      * ISR.OVW exactly like a real ring collision with BOUNDARY).
      */
     injectFrame(frame) {
-        if (!this.running)
+        if (!this.running) {
+            this.rxDropped++;
             return false;
-        if ((this.#rcr & 0x20) !== 0)
+        }
+        if ((this.#rcr & 0x20) !== 0) {
+            this.rxDropped++;
             return false; // monitor mode (PROM read window)
-        if (this.#pstart === 0 || this.#pstop <= this.#pstart)
+        }
+        if (this.#pstart === 0 || this.#pstop <= this.#pstart) {
+            this.rxDropped++;
             return false;
+        }
         if (frame.length > MAX_FRAME) {
             this.#warn(`ne2000: dropping oversized injected frame (${frame.length} B)`);
+            this.rxDropped++;
             return false;
         }
         const dataLen = Math.max(frame.length, MIN_FRAME);
@@ -192,6 +206,7 @@ export class NE2000 {
         const ringPages = this.#pstop - this.#pstart;
         if (pages >= ringPages) {
             this.#raiseISR(ISR_OVW);
+            this.rxDropped++;
             return false;
         }
         // Overflow check: writing onto the BOUNDARY page means the ring is
@@ -203,6 +218,7 @@ export class NE2000 {
                 page = this.#pstart + (page - this.#pstop);
             if (page === this.#bnry) {
                 this.#raiseISR(ISR_OVW);
+                this.rxDropped++;
                 return false;
             }
         }
@@ -215,6 +231,7 @@ export class NE2000 {
         // 8390 raises overflow when CURR would advance onto BNRY.
         if (next === this.#bnry) {
             this.#raiseISR(ISR_OVW);
+            this.rxDropped++;
             return false;
         }
         // 4-byte receive header, then the (padded) frame, wrapping at PSTOP.
@@ -234,8 +251,18 @@ export class NE2000 {
         }
         this.#curr = next;
         this.#rsr = 0x01;
+        this.rxAccepted++;
         this.#raiseISR(ISR_PRX);
         return true;
+    }
+    /** Diagnostic snapshot of receive-path state. */
+    inspectRx() {
+        return {
+            running: this.running, curr: this.#curr, bnry: this.#bnry,
+            pstart: this.#pstart, pstop: this.#pstop, isr: this.#isr,
+            imr: this.#imr, rcr: this.#rcr, accepted: this.rxAccepted, dropped: this.rxDropped,
+            irqEdges: this.irqEdges,
+        };
     }
     // ============================================================
     // PortHandler
@@ -513,8 +540,10 @@ export class NE2000 {
     }
     #updateIRQ() {
         const level = (this.#isr & this.#imr & 0x7f) !== 0;
-        if (level && !this.#irqLevel)
+        if (level && !this.#irqLevel) {
+            this.irqEdges++;
             this.#onIRQ();
+        }
         this.#irqLevel = level;
     }
 }

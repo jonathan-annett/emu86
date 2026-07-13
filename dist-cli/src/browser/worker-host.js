@@ -43,6 +43,7 @@ import { installCGAMirror, } from '../diagnostics/cga-mirror.js';
 import { hasSerialConsole, patchBootoptsForSerial, } from './bootopts-patch.js';
 import { EthernetSwitch } from '../net/switch.js';
 import { LanGateway } from '../net/gateway.js';
+import { TabAreaNetwork } from '../net/tan.js';
 const SIZE_TABLE = [
     // ---- Floppies ----
     { bytes: 1474560, geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 18 }, diskClass: 'floppy' }, // 1.44 MB
@@ -100,6 +101,8 @@ export class WorkerHost {
     #network = null;
     #nicPort = null;
     #gateway = null;
+    #tanConfig = null;
+    #tan = null;
     #stopping = false;
     /** Last in-flight async work — boot fetch + autoRun loop. */
     #pending = Promise.resolve();
@@ -110,6 +113,7 @@ export class WorkerHost {
         this.#batchSize = opts.batchSize ?? 5000;
         this.#haltSpinCycles = opts.haltSpinCycles ?? 1000;
         this.#maxHaltSpins = opts.maxHaltSpins ?? 1000;
+        this.#tanConfig = opts.tan ?? null;
     }
     /** Underlying machine. Tests poke this for low-level inspection. */
     get machine() {
@@ -130,6 +134,10 @@ export class WorkerHost {
      */
     get gateway() {
         return this.#gateway;
+    }
+    /** The Tab Area Network membership (M3-tabs), if configured. */
+    get tan() {
+        return this.#tan;
     }
     /**
      * Inbound message handler — call from the worker's `message` event
@@ -267,12 +275,22 @@ export class WorkerHost {
     async #boot(config) {
         this.#teardownMachine();
         this.#stopping = false;
+        // TAN identity first (Phase 14 M3-tabs) — the bootopts patch below
+        // stamps LOCALIP from it and the NIC MAC derives from it. Created
+        // once and kept across reboots: the tab keeps its address, and the
+        // lease keeps defending it while the machine restarts.
+        if (this.#tanConfig !== null && this.#tan === null) {
+            this.#tan = new TabAreaNetwork(this.#tanConfig.channel, this.#tanConfig.hostOctet !== undefined
+                ? { hostOctet: this.#tanConfig.hostOctet }
+                : {});
+        }
+        const tanIdentity = this.#tan !== null ? await this.#tan.acquire() : null;
         const primary = await this.#resolveSlot('primary', {
             imageUrl: config.imageUrl,
             imageBytes: config.imageBytes,
             geometry: config.geometry,
             diskClass: config.diskClass,
-        });
+        }, tanIdentity !== null ? [tanIdentity.localipLine] : []);
         let secondary = null;
         if (config.secondary) {
             secondary = await this.#resolveSlot('secondary', config.secondary);
@@ -303,6 +321,9 @@ export class WorkerHost {
         const gateway = new LanGateway({ welcomePing: true });
         gateway.attachTo(network);
         this.#gateway = gateway;
+        // M3-tabs: bridge this LAN onto the Tab Area Network.
+        if (this.#tan !== null)
+            this.#tan.attach(network);
         const machine = new IBMPCMachine({
             disk: primary.disk,
             diskClass: primary.diskClass,
@@ -317,6 +338,9 @@ export class WorkerHost {
             cyclesPerPitTick: 4,
             uartTransmit: (byte) => this.#txBuffer.push(byte),
             nicTransmit: (frame) => nicPort.transmit(frame),
+            // On the TAN every tab needs a unique MAC; solo machines keep
+            // the fixed default.
+            ...(tanIdentity !== null ? { nicMac: tanIdentity.mac } : {}),
         });
         // Silent CGA sink — Phase 9 has no canvas. Without a sink the kernel's
         // early-printk writes to 0xB8000 still land in memory; the mirror is
@@ -335,7 +359,7 @@ export class WorkerHost {
      * `slotName` is purely diagnostic — it surfaces in error messages so
      * a failing secondary slot doesn't masquerade as a broken primary.
      */
-    async #resolveSlot(slotName, spec) {
+    async #resolveSlot(slotName, spec, extraBootoptsLines = []) {
         let bytes;
         if (spec.imageBytes) {
             bytes = spec.imageBytes;
@@ -369,7 +393,7 @@ export class WorkerHost {
         if (slotName === 'primary' &&
             diskClass === 'hard-disk' &&
             !hasSerialConsole(bytes)) {
-            const patched = patchBootoptsForSerial(bytes);
+            const patched = patchBootoptsForSerial(bytes, extraBootoptsLines);
             if (patched !== null)
                 bytes = patched;
         }
@@ -433,6 +457,9 @@ export class WorkerHost {
             this.#gateway.detach();
             this.#gateway = null;
         }
+        // TAN survives teardown (identity + defence persist across
+        // reboots); only the trunk into the dying switch unplugs.
+        this.#tan?.detachLan();
         this.#network = null;
         this.#machine = null;
         this.#console = null;
