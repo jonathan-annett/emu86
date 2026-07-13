@@ -146,6 +146,28 @@ unless Fallback B forces it.
    `c86` interactively at the xterm prompt.
 4. Report includes what was and wasn't verified in which browser.
 
+### M2.5 — agent bridge (Jonathan's idea, 2026-07-13 in-session)
+
+Let an agent drive the browser-hosted machine programmatically. Vite's
+dev server already has a WebSocket channel (HMR) that plugins can carry
+custom events over — no new dependency:
+
+1. Inline vite plugin (`vite.config.ts`): bridges `emu86:rx` /
+   `emu86:tx` custom events to plain HTTP endpoints on the dev server
+   (`POST /agent/rx` with bytes, `GET /agent/transcript` returning the
+   cumulative TX text).
+2. `web/main.ts`: when `import.meta.hot` exists (dev mode only),
+   forward worker `tx` to `hot.send('emu86:tx', ...)` and subscribe to
+   `hot.on('emu86:rx', ...)` → worker. Production builds compile the
+   whole block away.
+3. Acceptance: with `npm run dev:browser` running and an image booted,
+   `curl -d 'ls' localhost:5173/agent/rx` (plus newline) makes the
+   command appear in the visible xterm and the output shows up in
+   `GET /agent/transcript`.
+
+Dev-mode only by design — the production `dist-web` build carries none
+of it.
+
 ### M3 — NE2000 + in-VM driver build (BLOCKED — do not start)
 
 Unblocks when `emu86-networking-plan.md` (or Jonathan's restatement)

@@ -52,6 +52,10 @@ import {
   installCGAMirror,
   type CGAMirrorSink,
 } from '../diagnostics/cga-mirror.js';
+import {
+  hasSerialConsole,
+  patchBootoptsForSerial,
+} from './bootopts-patch.js';
 
 /**
  * Size → (geometry, diskClass) lookup. The published-ELKS HD shapes were
@@ -427,6 +431,19 @@ export class WorkerHost {
       diskClass ??= inferred.diskClass;
     }
     diskClass ??= classFromGeometry(geometry);
+    // Phase 14 M2: HD images default to the CGA console, which the
+    // browser can't render — auto-patch /bootopts to console=ttyS0 so
+    // the xterm terminal works. In-memory copy only (the stored library
+    // image is untouched); floppies and already-serial images pass
+    // through unchanged; images without a /bootopts block boot as-is.
+    if (
+      slotName === 'primary' &&
+      diskClass === 'hard-disk' &&
+      !hasSerialConsole(bytes)
+    ) {
+      const patched = patchBootoptsForSerial(bytes);
+      if (patched !== null) bytes = patched;
+    }
     const disk = new InMemoryDisk({ geometry, contents: bytes });
     return { disk, diskClass };
   }
