@@ -239,6 +239,14 @@ subject, approved by the arc; hard rules 1–5 unchanged.
 - M3: its own scope addendum to this brief, then implementation +
   report, committed.
 
+**Observed nicety for a future milestone (2026-07-14, Jonathan playing
+TAN-pirated games):** full-screen ANSI programs (invaders) tax the
+browser display — the substrate has no real-time governor (deferred in
+`clock.ts` since the PIT phase), so games run at host speed and the
+UART firehoses xterm via per-batch postMessage. A worker-side pacing
+governor (cap virtual PIT ticks per real second) would fix both the
+display load and game-speed authenticity in one move.
+
 ## Out of scope for all of Phase 14
 
 - Fixing the `runUntilSentinel` echo bug (three phases of precedent
