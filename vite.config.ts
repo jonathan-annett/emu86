@@ -16,7 +16,7 @@ function buildStamp(): string {
     // touches dist-web before its own commit, which would make every
     // stamp read "-dirty" forever.
     const dirty = execSync(
-      "git status --porcelain -- . ':!dist-web' ':!dist-cli' ':!releases'",
+      "git status --porcelain --untracked-files=no -- . ':!dist-web' ':!dist-cli' ':!releases'",
       { encoding: 'utf8' },
     ).trim();
     if (dirty !== '') hash += '-dirty';
