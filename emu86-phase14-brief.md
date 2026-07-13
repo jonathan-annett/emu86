@@ -378,6 +378,37 @@ first-try nslookup still works, turbo visibly speeds a compile.
 Deliverable: `BROWSER_PACING_REPORT.md` with measured numbers.
 (This supersedes the "Performance work" exclusion under Out of scope.)
 
+### RTC chip (scope addendum, 2026-07-15 — Jonathan: "next up we need
+to make an RTC chip!"; guest date reads Mon Oct 21 1991)
+
+The networking plan's NTP-pseudo-host path died with the no-UDP
+discovery (M3c), so wall-clock comes the substrate-honest way the plan
+also named: an **MC146818 CMOS RTC at ports 0x70/0x71**. The stock
+image already runs **`clock -s -u` from `/etc/rc.sys` at every boot**,
+and `AST_SUPPORT=0` compiles its probe out — so the device only has to
+serve what `cmos_gettime()` reads (`elkscmd/sys_utils/clock.c`):
+BCD registers 0x00/02/04 (sec/min/hour 24h), 0x06 weekday **stored as
+tm_wday+3** (clock.c's "DOS uses 3-9" convention — counterparty-first,
+deviation from the 1-7 datasheet noted), 0x07/08/09
+(mday/month 1-based/year%100, <70 ⇒ 20xx). Status regs for
+robustness: 0x0A=0x26 (probe value, UIP never set — reads are
+torn-free per register and clock.c's seconds-stability loop covers
+minute rollovers), 0x0B=0x02 (24h, BCD), 0x0D=0x80 (battery OK).
+Index port honours the bit-7 NMI mask (masked off). Writes land in a
+scratch CMOS array, NOT applied to time — `clock -w` is recorded as a
+no-op v1 (report documents it).
+
+Time source: the machine's existing `hostClock` (browser/CLI =
+NodeHostClock **local** wall time — with `-u` the guest adopts it
+verbatim, so guest `date` matches the browser clock, which is the
+wish; tests = InMemoryHostClock, deterministic). Substrate touched:
+`src/devices/rtc.ts` (new), `src/machine/ibm-pc.ts` (register at
+0x70-0x71 when a hostClock exists, reset chain) — approved here; hard
+rules unchanged. Acceptance: unit tests against a fixed
+InMemoryHostClock; integration boot runs the guest's own
+`clock -s -u; date` and the transcript shows the host date. Browser:
+date correct at boot with zero typing (rc.sys does it).
+
 **Back burner (Jonathan, 2026-07-14, same conversation): two richer
 boot-customization layers, deliberately deferred in favour of the
 keystroke scripts above.**
