@@ -58,7 +58,9 @@ Any packet straddling the ring seam (page 0x7F→0x46) returned a
 garbage tail — position-dependent, so everything worked until the ring
 pointer reached the seam. Fixed in the device (`#advanceDma` wraps at
 PSTOP→PSTART); pinned by a seam-straddling round-trip regression test.
-Telnet gaming remains the best fuzzer this project has.
+Telnet gaming remains the best fuzzer this project has. **Fix
+field-verified** (Jonathan, 2026-07-14): both invaders and tetris
+playable over TAN telnet, no crashes.
 
 ## 6. Reproduction / browser demo
 
