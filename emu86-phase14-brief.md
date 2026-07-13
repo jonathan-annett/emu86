@@ -240,12 +240,18 @@ subject, approved by the arc; hard rules 1–5 unchanged.
   report, committed.
 
 **Observed nicety for a future milestone (2026-07-14, Jonathan playing
-TAN-pirated games):** full-screen ANSI programs (invaders) tax the
-browser display — the substrate has no real-time governor (deferred in
-`clock.ts` since the PIT phase), so games run at host speed and the
-UART firehoses xterm via per-batch postMessage. A worker-side pacing
-governor (cap virtual PIT ticks per real second) would fix both the
-display load and game-speed authenticity in one move.
+TAN-pirated games — CORRECTED same evening):** games are SLOW in the
+browser, not fast. The machine models 1 instruction = 1 clock cycle
+(`clock.advance(executed)`, `cyclesPerPitTick: 4`), so real-time guest
+clocks need ~4.77M instr/s; Node manages ~2M and the browser worker —
+yielding via setTimeout(0) every 5,000-instruction batch, which
+browsers clamp — considerably less. PIT-paced games therefore run at a
+fraction of real speed. Two-part fix when scheduled: (1) drive the
+virtual clock from HOST elapsed time so the PIT ticks a true 100 Hz
+regardless of emulation speed (timer-paced programs become
+right-speed instantly); (2) browser throughput — larger batches and a
+MessageChannel yield instead of clamped setTimeout(0). Display load
+from full-screen ANSI is secondary and mostly follows from (1).
 
 **Deployment shape (Jonathan, 2026-07-14): static PWA on Cloudflare.**
 dist-web is already fully static and the TAN needs no server
