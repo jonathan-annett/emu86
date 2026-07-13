@@ -409,6 +409,49 @@ InMemoryHostClock; integration boot runs the guest's own
 `clock -s -u; date` and the transcript shows the host date. Browser:
 date correct at boot with zero typing (rc.sys does it).
 
+### Landing showcase (scope addendum, 2026-07-15 — Jonathan's design,
+recorded verbatim-in-spirit; the retro.sophtwhere.com debug-typing
+demo, upgraded to a compiler)
+
+The default landing page becomes a two-act show:
+
+1. **Act one — instant boot, background download.** First visit boots
+   the bundled serial floppy immediately (as today) while
+   `hd32-minix.img` streams through `/gh-assets` into the image
+   library in the background (progress surfaced subtly). When stored,
+   the page announces **"breaking news"** — inviting a refresh.
+   First-run defaults only: a returning user's customized settings are
+   never hijacked.
+2. **Act two — the refresh boots the HD image**, and the demo boot
+   script runs the machine's own toolchain end-to-end before the
+   visitor's eyes: log in, `net start ne0`, then **type in a
+   hello-world C program and build it with the on-disk
+   cpp→c86→as→ld pipeline** — just as the eldest sibling does with
+   DOS `debug`, but with a real compiler. The program prints
+   **"hello human"** — homage to the earlier page.
+
+Mechanics:
+
+- **AutoexecRunner grows directives**: `@type` switches to
+  **clackety mode** — characters sent one at a time at fake-human
+  cadence (randomized inter-key delays) with a little keyboard-click
+  FX per keystroke (WebAudio-synthesized tick, no audio assets, no
+  new deps); `@instant` returns to line mode; `@expect` unchanged.
+  Possibly `@turbo`/`@authentic` directives posting live set-speed —
+  the compile step may want turbo (in-guest c86 took ~40 s at 1:1
+  pacing; authentic-capped browser time to be measured, and the demo
+  must not drag).
+- **Audio unlock**: browsers gate WebAudio behind a user gesture —
+  the refresh interaction may suffice; otherwise a "press any key to
+  roll the demo" gate (charming anyway). Design at implementation.
+- **Demo script content** comes from `HELLO_WORLD_COMPILE_REPORT.md`
+  (exact pipeline flags read from the image's own /usr/src/Makefile);
+  8.3 filenames; `sync` etiquette as established.
+- Touches: `web/autoexec.ts` (directives + pacing + FX),
+  `web/main.ts` (download orchestration + banner), settings seed
+  (demo script), possibly `web/settings.ts` first-run detection.
+  No substrate changes.
+
 **Back burner (Jonathan, 2026-07-14, same conversation): two richer
 boot-customization layers, deliberately deferred in favour of the
 keystroke scripts above.**
