@@ -223,6 +223,76 @@ Substrate note: M3a touches `src/devices/`, `src/machine/ibm-pc.ts`
 (optional-device wiring), and `src/net/` (new) — this is the phase's
 subject, approved by the arc; hard rules 1–5 unchanged.
 
+### M3c — DNS pseudo-host (scope addendum, 2026-07-14; Jonathan's "M4")
+
+**Reality-delta that reshapes the milestone: ELKS speaks DNS over TCP,
+not UDP.** ktcp implements no UDP at all (`elkscmd/ktcp/` has arp, ip,
+icmp, tcp — no udp.c), so libc's resolver `in_resolv()`
+(`reference/elks/libc/net/in_resolv.c:102-147`) opens a `SOCK_STREAM`
+socket to port 53 and sends the RFC 1035 §4.2.2 two-byte-length-prefixed
+query form. Every name-resolving tool routes through it — `nslookup`
+directly, telnet/urlget/ftp via `in_gethostbyname()`. The networking
+plan's "listens on UDP/53" is unimplementable against the actual guest;
+its "DNS could come before TCP" ordering note was written on the same
+dead assumption.
+
+Consequence: **M3c pulls a minimal TCP listener forward from M3d.**
+Smaller than it sounds: the LAN is lossless, in-memory, and synchronous,
+so no retransmission, reordering, or congestion handling — the engine is
+SYN → SYN+ACK → ESTABLISHED, ACK inbound data, transmit response
+segments, FIN both ways. DNS-over-TCP is the smallest real TCP consumer
+(one short-lived connection, one request/response) and yields both the
+engine seed and the reference traffic M3d's full termination will build
+on. Build it reusable from day one: `src/net/tcp.ts`, per-connection
+state keyed `(srcIp, srcPort, dstIp, dstPort)`, listener registration
+`(ip, port) → handler`; the DNS host is its first consumer.
+
+**Resolver shape: RFC 8484 DoH pass-through.** Strip the 2-byte TCP
+prefix → base64url → `GET https://cloudflare-dns.com/dns-query?dns=…`
+(`accept: application/dns-message`) → the response body is a raw DNS
+message → re-prefix the length → send back over the guest's TCP
+connection. Zero DNS message parsing on our side; the guest's own query
+and the resolver's real answer move byte-authentically. The resolve
+function is injected (`resolve(query: Uint8Array): Promise<Uint8Array>`)
+— browser default is the DoH fetch (available in the worker), tests
+inject canned fixture bytes, so the integration test stays
+deterministic and offline. First **async** pseudo-host: ACK the query
+synchronously, transmit the response when the promise settles — the
+queue-and-transmit-on-completion pattern `ARP_ICMP_REPORT.md` §3.3
+anticipated; the switch stays pure. Timing bound: `in_resolv` arms
+`alarm(2)` — two *guest* seconds, which the instruction-paced PIT
+stretches in wall-clock terms; real DoH round-trips (~100 ms) fit
+comfortably.
+
+Addressing/config: DNS host at **10.0.2.3 / 52:55:0a:00:02:03** (slirp
+convention, next to the M3b gateway). libc's default server is OpenDNS
+`208.67.222.222` overridden by the `DNSIP` env var
+(`in_resolv.c:18-19`); stock `net.cfg` sets nothing — so the bootopts
+patcher stamps `DNSIP=10.0.2.3` beside the TAN's LOCALIP lease. The
+LOCALIP precedent shows bootopts env reaches the shells that matter;
+verify it reaches `nslookup`'s login shell in-session. Acceptance:
+(a) Node integration test — stock image boots, `net start ne0`,
+`nslookup example.com 10.0.2.3` against a fixture resolver, resolved
+IP asserted in the serial transcript; (b) browser — same command at
+the xterm returns a real record via live DoH. Explicit-server is the
+guaranteed path; bare `nslookup example.com` works iff the DNSIP stamp
+propagates (expected; report documents which).
+
+Guest quirks to document, not fix: `in_resolv` reads at most 200
+response bytes and takes the **last** RR in the buffer as the answer
+(`in_resolv.c:148,186`) — multi-RR or >200-byte responses can confuse
+it. That's a guest libc quirk to record with evidence if it bites.
+
+Files: `src/net/wire.ts` (+TCP segment builder/parser with
+pseudo-header checksum), `src/net/tcp.ts` (new), `src/net/dns.ts`
+(new), `src/browser/worker-host.ts` (attach), `src/browser/
+bootopts-patch.ts` (+DNSIP line), unit + integration tests.
+Deliverable: `DNS_DOH_REPORT.md`, committed. Out of scope: UDP
+(nothing in the guest speaks it), the HTTP gateway and
+arbitrary-destination TCP (M3d), intercepting the libc default
+`208.67.222.222` at the gateway MAC (stamp DNSIP instead — revisit in
+M3d when off-subnet TCP exists), resolver choice/config UI.
+
 ## Verification
 
 - `npm run typecheck` clean (note: add `tsconfig.cli.json` if the
