@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -22,7 +22,69 @@ import { fileURLToPath } from 'node:url';
 
 const nodeFsStub = fileURLToPath(new URL('./web/stubs/node-fs.ts', import.meta.url));
 
+/**
+ * Phase 14 M2.5 — agent bridge (dev server only; Jonathan's idea,
+ * 2026-07-13).
+ *
+ * Lets an agent (or any script) drive the browser-hosted machine over
+ * plain HTTP, using the dev server's existing HMR WebSocket as the
+ * transport — zero new dependencies, and none of this exists in a
+ * production build.
+ *
+ *   POST /agent/rx           body text is injected into the emulator
+ *                            as keystrokes (remember the trailing \n)
+ *   GET  /agent/transcript   cumulative UART output as text/plain
+ *
+ * The page side (web/main.ts, inside `if (import.meta.hot)`) forwards
+ * worker `tx` bytes up as `emu86:tx` custom events and injects
+ * `emu86:rx` events as worker keystrokes. This is a TEXT pipe (UTF-8
+ * both ways), fit for terminal traffic — binary extraction stays on
+ * the probe-harness path.
+ *
+ * With several tabs open, every tab receives `/agent/rx` input and all
+ * tabs' output lands in one transcript — keep one tab per dev server.
+ */
+function emu86AgentBridge(): Plugin {
+  let transcript = '';
+  const TRANSCRIPT_CAP = 1_000_000;
+  const RX_BODY_CAP = 65_536;
+  return {
+    name: 'emu86-agent-bridge',
+    apply: 'serve',
+    configureServer(server: ViteDevServer) {
+      server.ws.on('emu86:tx', (data: { text?: unknown }) => {
+        if (typeof data?.text !== 'string') return;
+        transcript += data.text;
+        if (transcript.length > TRANSCRIPT_CAP) {
+          transcript = transcript.slice(-Math.floor(TRANSCRIPT_CAP / 2));
+        }
+      });
+      server.middlewares.use('/agent/rx', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('POST keystroke text to this endpoint\n');
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk: Buffer) => {
+          if (body.length < RX_BODY_CAP) body += chunk.toString('utf8');
+        });
+        req.on('end', () => {
+          server.ws.send('emu86:rx', { text: body });
+          res.setHeader('content-type', 'text/plain');
+          res.end(`sent ${body.length} chars\n`);
+        });
+      });
+      server.middlewares.use('/agent/transcript', (_req, res) => {
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.end(transcript);
+      });
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [emu86AgentBridge()],
   root: 'web',
   base: './',
   publicDir: 'public',

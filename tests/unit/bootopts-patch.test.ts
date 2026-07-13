@@ -166,3 +166,69 @@ describe('WorkerHost serial auto-patch (Phase 14 M2)', () => {
     expect(text).toContain('hma=kernel');
   });
 });
+
+describe('WorkerHost RX pacing (Phase 14 M2.5 regression)', () => {
+  it('does not overrun the 16-byte UART FIFO on a >16-byte input burst', async () => {
+    // Zero image: the CPU executes ADDs harmlessly, nothing reads the
+    // UART, so whatever #drainRx injects stays visible in the FIFO.
+    const posts: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => posts.push(m), autoRun: false });
+    host.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: new Uint8Array(64 * 512),
+        geometry: { cylinders: 1, heads: 2, sectorsPerTrack: 32 },
+        diskClass: 'floppy',
+      },
+    });
+    await host.whenIdle();
+
+    // Enable the RX FIFO the way a guest kernel would (FCR write at
+    // base+2) — no kernel runs on the zero image, and non-FIFO mode
+    // has a 1-byte holding register with its own pacing rule.
+    const uart = host.machine?.uart;
+    expect(uart).toBeTruthy();
+    uart?.writeByte?.(0x3fa, 0x01);
+
+    const burst = 'echo this paste is far longer than the sixteen byte fifo\n';
+    host.handleMessage({
+      type: 'rx',
+      bytes: new Uint8Array([...burst].map((c) => c.charCodeAt(0))),
+    });
+    host.runUntil(200);
+
+    // Old behavior: 16 injected (FIFO full), remainder DROPPED by the
+    // UART with overrun latched. Paced behavior: exactly the 12-byte
+    // in-flight cap, with the rest still queued host-side for later
+    // batches. (The UART's overrun flag isn't inspectable; the count
+    // is the discriminator — unpaced code reads 16 here.)
+    expect(uart?.pendingRxCount).toBe(12);
+    expect(uart?.inspect().fifoEnabled).toBe(true);
+  });
+
+  it('paces to a single byte while the guest has not enabled the FIFO', async () => {
+    const posts: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => posts.push(m), autoRun: false });
+    host.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: new Uint8Array(64 * 512),
+        geometry: { cylinders: 1, heads: 2, sectorsPerTrack: 32 },
+        diskClass: 'floppy',
+      },
+    });
+    await host.whenIdle();
+
+    host.handleMessage({
+      type: 'rx',
+      bytes: new Uint8Array([...'burst\n'].map((c) => c.charCodeAt(0))),
+    });
+    host.runUntil(200);
+
+    // Non-FIFO mode: exactly one byte in the holding register, nothing
+    // overwritten (old behavior: whole queue funneled through, last
+    // byte wins).
+    expect(host.machine?.uart.pendingRxCount).toBe(1);
+    expect(host.machine?.uart.inspect().rxFifo).toEqual(['b'.charCodeAt(0)]);
+  });
+});

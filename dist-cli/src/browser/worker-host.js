@@ -332,8 +332,23 @@ export class WorkerHost {
         const disk = new InMemoryDisk({ geometry, contents: bytes });
         return { disk, diskClass };
     }
+    /**
+     * Feed queued console input to the UART, paced against its actual RX
+     * capacity — `injectByte` DROPS bytes once the FIFO is full (real
+     * 16550 overrun semantics; in non-FIFO mode it OVERWRITES the 1-byte
+     * holding register), which silently truncated any >16-byte input
+     * burst (a paste into the xterm, or agent-bridge POSTs) to 16 chars.
+     * Keep ≤12 in flight per batch when the guest has enabled the FIFO
+     * (the probe harness's margin, `probe-harness.ts:RX_CHUNK_SIZE`),
+     * one byte otherwise, and leave the rest queued in BrowserConsole;
+     * the kernel drains between batches. Found by Phase 14 M2.5's first
+     * >16-char injection.
+     */
     #drainRx(browserConsole, machine) {
-        while (browserConsole.hasInput()) {
+        const RX_INFLIGHT_LIMIT = 12;
+        const limit = machine.uart.inspect().fifoEnabled ? RX_INFLIGHT_LIMIT : 1;
+        while (browserConsole.hasInput() &&
+            machine.uart.pendingRxCount < limit) {
             const b = browserConsole.readChar();
             if (b < 0)
                 break;

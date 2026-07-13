@@ -20,6 +20,11 @@
  * worker host is unchanged.
  */
 
+// `import.meta.hot` types for the M2.5 agent-bridge block. File-local so
+// every tsconfig that sweeps this file up (tsconfig.test.json includes
+// web/**) sees them, not just tsconfig.web.json's `types` array.
+/// <reference types="vite/client" />
+
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
@@ -148,6 +153,27 @@ async function init(): Promise<void> {
     const msg: MainToWorkerMessage = { type: 'rx', bytes };
     worker.postMessage(msg);
   });
+
+  // Phase 14 M2.5 — dev-only agent bridge. The HMR channel doubles as a
+  // control pipe: worker TX is mirrored to the dev server (curl GET
+  // /agent/transcript) and `emu86:rx` events arrive as keystrokes (curl
+  // POST /agent/rx). See the plugin in vite.config.ts. Production
+  // builds drop this whole block (`import.meta.hot` is undefined).
+  if (import.meta.hot) {
+    const hot = import.meta.hot;
+    const decoder = new TextDecoder();
+    worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
+      const msg = event.data;
+      if (msg.type === 'tx') {
+        hot.send('emu86:tx', { text: decoder.decode(msg.bytes) });
+      }
+    });
+    hot.on('emu86:rx', (data: { text?: unknown }) => {
+      if (typeof data?.text !== 'string' || data.text.length === 0) return;
+      const msg: MainToWorkerMessage = { type: 'rx', bytes: encoder.encode(data.text) };
+      worker.postMessage(msg);
+    });
+  }
 
   // Resolve the actual bytes from either the library (Uint8Array) or the
   // bundled URL (worker fetches). Using `imageBytes` for library entries
