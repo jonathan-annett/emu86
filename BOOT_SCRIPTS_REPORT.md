@@ -18,7 +18,7 @@
 
 - **Comments type harmlessly**: `#`-prefixed lines are sent verbatim — the ELKS shell ignores them — so scripts can carry annotations without runner syntax.
 - The runner is main-thread and image-agnostic; images that boot straight to `# ` (test bootopts) and images that boot to `login: ` both work with the same script, since the first line releases on either prompt.
-- Not verified in a real browser this session (needs a human at the dev server, per the usual pattern); the runner's contract is pinned by unit tests against real ELKS prompt strings.
+- **Field-verified on the live site** (Jonathan, 2026-07-14, deployed as version `e01ba0bd`): "worked first time" — image fetched through the /gh-assets proxy, boot script logged in and joined the TAN unattended. The runner's contract is additionally pinned by unit tests against real ELKS prompt strings.
 
 ## Test state
 
