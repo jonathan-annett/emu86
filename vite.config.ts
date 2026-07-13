@@ -1,5 +1,23 @@
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
+
+/**
+ * Build identity, stamped into the boot banner (web/main.ts) so a
+ * browser tab can say which build it runs — added when the stable/dev
+ * deploy tiers made "which version am I looking at?" a real question.
+ * Computed once per build (or dev-server start).
+ */
+function buildStamp(): string {
+  let hash = 'unknown';
+  try {
+    hash = execSync('git describe --always --dirty', { encoding: 'utf8' }).trim();
+  } catch {
+    // Not a git checkout (tarball build) — 'unknown' is honest.
+  }
+  const date = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  return `${hash} · ${date}Z`;
+}
 
 /**
  * Vite config for the browser harness.
@@ -95,6 +113,9 @@ function emu86AgentBridge(): Plugin {
 
 export default defineConfig({
   plugins: [emu86AgentBridge()],
+  define: {
+    __EMU86_BUILD__: JSON.stringify(buildStamp()),
+  },
   root: 'web',
   base: './',
   publicDir: 'public',

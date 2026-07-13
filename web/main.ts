@@ -25,6 +25,9 @@
 // web/**) sees them, not just tsconfig.web.json's `types` array.
 /// <reference types="vite/client" />
 
+/** Build stamp injected by vite define — see buildStamp() in vite.config.ts. */
+declare const __EMU86_BUILD__: string;
+
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 // Bundled by Vite (dev and build alike) — see the note in index.html
@@ -109,7 +112,8 @@ async function init(): Promise<void> {
   );
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);
-  term.writeln('emu86 — ELKS in the browser');
+  const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
+  term.writeln(`emu86 — ELKS in the browser [${buildLabel}]`);
   term.writeln(`Image: ${sourceLabel}`);
   if (settings.secondaryImageSource !== null) {
     const secondaryLabel = await describeImageSource(library, settings.secondaryImageSource);
