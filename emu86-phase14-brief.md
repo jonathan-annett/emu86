@@ -397,6 +397,21 @@ keystroke scripts above.**
    other way) backed by an IDB file store — no kernel fs work, and
    TAN tabs share it by construction. Wants M3d-era TCP listener
    maturity; revisit then.
+3. **Browser-defined block devices / virtual drives**
+   (`HUMANS_WISH_LIST.md`, 2026-07-15: browser declares "block device
+   #1 is 8192k"; guest runs `mkfs … && mount … /mnt/files`). Shortcut
+   that needs NO kernel driver: the machine already carries a
+   secondary disk (`/dev/hdb`, Phase 11 multi-disk) — so v1 is a
+   "create blank image (size N)" button in the library plus
+   **write-back persistence for the secondary slot** (the sector-diff
+   save from the golden-overlay design, applied to /dev/hdb). Stock
+   `mkfs /dev/hdb 8192; mount /dev/hdb /mnt` then gives a persistent
+   per-browser drive today. A literal `/dev/browser1` ELKS driver
+   (ioctl'd to browser storage) is the long-path version — a prime
+   in-VM-compile dogfooding target. Note: per-image IDB entries are
+   per-origin; TAN tabs on one origin share the library but must not
+   mount one writable image concurrently — same single-writer story
+   as the overlay design.
 
 **Back burner (Jonathan, 2026-07-14): guest UART ↔ real hardware over
 the browser.** Wire a guest serial port to a physical device so ELKS
