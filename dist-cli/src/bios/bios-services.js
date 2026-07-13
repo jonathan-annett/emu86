@@ -277,6 +277,28 @@ function chsToLba(geometry, ch, cl, dh) {
     const cylinder = ((cl & 0xC0) << 2) | (ch & 0xFF); // 10-bit
     return (cylinder * geometry.heads + dh) * geometry.sectorsPerTrack + (sector - 1);
 }
+/**
+ * Validate a CHS address against the drive's geometry, the way a real
+ * BIOS does — an out-of-range request must FAIL (CF=1, AH=04) rather
+ * than alias another LBA through the conversion arithmetic.
+ *
+ * This failure is load-bearing for guests: ELKS's floppy probe
+ * (`arch/i86/drivers/block/bioshd.c:probe_floppy`, sector_probe =
+ * {8, 9, 15, 18, 36}) reads increasing sector numbers on track 0 and
+ * keeps the largest that succeeds. Without this check a 1.44 MB
+ * (18-spt) floppy probes as 36 spt — reads of sectors 0-35 then map
+ * consistently by accident, but every access beyond track 0 lands 18
+ * sectors off, silently corrupting writes (found by Phase 14 M1, the
+ * first guest write to a probe floppy).
+ */
+function chsInRange(geometry, ch, cl, dh) {
+    const sector = cl & 0x3F;
+    const cylinder = ((cl & 0xC0) << 2) | (ch & 0xFF);
+    return (sector >= 1 &&
+        sector <= geometry.sectorsPerTrack &&
+        dh < geometry.heads &&
+        cylinder < geometry.cylinders);
+}
 const DISK_STATUS_OK = 0x00;
 const DISK_STATUS_BAD_COMMAND = 0x01;
 const DISK_STATUS_SECTOR_NOT_FOUND = 0x04;
@@ -320,6 +342,14 @@ export function int13Handler(cpu, ctx) {
                     setDiskStatus(cpu, bda, DISK_STATUS_BAD_COMMAND);
                 }
                 cpu.regs.AL = 0;
+                return;
+            }
+            // Reject CHS addresses outside the drive's geometry before any
+            // conversion — see chsInRange. No warn(): geometry-probe misses
+            // are normal guest traffic, not emulator faults.
+            if (!chsInRange(slot.disk.geometry, cpu.regs.CH, cpu.regs.CL, cpu.regs.DH)) {
+                cpu.regs.AL = 0;
+                setDiskStatus(cpu, bda, DISK_STATUS_SECTOR_NOT_FOUND);
                 return;
             }
             const count = cpu.regs.AL;

@@ -511,6 +511,7 @@ function nullProbeResult(): ProbeResult {
     kernelPanicked: false,
     truncated: false,
     instructionsUsed: 0,
+    probeDiskFinal: new Uint8Array(0),
   };
 }
 

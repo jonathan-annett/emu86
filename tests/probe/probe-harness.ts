@@ -202,6 +202,14 @@ export interface ProbeResult {
   readonly truncated: boolean;
   /** Total instructions consumed across boot and probe phases. */
   readonly instructionsUsed: number;
+  /**
+   * Post-run snapshot of the probe disk (Phase 14 M1). The guest can
+   * write build artifacts onto the mounted probe floppy; this captures
+   * whatever it flushed by the time the run ended (`sync` in the guest
+   * script before the sentinel/prompt is the caller's responsibility).
+   * Read files back with {@link readProbeDiskFile}.
+   */
+  readonly probeDiskFinal: Uint8Array;
 }
 
 /** Boot the VM, run a probe, capture its output. See module header for details. */
@@ -270,6 +278,9 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
       kernelPanicked: detectKernelPanic(txAfterBoot),
       truncated,
       instructionsUsed,
+      // Snapshot even on boot timeout — bootopts-path probes do all
+      // their work (including guest writes) during the boot phase.
+      probeDiskFinal: snapshotDisk(probeInMemDisk),
     };
   }
   const bootStdoutLength = txBytes.length;
@@ -300,7 +311,24 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
     kernelPanicked: detectKernelPanic(fullTranscript),
     truncated,
     instructionsUsed,
+    probeDiskFinal: snapshotDisk(probeInMemDisk),
   };
+}
+
+/**
+ * Copy a disk's full contents out through its public `readSector` API.
+ * `InMemoryDisk` deliberately has no bulk accessor (its backing store is
+ * private and `readSector` returns copies), so a sector loop is the
+ * supported way to snapshot it. 2,880 sectors × 512 B for the probe
+ * floppy — cheap relative to a boot.
+ */
+function snapshotDisk(disk: InMemoryDisk): Uint8Array {
+  const sectorSize = 512; // Disk contract: readSector returns 512-byte sectors.
+  const out = new Uint8Array(disk.sectorCount * sectorSize);
+  for (let lba = 0; lba < disk.sectorCount; lba++) {
+    out.set(disk.readSector(lba), lba * sectorSize);
+  }
+  return out;
 }
 
 /**
@@ -489,6 +517,9 @@ function bytesToString(bytes: readonly number[] | Uint8Array): string {
   return s;
 }
 
-// Re-export probe-disk types so callers only import from the harness module.
+// Re-export probe-disk types/helpers so callers only import from the
+// harness module. `readProbeDiskFile` pairs with `ProbeResult.probeDiskFinal`
+// for guest→host artifact extraction (Phase 14 M1).
 export type { ProbeDiskFile } from './probe-disk.js';
 export { FD1440_GEOMETRY };
+export { readProbeDiskFile } from './probe-disk.js';

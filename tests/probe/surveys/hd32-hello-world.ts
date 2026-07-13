@@ -1,5 +1,5 @@
 /**
- * HD32 hello-world compile probe (Phase 14, step 1).
+ * HD32 hello-world compile probe (Phase 14, step 1 + M1 extraction).
  *
  * Boots `hd32-minix.img`, ships a C source file + driver script to the
  * guest on the FAT12 probe floppy, and drives the on-disk C86 native
@@ -7,6 +7,13 @@
  * Phase 13.1 version probe) to compile and RUN a hello-world inside the
  * VM. The runner captures the guest transcript and classifies how far
  * the pipeline got.
+ *
+ * Phase 14 M1: the guest then exports its build artifacts back onto the
+ * mounted probe floppy (`cp` + `sync`); the harness snapshots the
+ * floppy's final bytes (`ProbeResult.probeDiskFinal`) and this module
+ * reads the artifacts out with `readProbeDiskFile()`. Fidelity is
+ * receipt-checked: the guest prints `md5sum /tmp/hello` and the host
+ * recomputes the md5 over the extracted bytes.
  *
  * # Launch path
  *
@@ -46,6 +53,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import {
   runProbe,
+  readProbeDiskFile,
   type ProbeResult,
 } from '../probe-harness.js';
 import {
@@ -147,6 +155,44 @@ export const HD32_HELLO_BUILD_SCRIPT = [
   'echo @@run@@',
   './hello',
   'echo rc=$?',
+  // ---- guest→host export (Phase 14 M1) ----
+  // md5 printed to the transcript is the fidelity receipt: the host
+  // recomputes it over the extracted bytes and they must match.
+  'echo @@md5@@',
+  'md5sum /tmp/hello',
+  'echo rc=$?',
+  // Copy artifacts onto the mounted probe floppy (8.3 names).
+  'echo @@export@@',
+  'cp /tmp/hello /mnt/hello.bin',
+  'cp /tmp/hello.o /mnt/hello.o',
+  'echo rc=$?',
+  // md5 of the copy ON the floppy, read back through the FAT driver —
+  // proves the in-guest copy is byte-perfect independent of flushing.
+  'echo @@md5fd@@',
+  'md5sum /mnt/hello.bin',
+  'echo rc=$?',
+  // `sync` alone does NOT flush FAT data clusters to the disk before
+  // the run ends (verified: dir entry + FAT chain arrive, data reads
+  // back as zeros). The reliable flush is umount — but this script is
+  // executing FROM /mnt, so the tail runs as a separate script exec'd
+  // from /tmp. `exec` replaces this shell; when the tail script exits,
+  // the init `-c` chain continues to its `exec /bin/sh` prompt.
+  'cp /mnt/unmnt.sh /tmp/unmnt.sh',
+  'cd /',
+  'exec sh /tmp/unmnt.sh',
+  '',
+].join('\n');
+
+/**
+ * Export tail: runs from /tmp so /mnt can be unmounted (the umount is
+ * what forces ELKS's buffer cache to write the FAT data clusters to
+ * the emulated disk). Shipped on the floppy alongside go.sh.
+ */
+export const HD32_HELLO_UNMOUNT_SCRIPT = [
+  'echo @@unmount@@',
+  'umount /mnt',
+  'echo rc=$?',
+  'sync',
   'echo @@artifacts@@',
   'ls -l /tmp',
   'echo __E__',
@@ -154,7 +200,21 @@ export const HD32_HELLO_BUILD_SCRIPT = [
 ].join('\n');
 
 /** Pipeline stages whose `rc=` lines the classifier checks, in order. */
-export const HELLO_STAGES: readonly string[] = ['copy', 'cpp', 'c86', 'as', 'ld', 'run'];
+export const HELLO_STAGES: readonly string[] = [
+  'copy',
+  'cpp',
+  'c86',
+  'as',
+  'ld',
+  'run',
+  'md5',
+  'export',
+  'md5fd',
+  'unmount',
+];
+
+/** Artifacts the guest exports to the probe floppy for host extraction. */
+export const HELLO_EXPORT_ARTIFACTS: readonly string[] = ['hello.bin', 'hello.o'];
 
 export interface SectionMap {
   readonly [name: string]: string;
@@ -184,6 +244,18 @@ export interface Hd32HelloWorldResult {
   readonly stages: readonly StageStatus[];
   /** True if the `run` section contains {@link HELLO_EXPECTED_OUTPUT}. */
   readonly helloRan: boolean;
+  /**
+   * Artifacts extracted from the probe floppy's post-run snapshot
+   * ({@link HELLO_EXPORT_ARTIFACTS}); `bytes: null` = not found on disk.
+   */
+  readonly extracted: readonly ExtractedArtifact[];
+  /** md5 the guest printed for /tmp/hello, or null if unparsable. */
+  readonly guestMd5: string | null;
+}
+
+export interface ExtractedArtifact {
+  readonly name: string;
+  readonly bytes: Uint8Array | null;
 }
 
 interface RunOptions {
@@ -219,6 +291,8 @@ export async function runHd32HelloWorld(
       sections: {},
       stages: [],
       helloRan: false,
+      extracted: [],
+      guestMd5: null,
     };
   }
 
@@ -233,7 +307,10 @@ export async function runHd32HelloWorld(
     probe: {
       filename: 'go.sh',
       script: opts.guestScript ?? HD32_HELLO_BUILD_SCRIPT,
-      extraFiles: opts.extraFiles ?? [{ name: 'hello.c', content: HELLO_C_SOURCE }],
+      extraFiles: opts.extraFiles ?? [
+        { name: 'hello.c', content: HELLO_C_SOURCE },
+        { name: 'unmnt.sh', content: HD32_HELLO_UNMOUNT_SCRIPT },
+      ],
     },
     bootInstructionBudget: opts.bootInstructionBudget ?? HELLO_BOOT_BUDGET,
     timeoutInstructions: opts.timeoutInstructions ?? HELLO_TIMEOUT,
@@ -245,6 +322,12 @@ export async function runHd32HelloWorld(
   const stages = classifyStages(sections);
   const runSection = sections['run'] ?? '';
 
+  // Pull exported artifacts out of the probe floppy's final state.
+  const extracted: ExtractedArtifact[] = HELLO_EXPORT_ARTIFACTS.map((name) => ({
+    name,
+    bytes: readProbeDiskFile(probe.probeDiskFinal, name),
+  }));
+
   return {
     imagePath,
     fixtureMissing: false,
@@ -254,7 +337,15 @@ export async function runHd32HelloWorld(
     sections,
     stages,
     helloRan: runSection.includes(HELLO_EXPECTED_OUTPUT),
+    extracted,
+    guestMd5: parseGuestMd5(sections['md5'] ?? ''),
   };
+}
+
+/** Parse the 32-hex-digit md5 from the guest's `md5sum /tmp/hello` output. */
+export function parseGuestMd5(md5Section: string): string | null {
+  const m = /\b([0-9a-f]{32})\b/.exec(md5Section);
+  return m !== null && m[1] !== undefined ? m[1] : null;
 }
 
 /**
