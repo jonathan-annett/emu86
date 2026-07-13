@@ -61,6 +61,17 @@ export const SERIAL_RUNLEVEL_LINE = '3';
 export const NE0_BOOTOPTS_LINE = 'ne0=5,0x300,,0x80';
 
 /**
+ * Nameserver the patch appends (Phase 14 M3c). ELKS's resolver
+ * (`libc/net/in_resolv.c`) defaults to OpenDNS 208.67.222.222 —
+ * unreachable until M3d's off-subnet TCP exists — overridden by the
+ * `DNSIP` env var. Bare `key=value` bootopts words become init's
+ * environment and reach login shells (the TAN's LOCALIP precedent),
+ * so `nslookup example.com` and telnet-by-hostname hit the worker's
+ * DNS pseudo-host at 10.0.2.3 with no explicit server argument.
+ */
+export const DNSIP_BOOTOPTS_LINE = 'DNSIP=10.0.2.3';
+
+/**
  * Locate the /bootopts block. Returns the byte offset of the marker, or
  * null when the image has no marker (non-ELKS images, or a marker so
  * close to the end that a full 1024-byte block can't follow — treated
@@ -101,12 +112,13 @@ export function hasSerialConsole(image: Uint8Array): boolean {
 
 /**
  * Return a copy of `image` whose /bootopts block gained
- * {@link SERIAL_CONSOLE_LINE}, {@link NE0_BOOTOPTS_LINE}, and
- * {@link SERIAL_RUNLEVEL_LINE}. Existing lines are preserved verbatim
- * except active `console=`/`ne0=` lines and bare runlevel digits,
- * which are dropped so exactly one claim of each remains. Returns
- * null when the image has no /bootopts block (caller boots it
- * unpatched — nothing sensible to edit).
+ * {@link SERIAL_CONSOLE_LINE}, {@link NE0_BOOTOPTS_LINE},
+ * {@link DNSIP_BOOTOPTS_LINE}, and {@link SERIAL_RUNLEVEL_LINE}.
+ * Existing lines are preserved verbatim except active
+ * `console=`/`ne0=`/`DNSIP=` lines and bare runlevel digits, which
+ * are dropped so exactly one claim of each remains. Returns null
+ * when the image has no /bootopts block (caller boots it unpatched —
+ * nothing sensible to edit).
  *
  * Throws if the resulting text exceeds the 1024-byte region — can only
  * happen on an image whose block is already nearly full.
@@ -133,11 +145,19 @@ export function patchBootoptsForSerial(
     .map((k) => `${k}=`);
   const kept = lines.filter((line) => {
     const t = line.trim();
-    if (t.startsWith('console=') || t.startsWith('ne0=') || /^[0-9]$/.test(t)) return false;
+    if (
+      t.startsWith('console=') ||
+      t.startsWith('ne0=') ||
+      t.startsWith('DNSIP=') ||
+      /^[0-9]$/.test(t)
+    ) {
+      return false;
+    }
     return !extraKeys.some((k) => t.startsWith(k));
   });
   kept.push(SERIAL_CONSOLE_LINE);
   kept.push(NE0_BOOTOPTS_LINE);
+  kept.push(DNSIP_BOOTOPTS_LINE);
   kept.push(...extraLines);
   kept.push(SERIAL_RUNLEVEL_LINE);
 

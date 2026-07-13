@@ -14,6 +14,7 @@
 export const ETHERTYPE_IPV4 = 0x0800;
 export const ETHERTYPE_ARP = 0x0806;
 export const IPPROTO_ICMP = 1;
+export const IPPROTO_TCP = 6;
 export const ICMP_ECHO_REQUEST = 8;
 export const ICMP_ECHO_REPLY = 0;
 export const ARP_OP_REQUEST = 1;
@@ -171,4 +172,90 @@ export function parseIcmpEcho(payload) {
         seq: ((payload[6] ?? 0) << 8) | (payload[7] ?? 0),
         payload: payload.subarray(8),
     };
+}
+// ============================================================
+// TCP (Phase 14 M3c)
+// ============================================================
+//
+// Counterparty is ktcp's `tcp.c`/`tcp_output.c`, which validates the
+// checksum over the pseudo-header ("BAD CHECKSUM" printf + drop) and
+// drops any segment whose seqnum isn't exactly rcv_nxt — so builders
+// carry real checksums and callers must sequence precisely. ktcp puts
+// an MSS option in its SYNs (data offset 6) but never parses options
+// on segments it receives, so ours are bare 20-byte headers.
+export const TCP_FIN = 0x01;
+export const TCP_SYN = 0x02;
+export const TCP_RST = 0x04;
+export const TCP_PSH = 0x08;
+export const TCP_ACK = 0x10;
+/**
+ * TCP checksum (RFC 793): RFC 1071 sum over the 12-byte IPv4
+ * pseudo-header (src, dst, zero, protocol 6, TCP length) followed by
+ * the segment bytes with the checksum field taken as zero.
+ */
+export function tcpChecksum(srcIp, dstIp, segment) {
+    const buf = new Uint8Array(12 + segment.length);
+    buf.set(srcIp, 0);
+    buf.set(dstIp, 4);
+    buf[8] = 0;
+    buf[9] = IPPROTO_TCP;
+    buf[10] = (segment.length >> 8) & 0xff;
+    buf[11] = segment.length & 0xff;
+    buf.set(segment, 12);
+    buf[12 + 16] = 0; // checksum field zeroed for computation
+    buf[12 + 17] = 0;
+    return internetChecksum(buf, 0, buf.length);
+}
+/** Build a TCP segment (bare 20-byte header, real checksum). */
+export function buildTcpSegment(srcIp, dstIp, seg) {
+    const p = new Uint8Array(20 + seg.payload.length);
+    p[0] = (seg.srcPort >> 8) & 0xff;
+    p[1] = seg.srcPort & 0xff;
+    p[2] = (seg.dstPort >> 8) & 0xff;
+    p[3] = seg.dstPort & 0xff;
+    writeU32(p, 4, seg.seq);
+    writeU32(p, 8, seg.ack);
+    p[12] = 5 << 4; // data offset 5 words, no options
+    p[13] = seg.flags & 0x3f;
+    p[14] = (seg.window >> 8) & 0xff;
+    p[15] = seg.window & 0xff;
+    // p[16..17] checksum below; p[18..19] urgent pointer stays 0
+    p.set(seg.payload, 20);
+    const cks = tcpChecksum(srcIp, dstIp, p);
+    p[16] = (cks >> 8) & 0xff;
+    p[17] = cks & 0xff;
+    return p;
+}
+/**
+ * Parse a TCP segment (an IPv4 payload). Options are skipped — ktcp's
+ * SYNs carry MSS. Null on truncation or a failed checksum (the src/dst
+ * IPs are needed for the pseudo-header).
+ */
+export function parseTcpSegment(srcIp, dstIp, bytes) {
+    if (bytes.length < 20)
+        return null;
+    const dataOff = ((bytes[12] ?? 0) >> 4) * 4;
+    if (dataOff < 20 || bytes.length < dataOff)
+        return null;
+    if (tcpChecksum(srcIp, dstIp, bytes) !== (((bytes[16] ?? 0) << 8) | (bytes[17] ?? 0))) {
+        return null;
+    }
+    return {
+        srcPort: ((bytes[0] ?? 0) << 8) | (bytes[1] ?? 0),
+        dstPort: ((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0),
+        seq: readU32(bytes, 4),
+        ack: readU32(bytes, 8),
+        flags: (bytes[13] ?? 0) & 0x3f,
+        window: ((bytes[14] ?? 0) << 8) | (bytes[15] ?? 0),
+        payload: bytes.subarray(dataOff),
+    };
+}
+function writeU32(p, offset, value) {
+    p[offset] = (value >>> 24) & 0xff;
+    p[offset + 1] = (value >>> 16) & 0xff;
+    p[offset + 2] = (value >>> 8) & 0xff;
+    p[offset + 3] = value & 0xff;
+}
+function readU32(p, offset) {
+    return ((((p[offset] ?? 0) << 24) | ((p[offset + 1] ?? 0) << 16) | ((p[offset + 2] ?? 0) << 8) | (p[offset + 3] ?? 0)) >>> 0);
 }

@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   BOOTOPTS_MARKER,
   BOOTOPTS_SIZE,
+  DNSIP_BOOTOPTS_LINE,
   NE0_BOOTOPTS_LINE,
   SERIAL_CONSOLE_LINE,
   SERIAL_RUNLEVEL_LINE,
@@ -91,15 +92,16 @@ describe('bootopts-patch', () => {
     expect(lines[0]).toBe('## /bootopts 1023 max');
     expect(lines).toContain('hma=kernel');
     expect(lines).toContain('#ne0=12,0x300,,0x80'); // commented example survives
-    expect(lines[lines.length - 3]).toBe(SERIAL_CONSOLE_LINE);
-    expect(lines[lines.length - 2]).toBe(NE0_BOOTOPTS_LINE);
+    expect(lines[lines.length - 4]).toBe(SERIAL_CONSOLE_LINE);
+    expect(lines[lines.length - 3]).toBe(NE0_BOOTOPTS_LINE);
+    expect(lines[lines.length - 2]).toBe(DNSIP_BOOTOPTS_LINE);
     expect(lines[lines.length - 1]).toBe(SERIAL_RUNLEVEL_LINE);
     expect(hasSerialConsole(patched)).toBe(true);
   });
 
-  it('drops competing active console=/runlevel lines, keeps commented ones', () => {
+  it('drops competing active console=/DNSIP=/runlevel lines, keeps commented ones', () => {
     const image = makeImage(
-      `${BOOTOPTS_MARKER}\nconsole=tty1\n#console=old\n1\n`,
+      `${BOOTOPTS_MARKER}\nconsole=tty1\n#console=old\nDNSIP=1.2.3.4\n1\n`,
       512,
     );
     const patched = patchBootoptsForSerial(image);
@@ -109,6 +111,8 @@ describe('bootopts-patch', () => {
     expect(lines).not.toContain('console=tty1');
     expect(lines).toContain('#console=old');
     expect(lines).toContain(SERIAL_CONSOLE_LINE);
+    // Old nameserver claim replaced by ours, exactly once.
+    expect(lines.filter((l) => l.startsWith('DNSIP='))).toEqual([DNSIP_BOOTOPTS_LINE]);
     // Old runlevel word replaced by ours, exactly once.
     expect(lines.filter((l) => /^[0-9]$/.test(l.trim()))).toEqual([SERIAL_RUNLEVEL_LINE]);
   });

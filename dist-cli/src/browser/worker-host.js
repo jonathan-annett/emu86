@@ -43,6 +43,7 @@ import { installCGAMirror, } from '../diagnostics/cga-mirror.js';
 import { hasSerialConsole, patchBootoptsForSerial, } from './bootopts-patch.js';
 import { EthernetSwitch } from '../net/switch.js';
 import { LanGateway } from '../net/gateway.js';
+import { DnsHost, dohResolve } from '../net/dns.js';
 import { TabAreaNetwork } from '../net/tan.js';
 const SIZE_TABLE = [
     // ---- Floppies ----
@@ -101,6 +102,7 @@ export class WorkerHost {
     #network = null;
     #nicPort = null;
     #gateway = null;
+    #dns = null;
     #tanConfig = null;
     #tan = null;
     #stopping = false;
@@ -134,6 +136,14 @@ export class WorkerHost {
      */
     get gateway() {
         return this.#gateway;
+    }
+    /**
+     * The LAN's DNS pseudo-host at 10.0.2.3 (Phase 14 M3c) — answers
+     * the guest's DNS-over-TCP queries via DoH pass-through. Null
+     * before the first boot.
+     */
+    get dns() {
+        return this.#dns;
     }
     /** The Tab Area Network membership (M3-tabs), if configured. */
     get tan() {
@@ -321,6 +331,13 @@ export class WorkerHost {
         const gateway = new LanGateway({ welcomePing: true });
         gateway.attachTo(network);
         this.#gateway = gateway;
+        // M3c: the DNS pseudo-host at 10.0.2.3 — the guest's DNS-over-TCP
+        // queries (nslookup, telnet-by-hostname) resolve through DoH. The
+        // bootopts patch stamps DNSIP=10.0.2.3 so the stock resolver finds
+        // it without an explicit server argument.
+        const dns = new DnsHost({ resolve: dohResolve() });
+        dns.attachTo(network);
+        this.#dns = dns;
         // M3-tabs: bridge this LAN onto the Tab Area Network.
         if (this.#tan !== null)
             this.#tan.attach(network);
@@ -456,6 +473,10 @@ export class WorkerHost {
         if (this.#gateway) {
             this.#gateway.detach();
             this.#gateway = null;
+        }
+        if (this.#dns) {
+            this.#dns.detach();
+            this.#dns = null;
         }
         // TAN survives teardown (identity + defence persist across
         // reboots); only the trunk into the dying switch unplugs.
