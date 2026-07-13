@@ -428,7 +428,32 @@ keystroke scripts above.**
    other way) backed by an IDB file store — no kernel fs work, and
    TAN tabs share it by construction. Wants M3d-era TCP listener
    maturity; revisit then.
-3. **Browser-defined block devices / virtual drives**
+3. **CodeMirror editor as a guest-visible file** (Jonathan,
+   2026-07-15: an editor pane on the page that ELKS sees as
+   `/mnt/editor/text` — `cat` shows the buffer, `grep` searches it,
+   `cp /mnt/editor/text /home/newfile` saves). This is the
+   huxley/lite integration made literal. Three rungs, honestly
+   distinct:
+   (a) **Buildable now, no mount illusion**: load = inject
+   `cat > /tmp/text <<EOF` + buffer through the RX path (boot-script
+   machinery); save = guest cats the file between sentinel markers,
+   browser captures from TX (the M1 transcript-extraction pattern).
+   A `webedit get/put` pair of shell one-liners makes it feel native.
+   (b) **FTP pseudo-host** (needs only the existing M3c TCP listener):
+   editor buffer served as a file by a browser-side ftpd at
+   10.0.2.4 — guest `ftp` get/put; still not a mount.
+   (c) **The real thing**: a tiny ELKS filesystem driver
+   ("browserfs") speaking a simple file-op protocol to a
+   port-mapped device the browser answers — genuine
+   `mount /dev/browser0 /mnt/editor`, live buffer reads. Kernel C,
+   compiled in-VM: alongside ktcp-ping, THE flagship dogfooding
+   target. Note: a live shared file has cache-coherency questions
+   (kernel buffer cache vs a buffer that changes under it) — rung
+   (c)'s design must treat reads as uncached or revalidate-on-open.
+   Dependency note: CodeMirror would be a new runtime dep for
+   `web/` — precedented by @xterm/xterm, but it's a Jonathan call
+   per hard rule 2.
+4. **Browser-defined block devices / virtual drives**
    (`HUMANS_WISH_LIST.md`, 2026-07-15: browser declares "block device
    #1 is 8192k"; guest runs `mkfs … && mount … /mnt/files`). Shortcut
    that needs NO kernel driver: the machine already carries a
