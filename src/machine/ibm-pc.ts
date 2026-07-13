@@ -16,6 +16,7 @@ import { BasicIOBus } from '../io/io-bus.js';
 import { PagedMemory } from '../memory/paged-memory.js';
 import type { PageStore } from '../memory/page-store.js';
 import { RunLoop, type RunLoopOptions, type RunResult } from '../runtime/run-loop.js';
+import { RTC146818 } from '../devices/rtc.js';
 import { Clock } from '../timing/clock.js';
 import type { Console } from '../console/console.js';
 import { InMemoryConsole } from '../console/console.js';
@@ -208,6 +209,13 @@ export class IBMPCMachine {
    * select it with a bootopts `ne0=5,0x300,,0x80` line.
    */
   readonly nic: NE2000;
+  /**
+   * MC146818 CMOS RTC at 0x70/0x71 (RTC addendum, 2026-07-15), serving
+   * time from `hostClock` — so the stock image's `clock -s -u` in
+   * rc.sys sets the guest date to the host's at every boot. `null`
+   * only when the BIOS is disabled (no hostClock to serve from).
+   */
+  readonly rtc: RTC146818 | null;
   readonly runLoop: RunLoop;
   /**
    * Trap registry holding every BIOS service handler. Defined when
@@ -372,6 +380,16 @@ export class IBMPCMachine {
     this.diskClass = diskClassRef;
     this.secondaryDiskClass = secondaryDiskClassRef;
 
+    // ---- CMOS RTC at 0x70/0x71 (RTC addendum) ----
+    // Rides with the BIOS block because it serves time from hostClock.
+    // Stock ELKS runs `clock -s -u` from rc.sys and adopts it at boot.
+    let rtcRef: RTC146818 | null = null;
+    if (clockRef !== null) {
+      rtcRef = new RTC146818(clockRef);
+      rtcRef.registerOn(this.bus);
+    }
+    this.rtc = rtcRef;
+
     // ---- CPU (needs memory + bus + controller, and trap registry if BIOS is on) ----
     this.cpu = traps !== null
       ? new CPU8086(this.memory, this.bus, this.controller, traps)
@@ -413,6 +431,7 @@ export class IBMPCMachine {
     this.controller.reset();
     this.pic.reset();
     this.pit.reset();
+    this.rtc?.reset();
     this.keyboardController.reset();
     this.uart.reset();
     this.clock.reset();
