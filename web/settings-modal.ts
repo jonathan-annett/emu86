@@ -70,6 +70,12 @@ export interface SettingsModalDeps {
    * the user changes the secondary selection.
    */
   bootedSecondary: { kind: 'library'; id: string } | null;
+  /**
+   * CPU-speed live toggle (pacing milestone): called on change so
+   * main.ts can post a set-speed message to the running worker —
+   * unlike image sources, speed applies without a reload.
+   */
+  onCpuSpeedChange?: (mode: 'authentic' | 'turbo') => void;
 }
 
 /** 100 MB cap on local uploads — aligned with GITHUB_DOWNLOAD_MAX_BYTES.
@@ -235,6 +241,38 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     });
     themeSection.body.appendChild(themeSelect);
     host.appendChild(themeSection.el);
+
+    /* CPU speed (pacing milestone) -------------------------------- */
+    const speedSection = section('CPU speed');
+    const speedHint = document.createElement('div');
+    speedHint.className = 'emu86-hint';
+    speedHint.textContent =
+      'Authentic caps the CPU at a real 4.77 MHz 8086 (games run true). ' +
+      'Turbo uncaps it for heavy work like in-VM compiles — the clock ' +
+      'stays wall-true either way. Applies immediately.';
+    speedSection.body.appendChild(speedHint);
+    const speedSelect = document.createElement('select');
+    speedSelect.className = 'emu86-input-select';
+    speedSelect.setAttribute('aria-label', 'CPU speed');
+    for (const [value, label] of [
+      ['authentic', 'Authentic (4.77 MHz)'],
+      ['turbo', 'Turbo (uncapped)'],
+    ] as const) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      if (value === settingsAtRender.cpuSpeed) opt.selected = true;
+      speedSelect.appendChild(opt);
+    }
+    speedSelect.addEventListener('change', () => {
+      const mode = speedSelect.value === 'turbo' ? 'turbo' : 'authentic';
+      const cur = deps.getSettings();
+      if (cur.cpuSpeed === mode) return;
+      deps.onChange({ ...cur, cpuSpeed: mode });
+      deps.onCpuSpeedChange?.(mode);
+    });
+    speedSection.body.appendChild(speedSelect);
+    host.appendChild(speedSection.el);
 
     /* Image source ----------------------------------------------- */
     const imageSection = section('Boot image');

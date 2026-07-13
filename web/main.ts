@@ -132,6 +132,10 @@ async function init(): Promise<void> {
     name: 'emu86-worker',
   });
 
+  // Latest pacing stats (worker posts ~1/sec) — read by the console
+  // logger below and the dev agent bridge's /agent/stats endpoint.
+  let latestStats: WorkerToMainMessage & { type: 'stats' } | null = null;
+
   // Boot script (Phase 14 — autoexec): a prompt-aware runner types the
   // active script into the console as the guest becomes ready. Fed from
   // the same TX stream the terminal renders; sends through the same rx
@@ -172,6 +176,17 @@ async function init(): Promise<void> {
       term.writeln(`[TAN address: 10.0.2.${msg.hostOctet}]`);
       return;
     }
+    if (msg.type === 'stats') {
+      // Pacing telemetry (~1/sec). Console-only by design — the numbers
+      // are for the pacing report and the dev /agent/stats endpoint.
+      latestStats = msg;
+      console.debug(
+        `[emu86] ${msg.instrPerSec.toLocaleString()} instr/s ` +
+          `(${(msg.realTimeRatio * 100).toFixed(0)}% of 4.77 MHz), ` +
+          `${msg.mode}, batch ${msg.batch}`,
+      );
+      return;
+    }
     if (msg.type === 'halted') {
       term.writeln('');
       term.writeln(`[emu86: halted — ${msg.reason}]`);
@@ -207,6 +222,10 @@ async function init(): Promise<void> {
       if (msg.type === 'tx') {
         hot.send('emu86:tx', { text: decoder.decode(msg.bytes) });
       }
+      if (msg.type === 'stats') {
+        // Mirror pacing stats to the dev server for GET /agent/stats.
+        hot.send('emu86:stats', { stats: msg });
+      }
     });
     hot.on('emu86:rx', (data: { text?: unknown }) => {
       if (typeof data?.text !== 'string' || data.text.length === 0) return;
@@ -230,6 +249,8 @@ async function init(): Promise<void> {
   if (session.tanHostOctet !== null) {
     boot.config.tanPreferredOctet = session.tanHostOctet;
   }
+  // Pacing: initial CPU speed from settings.
+  boot.config.cpuSpeed = settings.cpuSpeed;
   worker.postMessage(boot);
 
   // Mount the settings UI. `bootedFrom` and `bootedSecondary` capture the
@@ -244,6 +265,11 @@ async function init(): Promise<void> {
     },
     bootedFrom: settings.imageSource,
     bootedSecondary: settings.secondaryImageSource,
+    // Speed applies live: forward the toggle to the running worker.
+    onCpuSpeedChange: (mode) => {
+      const msg: MainToWorkerMessage = { type: 'set-speed', mode };
+      worker.postMessage(msg);
+    },
   });
 
   // Page unload cleans up workers automatically; no manual teardown needed.

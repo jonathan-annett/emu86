@@ -12,6 +12,10 @@
  * round-trip cleanly as raw octets.
  */
 
+import type { CpuSpeedMode } from './pacing.js';
+
+export type { CpuSpeedMode };
+
 /**
  * CHS geometries we recognise when inferring from image size. Mirrors
  * `tools/elks/run-serial.ts`'s floppy table, plus ELKS HD shapes added in
@@ -88,6 +92,13 @@ export interface BootConfig {
    * {@link TanIdentityMessage}.
    */
   tanPreferredOctet?: number;
+  /**
+   * Initial CPU speed (pacing milestone). `'authentic'` caps execution
+   * at a real 4.77 MHz 8086; `'turbo'` uncaps instructions while the
+   * clock stays wall-true. Default authentic. Live changes ride
+   * {@link SetSpeedMessage}.
+   */
+  cpuSpeed?: CpuSpeedMode;
 }
 
 // ============================================================
@@ -108,7 +119,17 @@ export interface ResetMessage {
   type: 'reset';
 }
 
-export type MainToWorkerMessage = BootMessage | RxMessage | ResetMessage;
+/** Live CPU-speed toggle from the settings modal (pacing milestone). */
+export interface SetSpeedMessage {
+  type: 'set-speed';
+  mode: CpuSpeedMode;
+}
+
+export type MainToWorkerMessage =
+  | BootMessage
+  | RxMessage
+  | ResetMessage
+  | SetSpeedMessage;
 
 // ============================================================
 // Worker → Main
@@ -144,9 +165,26 @@ export interface TanIdentityMessage {
   hostOctet: number;
 }
 
+/**
+ * Rolling throughput stats, ~1/sec while the paced loop runs (pacing
+ * milestone). `realTimeRatio` = instrPerSec / 4.77M — 1.0 means a full
+ * authentic 8086's worth of CPU delivered; `cyclesPerSec` should sit
+ * near 4.77M whenever the clock is keeping wall pace.
+ */
+export interface StatsMessage {
+  type: 'stats';
+  instrPerSec: number;
+  cyclesPerSec: number;
+  realTimeRatio: number;
+  mode: CpuSpeedMode;
+  /** Current adaptive per-turn instruction batch. */
+  batch: number;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
   | HaltedMessage
   | ErrorMessage
-  | TanIdentityMessage;
+  | TanIdentityMessage
+  | StatsMessage;

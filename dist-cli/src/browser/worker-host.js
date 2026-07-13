@@ -45,6 +45,7 @@ import { EthernetSwitch } from '../net/switch.js';
 import { LanGateway } from '../net/gateway.js';
 import { DnsHost, dohResolve } from '../net/dns.js';
 import { TabAreaNetwork } from '../net/tan.js';
+import { AUTHENTIC_CYCLES_PER_MS, RealTimePacer, } from './pacing.js';
 const SIZE_TABLE = [
     // ---- Floppies ----
     { bytes: 1474560, geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 18 }, diskClass: 'floppy' }, // 1.44 MB
@@ -108,6 +109,15 @@ export class WorkerHost {
     #stopping = false;
     /** Last in-flight async work — boot fetch + autoRun loop. */
     #pending = Promise.resolve();
+    // ---- Real-time pacing (pacing milestone) ----
+    #pacerNow;
+    #pacer;
+    /** Adaptive per-turn instruction batch — targets ~4 ms of stepping. */
+    #adaptiveBatch;
+    // Rolling stats window (posted ~1/sec while the paced loop runs).
+    #statsWindowStart = 0;
+    #statsInstructions = 0;
+    #statsCycles = 0;
     constructor(opts) {
         this.#post = opts.post;
         this.#fetchImage = opts.fetchImage;
@@ -116,6 +126,9 @@ export class WorkerHost {
         this.#haltSpinCycles = opts.haltSpinCycles ?? 1000;
         this.#maxHaltSpins = opts.maxHaltSpins ?? 1000;
         this.#tanConfig = opts.tan ?? null;
+        this.#pacerNow = opts.pacerTimeSource ?? (() => performance.now());
+        this.#pacer = new RealTimePacer({ now: this.#pacerNow });
+        this.#adaptiveBatch = this.#batchSize;
     }
     /** Underlying machine. Tests poke this for low-level inspection. */
     get machine() {
@@ -162,6 +175,11 @@ export class WorkerHost {
         if (msg.type === 'rx') {
             if (this.#console)
                 this.#console.injectInput(msg.bytes);
+            return;
+        }
+        if (msg.type === 'set-speed') {
+            // Live toggle from the settings modal — takes effect next turn.
+            this.#pacer.setMode(msg.mode);
             return;
         }
         if (msg.type === 'reset') {
@@ -267,42 +285,160 @@ export class WorkerHost {
         }
         if (!this.#autoRun)
             return;
-        // Production async loop. Yields to the worker's macrotask queue between
-        // batches so inbound RX messages can be delivered. Without the yield,
-        // postMessage events would queue forever behind a synchronous run loop.
-        while (!this.#stopping && this.#machine !== null) {
-            // DNS resolve in flight: stall the machine (and with it the PIT)
-            // until the DoH fetch settles, so the guest's 2-guest-second
-            // resolver alarm can't expire mid-fetch. Invisible to the guest;
-            // see DnsHost.pendingResolves for the full rationale.
+        await this.#runPacedLoop();
+    }
+    /**
+     * Production run loop (pacing milestone, 2026-07-14). Real time, not
+     * instruction count, drives the virtual clock: each turn converts wall
+     * elapsed into a cycle budget at 4.77 MHz, executes instructions
+     * against it (authentic mode: at most one instruction per cycle, so
+     * the CPU never outruns a real 8086; turbo: adaptive batch regardless,
+     * clock still wall-true), then advances the clock by the elapsed
+     * cycles in PIT-safe slices. Field impetus: `sleep 30` completed in
+     * ~1 wall second under instruction pacing (idle halt spins race), and
+     * games ran at a fraction of speed under load. After this, guest
+     * seconds are wall seconds in both directions.
+     *
+     * Idle (HLT with IF set) is legitimate here — no halt-spin budget or
+     * bail; the clock keeps wall pace and the next PIT edge wakes the CPU
+     * on a later turn. HLT with interrupts hard-disabled is a dead
+     * machine and posts `halted`.
+     *
+     * The network fabric is never gated by any of this (Jonathan: "only
+     * the CPU clock gets capped — never the networking"): frames inject
+     * and pseudo-hosts answer whenever they fire, including during the
+     * DNS stall and between turns.
+     *
+     * Yields between turns use a MessageChannel ping (unclamped, immune
+     * to background-tab timer throttling — TAN servers in hidden tabs
+     * stay live), so inbound RX/frames keep flowing.
+     */
+    async #runPacedLoop() {
+        this.#pacer.skip(); // boot/fetch wall time is not guest time
+        this.#statsWindowStart = this.#pacerNow();
+        this.#statsInstructions = 0;
+        this.#statsCycles = 0;
+        while (!this.#stopping && this.#machine !== null && this.#console !== null) {
+            const machine = this.#machine;
+            // DNS resolve in flight: stall the machine (and its clock) until
+            // the DoH fetch settles — with honest pacing this is bounded
+            // belt-and-braces (a slow fetch can still outlast the guest's 2 s
+            // resolver alarm). Stalled wall time must not become guest time.
             if (this.#dns !== null && this.#dns.pendingResolves > 0) {
+                this.#pacer.skip();
                 await yieldMacrotask();
                 continue;
             }
-            const result = this.runUntil(this.#batchSize);
-            if (result.reason !== 'instruction-limit' &&
-                result.reason !== 'stopped') {
-                this.#post({ type: 'halted', reason: result.reason });
+            this.#drainRx(this.#console, machine);
+            const cycles = this.#pacer.cyclesDue();
+            const budget = Math.min(this.#adaptiveBatch, this.#pacer.instructionBudget(cycles));
+            const t0 = this.#pacerNow();
+            const turn = this.#stepInstructions(machine, budget);
+            const stepMs = this.#pacerNow() - t0;
+            if (turn.reason === 'error') {
+                this.#flushTx();
+                this.#post({ type: 'halted', reason: 'error' });
                 return;
             }
-            if (result.reason === 'stopped')
+            if (turn.reason === 'dead') {
+                this.#flushTx();
+                this.#post({ type: 'halted', reason: 'halted' });
                 return;
+            }
+            this.#pacer.advanceClock(machine.clock, cycles);
+            this.#flushTx();
+            // Adaptive batch: target ~4 ms of stepping per budget-bound turn so
+            // yields stay frequent without macrotask overhead dominating.
+            if (budget > 0 && turn.executed >= budget) {
+                if (stepMs < 2 && this.#adaptiveBatch < 250_000) {
+                    this.#adaptiveBatch = Math.min(250_000, Math.ceil(this.#adaptiveBatch * 1.25));
+                }
+                else if (stepMs > 6 && this.#adaptiveBatch > 2_000) {
+                    this.#adaptiveBatch = Math.max(2_000, Math.floor(this.#adaptiveBatch / 1.25));
+                }
+            }
+            this.#statsInstructions += turn.executed;
+            this.#statsCycles += cycles;
+            const now = this.#pacerNow();
+            const windowMs = now - this.#statsWindowStart;
+            if (windowMs >= 1000) {
+                const instrPerSec = Math.round((this.#statsInstructions / windowMs) * 1000);
+                this.#post({
+                    type: 'stats',
+                    instrPerSec,
+                    cyclesPerSec: Math.round((this.#statsCycles / windowMs) * 1000),
+                    realTimeRatio: instrPerSec / (AUTHENTIC_CYCLES_PER_MS * 1000),
+                    mode: this.#pacer.mode,
+                    batch: this.#adaptiveBatch,
+                });
+                this.#statsWindowStart = now;
+                this.#statsInstructions = 0;
+                this.#statsCycles = 0;
+            }
             await yieldMacrotask();
         }
+    }
+    /**
+     * Execute up to `budget` instructions. Returns early on idle (HLT
+     * awaiting an interrupt — the caller's clock advance will bring the
+     * next PIT edge), dead (HLT with IF clear and no NMI pending: nothing
+     * can ever wake it; no device generates NMIs today), or error (posted
+     * before returning). Never advances the clock — that's the pacer's.
+     */
+    #stepInstructions(machine, budget) {
+        const cpu = machine.cpu;
+        let executed = 0;
+        try {
+            while (executed < budget) {
+                if (cpu.halted) {
+                    const ctrl = cpu.intCtrl;
+                    const canService = ctrl.hasNMI() ||
+                        (ctrl.hasMaskable() && cpu.flags.IF && !cpu.interruptInhibit);
+                    if (!canService) {
+                        return cpu.flags.IF || ctrl.hasNMI()
+                            ? { executed, reason: 'idle' }
+                            : { executed, reason: 'dead' };
+                    }
+                }
+                cpu.step();
+                executed++;
+            }
+        }
+        catch (err) {
+            this.#postError(err);
+            return { executed, reason: 'error' };
+        }
+        return { executed, reason: 'ok' };
     }
     async #boot(config) {
         this.#teardownMachine();
         this.#stopping = false;
+        // Pacing: initial CPU speed from settings (live changes arrive via
+        // the set-speed message).
+        if (config.cpuSpeed !== undefined)
+            this.#pacer.setMode(config.cpuSpeed);
         // TAN identity first (Phase 14 M3-tabs) — the bootopts patch below
         // stamps LOCALIP from it and the NIC MAC derives from it. Created
         // once and kept across reboots: the tab keeps its address, and the
         // lease keeps defending it while the machine restarts.
         if (this.#tanConfig !== null && this.#tan === null) {
-            this.#tan = new TabAreaNetwork(this.#tanConfig.channel, this.#tanConfig.hostOctet !== undefined
-                ? { hostOctet: this.#tanConfig.hostOctet }
-                : {});
+            this.#tan = new TabAreaNetwork(this.#tanConfig.channel, {
+                ...(this.#tanConfig.hostOctet !== undefined
+                    ? { hostOctet: this.#tanConfig.hostOctet }
+                    : {}),
+                // Sticky IP (session store): the last session's octet gets
+                // first shot; defend/repick still applies.
+                ...(config.tanPreferredOctet !== undefined
+                    ? { preferredOctet: config.tanPreferredOctet }
+                    : {}),
+            });
         }
         const tanIdentity = this.#tan !== null ? await this.#tan.acquire() : null;
+        if (tanIdentity !== null) {
+            // Report the settled identity so the main thread can persist it
+            // for the next page load (and show the address to the user).
+            this.#post({ type: 'tan-identity', hostOctet: tanIdentity.hostOctet });
+        }
         const primary = await this.#resolveSlot('primary', {
             imageUrl: config.imageUrl,
             imageBytes: config.imageBytes,
@@ -497,10 +633,30 @@ export class WorkerHost {
 }
 /**
  * Yield to the macrotask queue. Workers process inbound `message` events as
- * macrotasks, so a microtask yield (queueMicrotask) would starve them. The
- * `setTimeout(0)` form costs ~1ms in browsers and ~0.05ms in Node — both
- * negligible compared to the ~5000-instruction batch we just executed.
+ * macrotasks, so a microtask yield (queueMicrotask) would starve them.
+ *
+ * Pacing milestone: in a REAL web worker the yield is a MessageChannel
+ * ping instead of `setTimeout(0)` — browsers clamp nested timeouts to
+ * ≥1 ms (and throttle them hard in background tabs, which would starve
+ * TAN servers in hidden tabs); a port message is an unclamped macrotask.
+ * Everywhere else (Node tests, CLI) it stays `setTimeout(0)`: Node
+ * doesn't clamp it meaningfully, and — found the hard way — a
+ * continuously ping-ponging MessageChannel wedges vitest's worker
+ * teardown so hard the whole run hangs with no output (both thread and
+ * fork pools; see BROWSER_PACING_REPORT.md). `importScripts` is the
+ * real-dedicated-worker discriminator: absent in Node and on the main
+ * thread.
  */
-function yieldMacrotask() {
-    return new Promise((resolve) => setTimeout(resolve, 0));
-}
+const yieldMacrotask = (() => {
+    const isRealWorker = typeof globalThis.importScripts === 'function';
+    if (!isRealWorker || typeof MessageChannel === 'undefined') {
+        return () => new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const channel = new MessageChannel();
+    const waiters = [];
+    channel.port1.onmessage = () => waiters.shift()?.();
+    return () => new Promise((resolve) => {
+        waiters.push(resolve);
+        channel.port2.postMessage(null);
+    });
+})();

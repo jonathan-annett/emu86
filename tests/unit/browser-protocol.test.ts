@@ -105,6 +105,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'boot':  return 'boot';
       case 'rx':    return 'rx';
       case 'reset': return 'reset';
+      case 'set-speed': return 'set-speed';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -119,6 +120,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'halted': return 'halted';
       case 'error':  return 'error';
       case 'tan-identity': return 'tan-identity';
+      case 'stats': return 'stats';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -130,6 +132,7 @@ describe('browser protocol — exhaustiveness', () => {
     expect(describeMain({ type: 'reset' })).toBe('reset');
     expect(describeMain({ type: 'rx', bytes: new Uint8Array() })).toBe('rx');
     expect(describeMain({ type: 'boot', config: {} })).toBe('boot');
+    expect(describeMain({ type: 'set-speed', mode: 'turbo' })).toBe('set-speed');
   });
 
   it('worker→main exhaustive switch covers every variant', () => {
@@ -138,5 +141,15 @@ describe('browser protocol — exhaustiveness', () => {
     expect(describeWorker({ type: 'halted', reason: 'x' })).toBe('halted');
     expect(describeWorker({ type: 'error', message: 'x' })).toBe('error');
     expect(describeWorker({ type: 'tan-identity', hostOctet: 42 })).toBe('tan-identity');
+    expect(
+      describeWorker({
+        type: 'stats',
+        instrPerSec: 1,
+        cyclesPerSec: 2,
+        realTimeRatio: 0.5,
+        mode: 'authentic',
+        batch: 5000,
+      }),
+    ).toBe('stats');
   });
 });

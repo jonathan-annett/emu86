@@ -62,6 +62,7 @@ export class TabAreaNetwork {
     #channel;
     #claimWaitMs;
     #random;
+    #preferredOctet;
     #identity = null;
     #trunk = null;
     #lan = null;
@@ -85,6 +86,13 @@ export class TabAreaNetwork {
         this.#channel = channel;
         this.#claimWaitMs = opts.claimWaitMs ?? DEFAULT_CLAIM_WAIT_MS;
         this.#random = opts.random ?? Math.random;
+        this.#preferredOctet =
+            opts.preferredOctet !== undefined
+                && Number.isInteger(opts.preferredOctet)
+                && opts.preferredOctet >= OCTET_MIN
+                && opts.preferredOctet <= OCTET_MAX
+                ? opts.preferredOctet
+                : null;
         if (opts.hostOctet !== undefined) {
             // Fixed identities are settled from birth and defend immediately.
             this.#identity = tanIdentityFor(opts.hostOctet);
@@ -109,7 +117,12 @@ export class TabAreaNetwork {
             return this.#identity;
         }
         for (let attempt = 0; attempt < 10; attempt++) {
-            const octet = OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
+            // Sticky IP: the persisted octet from the last session gets first
+            // shot; a live holder (e.g. the original of a duplicated tab)
+            // defends it and the fallback picks are random as before.
+            const octet = attempt === 0 && this.#preferredOctet !== null
+                ? this.#preferredOctet
+                : OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
             this.#conflictSeen = false;
             this.#identity = tanIdentityFor(octet); // provisional
             this.#channel.postMessage({ tan: 'claim', octet });

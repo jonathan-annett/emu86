@@ -90,6 +90,7 @@ describe('settings', () => {
       secondaryImageSource: { kind: 'library', id: 'secondary-id-1' },
       bootScripts: [{ id: 'bs-1', name: 'network', text: 'root\nnet start ne0\n' }],
       activeBootScriptId: 'bs-1',
+      cpuSpeed: 'authentic',
     };
     saveSettings(target);
     const loaded = loadSettings();
@@ -175,6 +176,7 @@ describe('settings', () => {
       secondaryImageSource: null,
       bootScripts: [],
       activeBootScriptId: null,
+      cpuSpeed: 'authentic',
     };
     saveSettings(target);
     docTarget.removeEventListener(SETTINGS_CHANGED_EVENT, handler);
@@ -190,6 +192,7 @@ describe('settings', () => {
       secondaryImageSource: null,
       bootScripts: [],
       activeBootScriptId: null,
+      cpuSpeed: 'authentic',
     });
     const original = loadSettings();
 
@@ -266,6 +269,7 @@ describe('settings', () => {
       secondaryImageSource: { kind: 'library', id: 'gone-secondary' },
       bootScripts: [],
       activeBootScriptId: null,
+      cpuSpeed: 'authentic',
     });
     const stale = loadSettings();
     const fixed = await validateImageSourceAgainstLibrary(

@@ -73,6 +73,13 @@ export interface Settings {
    * until the user opts in.
    */
   activeBootScriptId: string | null;
+  /**
+   * CPU speed (pacing milestone): 'authentic' caps execution at a real
+   * 4.77 MHz 8086; 'turbo' uncaps instructions (clock stays wall-true)
+   * for in-VM compile workloads. Applies live — the modal also posts a
+   * set-speed message to the running worker.
+   */
+  cpuSpeed: 'authentic' | 'turbo';
 }
 
 export const FONT_SIZE_MIN = 8;
@@ -96,6 +103,7 @@ export const DEFAULT_SETTINGS: Settings = {
   secondaryImageSource: null,
   bootScripts: [SEED_BOOT_SCRIPT],
   activeBootScriptId: null,
+  cpuSpeed: 'authentic',
 };
 
 const STORAGE_KEY = 'emu86.settings.v1';
@@ -197,6 +205,10 @@ export function loadSettings(): Settings {
       && bootScripts.some((s) => s.id === obj.activeBootScriptId)
       ? obj.activeBootScriptId
       : null;
+  const cpuSpeed =
+    obj.cpuSpeed === 'authentic' || obj.cpuSpeed === 'turbo'
+      ? obj.cpuSpeed
+      : DEFAULT_SETTINGS.cpuSpeed;
 
   return {
     fontSize,
@@ -205,6 +217,7 @@ export function loadSettings(): Settings {
     secondaryImageSource,
     bootScripts,
     activeBootScriptId,
+    cpuSpeed,
   };
 }
 

@@ -46,6 +46,7 @@ const nodeFsStub = fileURLToPath(new URL('./web/stubs/node-fs.ts', import.meta.u
  */
 function emu86AgentBridge(): Plugin {
   let transcript = '';
+  let latestStats: unknown = null;
   const TRANSCRIPT_CAP = 1_000_000;
   const RX_BODY_CAP = 65_536;
   return {
@@ -58,6 +59,11 @@ function emu86AgentBridge(): Plugin {
         if (transcript.length > TRANSCRIPT_CAP) {
           transcript = transcript.slice(-Math.floor(TRANSCRIPT_CAP / 2));
         }
+      });
+      // Pacing telemetry (GET /agent/stats): the page mirrors the
+      // worker's ~1/sec stats messages up the HMR channel.
+      server.ws.on('emu86:stats', (data: { stats?: unknown }) => {
+        if (data?.stats !== undefined) latestStats = data.stats;
       });
       server.middlewares.use('/agent/rx', (req, res) => {
         if (req.method !== 'POST') {
@@ -78,6 +84,10 @@ function emu86AgentBridge(): Plugin {
       server.middlewares.use('/agent/transcript', (_req, res) => {
         res.setHeader('content-type', 'text/plain; charset=utf-8');
         res.end(transcript);
+      });
+      server.middlewares.use('/agent/stats', (_req, res) => {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify(latestStats));
       });
     },
   };
