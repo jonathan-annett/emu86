@@ -323,6 +323,19 @@ right-speed instantly); (2) browser throughput — larger batches and a
 MessageChannel yield instead of clamped setTimeout(0). Display load
 from full-screen ANSI is secondary and mostly follows from (1).
 
+**Back burner (Jonathan, 2026-07-14): guest UART ↔ real hardware over
+the browser.** Wire a guest serial port to a physical device so ELKS
+can talk to gadgets like ESP32s running console interfaces. Browser
+side: the Web Serial API is the natural fit (ESP32 dev boards enumerate
+as USB-CDC serial; raw WebUSB only needed for non-CDC oddballs) —
+`navigator.serial.requestPort()` needs a user gesture and a secure
+context (the Cloudflare deploy provides HTTPS; localhost dev works
+too). Guest side: ttyS0 is the console, so this wants the **second
+UART (ttyS1)** — the same substrate the networking plan already
+earmarks as the `webget`/host-services channel; building ttyS1 once
+serves both. Pacing note: real serial is wall-clock — another consumer
+for the host-time-driven clock work.
+
 **Deployment shape (Jonathan, 2026-07-14): static PWA on Cloudflare.**
 dist-web is already fully static and the TAN needs no server
 (BroadcastChannel is in-browser IPC) — so "open URL, see ELKS, telnet
