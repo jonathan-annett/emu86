@@ -543,3 +543,12 @@ header code {
   background: #3a1010;
   color: #ffaaaa;
 }
+
+/* About-page link in the header (about addendum, 2026-07-15). */
+.about-link {
+  color: #33ff66;
+  text-decoration: none;
+}
+.about-link:hover {
+  text-decoration: underline;
+}

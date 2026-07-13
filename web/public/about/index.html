@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About — emu86 · ELKS in the browser</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --fg: #d8d8d8;
+    --dim: #8a8a8a;
+    --green: #33ff66;
+    --amber: #ffb000;
+    --rule: #262626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+  main {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 5rem;
+  }
+  h1, h2, h3 {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  h1 { color: var(--green); font-size: 1.6rem; margin: 0 0 0.25rem; }
+  .tagline { color: var(--dim); font-style: italic; margin-top: 0; }
+  h2 { color: var(--amber); font-size: 1.15rem; margin-top: 2.75rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.35rem; }
+  h3 { color: var(--fg); font-size: 1rem; margin-top: 1.75rem; }
+  a { color: var(--green); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 0.88em;
+    background: #151515;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: #101010;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .milestone {
+    border-left: 2px solid var(--rule);
+    padding-left: 1.1rem;
+    margin: 1.4rem 0;
+  }
+  .milestone .date {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--amber);
+    letter-spacing: 0.04em;
+  }
+  .milestone p { margin: 0.3rem 0 0; }
+  ul { padding-left: 1.3rem; }
+  li { margin: 0.45rem 0; }
+  .numbers {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+  }
+  .numbers div {
+    background: #101010;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.7rem 0.9rem;
+  }
+  .numbers b {
+    display: block;
+    font-family: ui-monospace, Menlo, monospace;
+    color: var(--green);
+    font-size: 1.25rem;
+  }
+  .numbers span { color: var(--dim); font-size: 0.82rem; }
+  .closing { color: var(--fg); font-style: italic; margin-top: 2.5rem; }
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--rule);
+    color: var(--dim);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>emu86</h1>
+  <p class="tagline">A 1980s PC written in TypeScript, booting a real
+  Unix in your browser tab — where duplicating the tab plugs a second
+  machine into the network, and one tab can telnet into the other.</p>
+
+  <p><a href="/">← back to the machine</a></p>
+
+  <h2>What this is</h2>
+  <p>
+    emu86 is an Intel 8086 PC emulator written in plain TypeScript —
+    no WebAssembly, no native code, no runtime dependencies beyond the
+    language itself. It boots unmodified
+    <a href="https://github.com/ghaerr/elks">ELKS</a> (the Embeddable
+    Linux Kernel Subset, a real Unix for 16-bit machines) from real
+    disk images: BIOS, interrupt controller, timer, UART, keyboard,
+    IDE disks, and an NE2000 network card, all modeled honestly enough
+    that the stock kernel probes them and finds them.
+  </p>
+  <p>
+    It exists to answer a question for a different project: a browser
+    code editor needed an 8086 emulator, and the choice was
+    <em>pure TypeScript</em> versus <em>C compiled to WASM</em>. This
+    is the pure-TypeScript arm of that bet — the wager being that
+    readable source is worth more than raw speed, and that the speed
+    would turn out to be enough. The project's stated principle from
+    day one: <em>understandable first, fast second</em>. (The verdict,
+    measured: about half the speed of a real 4.77&nbsp;MHz IBM XT on
+    genuine kernel workloads, before anyone has tried to make it
+    fast. It turns out half an XT is plenty.)
+  </p>
+
+  <div class="numbers">
+    <div><b>1,119</b><span>tests in the always-on suite (plus the SingleStepTests 8088 corpus as the opcode oracle)</span></div>
+    <div><b>41</b><span>phase reports — the project's real memory, negative results included</span></div>
+    <div><b>~4 months</b><span>March to July 2026, three machines, one consolidation</span></div>
+    <div><b>0</b><span>lines of WASM, C, or hand-written assembly in the emulator</span></div>
+  </div>
+
+  <h2>The timeline</h2>
+
+  <div class="milestone"><span class="date">MARCH 23, 2026</span>
+    <p>First life, inside the editor project itself: a 23-file
+    emulator core validated <em>bit-for-bit</em> against Adrian
+    Cable's 8086tiny, running both side by side in a C co-simulation
+    harness and diffing every register after every instruction.</p>
+  </div>
+
+  <div class="milestone"><span class="date">APRIL 27–29</span>
+    <p>The standalone repository. Three days, seven commits: from a
+    six-opcode proof-of-concept to CGA text, a keyboard, a serial
+    console, and a browser harness. Then the repo went quiet — the
+    work didn't. The following phases were driven from, among other
+    things, <em>a folding phone</em>.</p>
+  </div>
+
+  <div class="milestone"><span class="date">SPRING → SUMMER</span>
+    <p>Phase by phase, brief by brief: interrupt delivery, the PIT and
+    PIC, ELKS boot diagnosis (early printk, root mount), hard-disk
+    images, MBR partitions, multi-disk, a MINIX-filesystem image with
+    a complete on-disk C toolchain. Each phase ends with a written
+    report that records what worked <em>and what didn't</em> — the
+    abandoned approaches are documented as carefully as the shipped
+    ones. Twenty-nine briefs, and the test count climbing the whole
+    way.</p>
+  </div>
+
+  <div class="milestone"><span class="date">JULY 13</span>
+    <p>Consolidation day: three machines' checkouts verified
+    identical, folded into one, audited top to bottom. Then Phase 14
+    opened — the dogfooding arc — with a hello-world compiled and run
+    <em>inside the emulated machine</em>, using the C compiler that
+    lives on the guest's own disk, and the resulting binary extracted
+    back out byte-exact, checksummed on both sides of reality.</p>
+  </div>
+
+  <div class="milestone"><span class="date">JULY 13–14</span>
+    <p>The network grew up in one long arc: an NE2000 card the stock
+    kernel detects; a virtual ethernet switch; a gateway that answers
+    ARP and ping; and then the TAN — the <em>Tab Area Network</em> —
+    where every browser tab's machine joins one LAN over a
+    BroadcastChannel trunk, leases itself an IP, and
+    <code>telnet 10.0.2.x</code> logs you from one tab's Unix into
+    another's. Duplicating the tab became the fastest PC purchase in
+    history. DNS followed — with a surprise (see below) — then real
+    answers via DNS-over-HTTPS pass-through.</p>
+  </div>
+
+  <div class="milestone"><span class="date">JULY 14–15</span>
+    <p>The site you're on went live. Boot scripts that type themselves
+    at the right prompts. Sticky per-tab IP addresses. And two fixes a
+    real 1981 machine would be proud of: a <em>pacing</em> overhaul so
+    that guest time is wall time — one guest second is one real second,
+    idle or busy, capped at an authentic 4.77&nbsp;MHz with a Turbo
+    switch — and an MC146818 real-time clock chip, after which the
+    machine stopped believing it was October&nbsp;21,&nbsp;1991.</p>
+  </div>
+
+  <h2>Things learned the hard way</h2>
+  <ul>
+    <li><strong>ELKS speaks DNS over TCP.</strong> Its network stack
+    has no UDP at all — a fact apparently nowhere on the internet
+    until you read the source. The plan said "DNS is easy, it's just
+    UDP"; the guest disagreed, and a small TCP engine got built a
+    milestone early.</li>
+    <li><strong>ELKS has no ping.</strong> The kernel answers pings
+    but nothing on the system can send one. The acceptance test
+    inverted itself: the LAN pings the machine, and the machine's own
+    <code>netstat</code> counters testify.</li>
+    <li><strong>A timeout that says "Name not found."</strong> The
+    guest's resolver compares a signed error against an unsigned size,
+    sails past its own error check, and parses its own transmit buffer
+    as the answer. Two hours of wire-level debugging to learn the bug
+    was upstream, in libc, since 2022.</li>
+    <li><strong><code>sleep 30</code> took one second.</strong> An
+    idle emulated CPU burned virtual time thirty times faster than
+    wall time; a busy one, three times slower. Games crawled while
+    timeouts fired instantly. The fix — drive the virtual clock from
+    the host's — is one page of code and was worth the whole
+    milestone.</li>
+    <li><strong>Telnet gaming is a fuzzer.</strong> Playing Tetris
+    between two tabs found a ring-buffer wraparound bug in the NE2000
+    model that no test had touched. The crash reproduced, the seam got
+    a regression test, the games resumed.</li>
+    <li><strong>The counterparty is the contract.</strong> Every
+    device here is written against what the guest's source code
+    actually does — ktcp's checksum quirks, the clock utility's
+    weekday-plus-three convention — not against the datasheet. The
+    datasheet doesn't boot.</li>
+  </ul>
+
+  <h2>How it's built</h2>
+  <p>
+    This project is a long-running collaboration between one human and
+    Claude (Anthropic's model — earlier phases planned by chat,
+    current work done end-to-end in Claude Code sessions). The working
+    discipline predates the tools being fashionable: every phase
+    starts with a written <em>brief</em> agreed before implementation,
+    and ends with a written <em>report</em> — findings, decisions,
+    measurements, and explicitly what was <em>not</em> done. The
+    reports are the project's memory; the code alone doesn't carry the
+    reasoning. Nothing lands without the full test suite green, and
+    the CPU core answers to an external oracle: the SingleStepTests
+    8088 corpus, thousands of single-instruction cases with exact
+    expected machine state.
+  </p>
+  <p>
+    The hard rules have never moved: the CPU step stays purely
+    synchronous, strict TypeScript stays strict, no new dependencies,
+    and negative results are findings to publish, not failures to
+    hide.
+  </p>
+
+  <h2>Try it</h2>
+  <ul>
+    <li><a href="/">Boot the machine</a> — it starts an ELKS floppy
+    automatically; the gear menu offers full hard-disk images
+    (fetched straight from the ELKS project's releases).</li>
+    <li>Log in as <code>root</code>, then <code>net start ne0</code> —
+    or pick the seeded boot script in settings and it types itself.</li>
+    <li>Duplicate the tab. Note the new machine's address in its boot
+    banner, then <code>telnet 10.0.2.&lt;it&gt;</code> from the first
+    tab. You are now remotely logged into a computer that lives one
+    tab to the right.</li>
+    <li><code>nslookup example.com</code> — real answers, resolved
+    over DNS-over-HTTPS without the kernel suspecting a thing.</li>
+    <li><code>date</code> — correct, thanks to a CMOS chip younger
+    than the operating system reading it.</li>
+    <li>Playing games? Settings → CPU speed → Turbo. An authentic
+    4.77&nbsp;MHz 8086 pushing full-screen redraws down a serial line
+    is authentically slow; the Turbo button is period-correct.</li>
+  </ul>
+
+  <h2>Honest limits</h2>
+  <ul>
+    <li>Outbound network magic is bounded by the browser: DNS works
+    (DoH is HTTPS), guest-to-guest TCP works (it's real ktcp on both
+    ends), but arbitrary internet TCP awaits a gateway milestone — and
+    HTTPS from the guest is structurally impossible without tricks
+    we've declined to play.</li>
+    <li>No inbound connections from the real internet. The TAN is
+    same-origin, same browser.</li>
+    <li>The CPU delivers about half an XT under authentic pacing on a
+    desktop; heavy full-screen terminal games want the Turbo switch.</li>
+    <li>Guest writes don't persist yet — every boot is a fresh
+    machine. (Persistent virtual drives are on the wish list, and the
+    wish list is in the repository.)</li>
+  </ul>
+
+  <h2>Family</h2>
+  <p>
+    emu86 has a sibling: <a href="https://mcu-pc.net">mcu-pc.net</a> —
+    a 1981 IBM PC emulated on a USB stick the size of a thumbnail,
+    booting FreeDOS on a microcontroller and playing a 1984 game about
+    a cat. Same human, same collaborator, opposite bet: that one runs
+    C on bare metal against hardware limits measured in kilobytes;
+    this one runs TypeScript in a browser against no limit but
+    honesty. Between them: three days and four months, respectively,
+    and the shared conviction that the machines of 1981 are still
+    worth understanding — by rebuilding them somewhere impossible.
+  </p>
+
+  <p class="closing">
+    And now there is a PC in your browser tab. It boots a real Unix,
+    joins a network that exists only between your own tabs, resolves
+    real names through a resolver its kernel is too old to imagine,
+    keeps honest time from a clock chip it never shipped with, and
+    lets you telnet into its twin — a computer created, in full working
+    order, by pressing "Duplicate Tab."
+  </p>
+
+  <footer>
+    <p>
+      Built on the shoulders of: <a href="https://github.com/ghaerr/elks">ELKS</a>
+      by Greg Haerr and contributors ·
+      <a href="https://github.com/adriancable/8086tiny">8086tiny</a> by Adrian Cable
+      (the original correctness reference) ·
+      <a href="https://github.com/SingleStepTests/8088">SingleStepTests</a>
+      (the opcode oracle) · <a href="https://xtermjs.org">xterm.js</a>.
+    </p>
+    <p>© 2026 Jonathan Annett · built with Claude ·
+      <a href="/">8086-tab.net</a></p>
+  </footer>
+</main>
+</body>
+</html>
