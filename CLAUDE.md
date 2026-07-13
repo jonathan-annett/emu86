@@ -1,8 +1,9 @@
 # emu86 — orientation for an agent picking this up
 
 Written 2026-07-13, when the project was consolidated onto `claude-dev-box` from
-three machines. Read this before `README.md`. **`README.md` is stale and will
-actively mislead you** — see §1.
+three machines; **updated 2026-07-14** after Phase 14 landed (facts below
+re-verified then — §§1, 2, 4, 6 changed). Read this before `README.md`.
+**`README.md` is stale and will actively mislead you** — see §1.
 
 ## 0. What this project is
 
@@ -27,45 +28,49 @@ The repo accumulated 29 `*-brief.md` / `*_REPORT.md` pairs — one per phase —
 | `SESSION_REPORT.md` | "353 tests. v0→v1 complete." | Stale — that was ~Phase 2. |
 | `emu86-agent-brief.md` | "Extend from the 6-opcode v0 slice." | Stale — it's the *first* brief. |
 
-**The truth is in the newest reports.** Current frontier, in order:
+**The truth is in the newest reports.** Current frontier (2026-07-14):
 
-1. `PROBE_HARNESS_REPORT.md` — Phase 12: the probe harness API/structure.
-2. `TOOLCHAIN_SURVEY_REPORT.md` — Phase 13: surveyed compilers on the HD32 image.
-3. `PROBE_HARNESS_EXTENSION_REPORT.md` — **the latest** (commit `b0ed610`). Extended
-   the harness, then used it to verify **`c86` v5.2.0 exists and runs on
-   `hd32-minix.img`**.
+1. `emu86-phase14-brief.md` — **the living plan**: every Phase-14 scope
+   addendum, plus the recorded back-burner ideas (golden boot overlays,
+   shared IDB "NAS", Web Serial to real gadgets) and the pacing diagnosis.
+2. Newest reports, newest first: `BOOT_SCRIPTS_REPORT.md`,
+   `DNS_DOH_REPORT.md`, `TAN_REPORT.md`, then the rest of Phase 14
+   (`ARP_ICMP`, `NE2K_SWITCH`, `AGENT_BRIDGE`, `BROWSER_HD_SESSION`,
+   `ARTIFACT_EXTRACTION`, `HELLO_WORLD_COMPILE`).
+3. `EMU86_AUDIT_REPORT.md` — 2026-07-13 ground truth for the whole repo.
 
-**Where you are:** that last report settled the big architectural question —
-**in-VM dogfood beats host cross-compile** ("Outcome A"). It states the next step
-explicitly:
-
-> *"Phase 14's first concrete step is now well-defined: a hello-world compile
-> against the verified `c86 v5.2.0` on `hd32-minix.img`."*
-
-**Phase 14 = build an NE2000 network driver, in-VM, using the on-disk `c86`/`as`/`ld`.**
-Start there unless Jonathan says otherwise.
+**Where you are:** Phase 14 is essentially complete — in-VM compile +
+extraction, browser HD sessions, agent bridge, NE2000 + switch + gateway,
+the TAN (tabs telnet each other), DNS-over-DoH at 10.0.2.3, boot scripts,
+sticky per-tab IPs. **The project is deployed: https://8086-tab.net**
+(Cloudflare Worker `emu86`; `wrangler.jsonc` at repo root; deploy needs
+`~/cf-token.env`, and the deploy command is permission-gated for agents —
+Jonathan runs it). **Next on the books:** the pacing/throughput milestone
+(host-time-driven PIT — games currently run slow, and a DNS-resolve stall
+workaround papers over one symptom), then M3d (TCP termination for
+arbitrary destinations + HTTP gateway, growing from `src/net/tcp.ts`).
 
 ## 2. Test baseline — read this before you think you broke something
 
 ```
 npm install
-npm run build     # tsc --noEmit (typecheck)
-npx vitest run    # → 998 passed, 80 files, 1 skipped
+npm run build      # tsc --noEmit (typecheck; `npm run typecheck` covers all configs)
+npx vitest run     # → 1,101 passed, 97 files, 1 skipped (as of 2026-07-14)
 ```
 
-**998 passing is correct and green on this box.** But **the briefs say "1,294
-passing as of Phase 13"** — that is *not* a regression you introduced. The gap is
-`tests/sst/corpus.test.ts`, which is **skipped** here: it needs the
+The one **skipped** file is `tests/sst/corpus.test.ts`: it needs the
 [SingleStepTests/8088](https://github.com/SingleStepTests/8088) corpus, and
 `tests/sst/loader.ts` expects the corpus's `v2/` directory symlinked at
 `tests/sst/data/`. It isn't fetched on this machine. Fetch it if you're touching
 CPU/opcode semantics — **the SST corpus is the real correctness oracle** — otherwise
-leave it and know that 998 is your baseline.
+leave it and know that the full-suite count above is your baseline. (Old briefs
+cite "1,294 passing as of Phase 13" — that number included the corpus; not a
+regression.)
 
-Disk images are likewise not all present (only `dist-web/elks-serial.img` is
-committed). `hd32-minix.img` and friends are built/fetched on demand:
-`npm run build:elks-hd-image`, `build:elks-serial-image`, `build:elks-hd-mbr-images`.
-Phase 14 needs the HD32 MINIX image.
+Disk images ARE committed in-tree (correction 2026-07-14; the audit confirmed
+it): `reference/elks-images-hd/hd32-*.img` (all four) and
+`dist-web/elks-serial.img`. The `build:elks-*` npm scripts regenerate/refetch
+them if ever needed.
 
 ## 3. The fractured origin — the thing you must not get wrong
 
@@ -96,23 +101,25 @@ against the C 8086tiny reference*, and **it exists only in the huxley repo.**
 This project is **brief-driven**, and the briefs are **not written by the coding
 agent**:
 
-1. A **planning chat on claude.ai** (Fable) reviews the last report and writes the
-   next brief — e.g. convscan chat #94 *"Phase 7 completion and next brief proposal"*.
-2. The brief lands in the repo as `emu86-<topic>-brief.md`.
-3. An agent (**you**) executes it in the repo.
-4. You write `<TOPIC>_REPORT.md` — findings, decisions, what you verified, what you
-   deliberately did *not* do.
+**Process update (2026-07-13): planning moved into the working session.** The
+original loop — a separate planning chat on claude.ai writes the brief, a repo
+agent executes it — is history. Now the agent drafts the brief (or a scope
+addendum to the running phase brief) **in-session**, Jonathan reviews it there
+(his terse approvals are real approvals), and then the agent implements. What is
+UNCHANGED and load-bearing:
+
+1. Scope lands in a brief/addendum **before** implementation.
+2. You write `<TOPIC>_REPORT.md` when the work lands — findings, decisions, what
+   you verified, what you deliberately did *not* do.
 
 **Follow this.** The reports are the project's actual memory; the code alone doesn't
 carry the reasoning. Match the existing reports' depth and honesty (they record
 negative results and abandoned approaches — that's a feature).
 
-⚠️ **`emu86-networking-plan.md` is cited by the Phase 13/13.5 briefs as the Phase 14
-device-shape context — and it is NOT in this repo.** It was never committed, and it
-isn't on any host. It was authored in a planning chat. **Don't hunt for it in the
-code and don't assume it's lost work** — ask Jonathan, or recover it from the chats
-(convscan #94 / #82 discuss the NE2000 phase). Phase 14's *first step* is well
-defined without it.
+(Historical note, resolved: `emu86-networking-plan.md` was once planning-chat-only
+and this file warned it was unrecoverable from the repo. Jonathan recovered it on
+2026-07-13; it is committed at the repo root and the Phase 14 M3 milestones were
+built against it.)
 
 ## 5. Hard rules (constant across every brief — treat as locked)
 
@@ -129,10 +136,11 @@ defined without it.
 
 ## 6. Repo gotchas that will waste your time
 
-- **Commit your work.** In this repo's entire history, **no agent has ever run
-  `git commit` or `git push`** — all 7 commits are hand-authored by Jonathan. That
-  cost real time during consolidation (nobody could tell from the transcripts whether
-  the phone's work was safe). Don't repeat it: commit, and say so.
+- **Commit your work.** (Updated 2026-07-14: agents DO commit now — routinely,
+  per feature/milestone, with the brief/report discipline; ~30 of the 37 commits
+  are agent-authored. `git push` remains Jonathan's.) The original warning stands
+  as history: for the repo's first 7 commits no agent ever committed, and it cost
+  real time during consolidation. Commit, and say so.
 - **`.gitmodules` lists a top-level `elks` submodule that is not in the index.**
   Only `reference/8086tiny` and `reference/elks` are real. Leftover from the "fixed
   submodules" commit. Don't chase it.
@@ -141,8 +149,10 @@ defined without it.
   the npm scripts; don't hand-edit.
 - Root is littered with `corpus-baseline*.txt`, `diag-out*.txt` — scratch artifacts
   from old phases, not inputs.
-- Remote is `github.com/jonathan-annett/emu86` (**private**), branch `main`, currently
-  at `b0ed610`.
+- Remote is `github.com/jonathan-annett/emu86` (**private**), branch `main`.
+  The deployed site (https://8086-tab.net) is NOT auto-deployed from git — it
+  ships via `npx wrangler deploy` from this checkout (see `wrangler.jsonc`),
+  run by Jonathan.
 
 ## 7. How to work in this repo
 
@@ -158,8 +168,8 @@ independent areas — read many reports, check many subsystems, verify many clai
 — spawn subagents in parallel rather than walking it serially. Intervene if one
 goes off track or is missing context.
 
-**Commit what you do.** No agent has ever committed here (§6) and it cost real
-time. Commit, and say so.
+**Commit what you do.** Per feature or milestone, with a message that carries the
+why (§6 has the history of what NOT committing cost). Push stays with Jonathan.
 
 **Your final message is not a continuation of your working thread.** After a long
 session the shorthand you built up — phase numbers, file abbreviations, arrow
@@ -191,3 +201,8 @@ Consolidated 2026-07-13 from three machines (fold7 phone = canonical, buenos-ren
 VPS, whisperx-server). The phone and VPS checkouts were verified identical to
 `origin/main` and deleted. Nothing was lost. Facts in this file were read off the
 repo and the reports, not remembered.
+
+Updated 2026-07-14 (the session that closed out Phase 14): §1 frontier, §2
+baseline (1,101 tests; images in-tree), §4 process (planning in-session;
+networking plan recovered), §6 (agents commit; deployment shape). Facts
+re-verified against the repo at update time, same standard.
