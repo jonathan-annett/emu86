@@ -28,7 +28,7 @@ The two milestones compose: pacing keeps guest time *flowing* at wall rate; the 
 
 ## Field acceptance
 
-Redeploy the dev tier and boot any HD image: the login shell's `date` should match the browser clock immediately — rc.sys runs `clock -s -u` before getty. (Pending Jonathan's confirmation.)
+✅ **Field-verified** (Jonathan, dev tier, build 599c4ff): boot transcript shows `Running /etc/rc.sys script` followed immediately by `Tue Jul 14 02:32:48 2026` — the host's local wall clock to the second, printed by the stock image's own startup, zero typing. The 1991 era is over.
 
 ## Test state
 
