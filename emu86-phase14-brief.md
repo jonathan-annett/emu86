@@ -203,6 +203,22 @@ ARP/ICMP pseudo-hosts → DNS-over-DoH → TCP termination + HTTP gateway
 open-question 3): start as `BootConfig` fields in the worker protocol;
 promote to the settings UI when pseudo-hosts exist to configure.
 
+**M3-tabs — inter-tab LAN (Jonathan, 2026-07-13 close: "tab 1 can
+telnet to tab 2. that will be gold").** Same-origin browser tabs share
+one LAN via a BroadcastChannel **trunk port** on each tab's switch
+(real-switch trunking; the M3a learning CAM already handles
+who-lives-where — no switch changes). Guest↔guest TCP needs NO
+termination engine: ktcp speaks real TCP at both ends and telnetd
+already listens — only frames must move. Two constraints discovered
+in-session: ELKS has no DHCP client (ktcp is static-config), but stock
+`/etc/net.cfg` reads `$LOCALIP` from the bootopts env — so tabs lease
+unique `LOCALIP=10.0.2.x` values over the same channel and the
+bootopts patcher stamps them ("DHCP at the bootopts layer"); and each
+tab needs a unique NIC MAC (today every machine is
+02:65:6d:75:38:36, intolerable on a shared segment). Acceptance:
+`telnet 10.0.2.<other-tab>` from one xterm logs into the other tab's
+ELKS. Node-testable with two WorkerHosts on a stubbed channel.
+
 Substrate note: M3a touches `src/devices/`, `src/machine/ibm-pc.ts`
 (optional-device wiring), and `src/net/` (new) — this is the phase's
 subject, approved by the arc; hard rules 1–5 unchanged.
