@@ -71,12 +71,16 @@ export interface SettingsModalDeps {
   bootedSecondary: { kind: 'library'; id: string } | null;
 }
 
-/** 10 MB cap on local uploads. Floppies are <= 1.44 MB; this is a safety
- *  bound to keep a multi-gigabyte file pick from blocking the main thread
- *  on arrayBuffer. Hard-disk-class images are intentionally upload-rejected
- *  and routed through the GitHub browser instead, where the cap is higher
- *  (see GITHUB_DOWNLOAD_MAX_BYTES). */
-const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+/** 100 MB cap on local uploads — aligned with GITHUB_DOWNLOAD_MAX_BYTES.
+ *  The Phase 9.2 cap was 10 MB ("HD images route through the GitHub
+ *  browser instead"), but the GitHub asset CDN sends no CORS headers, so
+ *  that route can never actually fetch — which left hard-disk images with
+ *  NO working path into the library (found by Jonathan uploading
+ *  hd32-minix.img, Phase 14 M3b). Upload is the supported HD path; the
+ *  cap exists only to keep an accidental multi-gigabyte pick from
+ *  stalling the main thread / blowing the IDB quota. ELKS hd64 images
+ *  (~67 MB) are the largest real bootables. */
+const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 
 /** 100 MB cap on GitHub downloads. ELKS hd64 images are ~67 MB; this allows
  *  them through with headroom. Above this, the user is prompted before the
