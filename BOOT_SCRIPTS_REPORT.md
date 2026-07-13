@@ -19,6 +19,7 @@
 - **Comments type harmlessly**: `#`-prefixed lines are sent verbatim — the ELKS shell ignores them — so scripts can carry annotations without runner syntax.
 - The runner is main-thread and image-agnostic; images that boot straight to `# ` (test bootopts) and images that boot to `login: ` both work with the same script, since the first line releases on either prompt.
 - **Field-verified on the live site** (Jonathan, 2026-07-14, deployed as version `e01ba0bd`): "worked first time" — image fetched through the /gh-assets proxy, boot script logged in and joined the TAN unattended. The runner's contract is additionally pinned by unit tests against real ELKS prompt strings.
+- **Emergent nicety, field-found (Jonathan, same evening): the browser's "Duplicate tab" is an instant new PC.** The duplicate re-runs the boot flow, the TAN lease assigns a fresh 10.0.2.x octet and MAC, and the active boot script joins it to the LAN — one gesture from "machine I'm looking at" to "second machine I can telnet into." No code made this happen on purpose; the lease + autoexec composition did.
 
 ## Test state
 
