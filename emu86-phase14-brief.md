@@ -247,6 +247,19 @@ UART firehoses xterm via per-batch postMessage. A worker-side pacing
 governor (cap virtual PIT ticks per real second) would fix both the
 display load and game-speed authenticity in one move.
 
+**Deployment shape (Jonathan, 2026-07-14): static PWA on Cloudflare.**
+dist-web is already fully static and the TAN needs no server
+(BroadcastChannel is in-browser IPC) — so "open URL, see ELKS, telnet
+between your own tabs" works from any static host today. Remaining
+work when this becomes a milestone: PWA manifest + service worker
+(offline boot); HD images via an R2 bucket with CORS headers or a tiny
+CF Worker CORS proxy for the GitHub asset CDN (the API is CORS-open,
+only assets block; note Cloudflare Pages caps static files at 25 MB —
+the HD images are 31 MB, so plain static hosting is out). Policy flag:
+the same proxy could later widen the M3d HTTP gateway beyond
+CORS-permissive sites — that edges toward the host-side-daemon shape
+the networking plan rejected; decide deliberately when M3d lands.
+
 ## Out of scope for all of Phase 14
 
 - Fixing the `runUntilSentinel` echo bug (three phases of precedent
