@@ -22,9 +22,11 @@
  *   - asset CDN (release-assets.githubusercontent.com) does NOT return ACAO
  *     headers (verified Phase 9.3 diagnosis). A browser fetch in cors mode
  *     SHOULD therefore fail — but real-world behaviour is browser-version
- *     dependent. We attempt the fetch and surface failures with a
- *     diagnostic-friendly error message; the user can then fall back to the
- *     manual upload path.
+ *     dependent. We attempt the fetch, and when it throws we retry once
+ *     through the same-origin `/gh-assets/` CORS proxy that the production
+ *     worker serves (deploy/cf-worker.ts; the vite dev server mirrors it).
+ *     Only if both fail do we surface the diagnostic error, and the user
+ *     can then fall back to the manual upload path.
  *
  * Phase 9.2 forward-compat: the image library's `source: 'upload' | 'github'`
  * discriminator landed in 9.2 specifically so 9.3 can write `'github'`-
@@ -196,13 +198,24 @@ export async function downloadAsset(
   try {
     res = await fetch(url);
   } catch (err) {
-    throw new AssetDownloadError(
+    const originalError = new AssetDownloadError(
       `Asset fetch failed (network/CORS): ${describeError(err)}. ` +
       `If this is a CORS error, the GitHub asset CDN does not return ` +
       `Access-Control-Allow-Origin headers; falling back to the manual upload ` +
       `flow is the supported path.`,
       0,
     );
+    // CORS/network failure: retry once through the same-origin proxy
+    // (production worker / vite dev proxy). A host without the proxy
+    // 404s, and the original error is the one worth surfacing.
+    const proxied = proxyAssetUrl(url);
+    if (proxied === null) throw originalError;
+    try {
+      res = await fetch(proxied);
+    } catch {
+      throw originalError;
+    }
+    if (!res.ok) throw originalError;
   }
   if (!res.ok) {
     throw new AssetDownloadError(
@@ -227,6 +240,23 @@ export async function downloadAsset(
     onProgress({ loaded: buf.byteLength, total });
   }
   return new Uint8Array(buf);
+}
+
+/**
+ * Same-origin proxy URL for a GitHub release download, or null when the
+ * URL isn't a github.com download or there's no http(s) origin to be
+ * same-origin with (tests, file: pages). `/gh-assets/<path>` is served
+ * by the production worker (deploy/cf-worker.ts) and mirrored by the
+ * vite dev server; unknown hosts simply 404 and the caller keeps the
+ * original error.
+ */
+export function proxyAssetUrl(downloadUrl: string): string | null {
+  const GITHUB_PREFIX = 'https://github.com/';
+  if (!downloadUrl.startsWith(GITHUB_PREFIX)) return null;
+  if (typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) {
+    return null;
+  }
+  return `/gh-assets/${downloadUrl.slice(GITHUB_PREFIX.length)}`;
 }
 
 async function readWithProgress(

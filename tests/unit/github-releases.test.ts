@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   listReleases,
   downloadAsset,
+  proxyAssetUrl,
   RateLimitError,
   AssetDownloadError,
 } from '../../web/github-releases.js';
@@ -289,6 +290,63 @@ describe('github-releases — downloadAsset', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(AssetDownloadError);
       expect((err as AssetDownloadError).status).toBe(0);
+      expect((err as Error).message).toMatch(/CORS/);
+    }
+  });
+});
+
+describe('github-releases — /gh-assets proxy fallback', () => {
+  const GH_URL = 'https://github.com/ghaerr/elks/releases/download/v0.8.0/hd32-minix.img';
+
+  it('proxyAssetUrl maps github.com downloads to the same-origin proxy path', () => {
+    vi.stubGlobal('location', { protocol: 'https:' });
+    expect(proxyAssetUrl(GH_URL)).toBe(
+      '/gh-assets/ghaerr/elks/releases/download/v0.8.0/hd32-minix.img',
+    );
+    expect(proxyAssetUrl('https://example/asset.img')).toBeNull();
+  });
+
+  it('proxyAssetUrl is null without an http(s) origin (tests, file: pages)', () => {
+    // No location stub — the Node test env has none.
+    expect(proxyAssetUrl(GH_URL)).toBeNull();
+  });
+
+  it('a CORS-failed direct fetch retries once through /gh-assets and succeeds', async () => {
+    vi.stubGlobal('location', { protocol: 'https:' });
+    const data = new Uint8Array([9, 8, 7, 6]);
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        throw new TypeError('Failed to fetch');
+      })
+      .mockImplementationOnce(async () =>
+        new Response(data, { status: 200, headers: { 'content-length': '4' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await downloadAsset(GH_URL);
+    expect(Array.from(out)).toEqual([9, 8, 7, 6]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(GH_URL);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      '/gh-assets/ghaerr/elks/releases/download/v0.8.0/hd32-minix.img',
+    );
+  });
+
+  it('a failing proxy surfaces the ORIGINAL CORS error, not the proxy 404', async () => {
+    vi.stubGlobal('location', { protocol: 'https:' });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        throw new TypeError('Failed to fetch');
+      })
+      .mockImplementationOnce(async () => new Response('no proxy here', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      await downloadAsset(GH_URL);
+      throw new Error('expected to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AssetDownloadError);
+      expect((err as AssetDownloadError).status).toBe(0); // the CORS error
       expect((err as Error).message).toMatch(/CORS/);
     }
   });

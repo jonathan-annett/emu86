@@ -271,6 +271,14 @@ export class WorkerHost {
         // batches so inbound RX messages can be delivered. Without the yield,
         // postMessage events would queue forever behind a synchronous run loop.
         while (!this.#stopping && this.#machine !== null) {
+            // DNS resolve in flight: stall the machine (and with it the PIT)
+            // until the DoH fetch settles, so the guest's 2-guest-second
+            // resolver alarm can't expire mid-fetch. Invisible to the guest;
+            // see DnsHost.pendingResolves for the full rationale.
+            if (this.#dns !== null && this.#dns.pendingResolves > 0) {
+                await yieldMacrotask();
+                continue;
+            }
             const result = this.runUntil(this.#batchSize);
             if (result.reason !== 'instruction-limit' &&
                 result.reason !== 'stopped') {

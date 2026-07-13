@@ -1,0 +1,24 @@
+// Cloudflare deployment for 8086-tab.net (worker service: emu86).
+//
+// `npx wrangler deploy` from the repo root publishes:
+//   - dist-web/ as static assets (build first: npm run build:browser)
+//   - deploy/cf-worker.ts for requests no asset matches — today that is
+//     only /gh-assets/*, the narrow CORS proxy for ELKS release images
+//     (see the worker's header comment for the scope policy).
+//
+// Auth: wrangler reads CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID from
+// the environment (`source ~/cf-token.env`). The 8086-tab.net custom
+// domain is attached to the service and survives redeploys.
+{
+  "name": "emu86",
+  "main": "deploy/cf-worker.ts",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist-web",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

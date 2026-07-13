@@ -63,6 +63,22 @@ export class DnsHost {
     queriesResolved = 0;
     servfailsSent = 0;
     answersDropped = 0;
+    /**
+     * Resolves currently in flight. The browser run loop STALLS the
+     * machine while this is non-zero: guest virtual time races wall time
+     * when the guest idles in HLT (halt spins), so `in_resolv`'s
+     * 2-guest-second alarm would otherwise expire in a few tens of wall
+     * milliseconds — losing to any cold DoH fetch. Field signature:
+     * first lookup of a name fails "Name not found" (the in_resolv
+     * stale-buffer quirk, see DNS_DOH_REPORT.md §4.3), immediate retry
+     * on a warm connection wins. Pausing the clock is invisible to the
+     * guest — its only time sources are the PIT being stalled and INT
+     * 1Ah wall time. Superseded properly by the pacing milestone.
+     */
+    #pendingResolves = 0;
+    get pendingResolves() {
+        return this.#pendingResolves;
+    }
     constructor(opts) {
         this.ip = opts.ip ?? DNS_IP;
         this.mac = opts.mac ?? DNS_MAC;
@@ -122,6 +138,7 @@ export class DnsHost {
     }
     async #resolveAndAnswer(conn, query) {
         let answer;
+        this.#pendingResolves++;
         try {
             answer = await this.#resolve(query);
             this.queriesResolved++;
@@ -130,6 +147,9 @@ export class DnsHost {
             this.#onResolveError(err);
             answer = servfailFor(query);
             this.servfailsSent++;
+        }
+        finally {
+            this.#pendingResolves--;
         }
         if (conn.state !== 'established') {
             this.answersDropped++; // guest gave up (its 2s alarm) — nothing to do

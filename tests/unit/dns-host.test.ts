@@ -280,6 +280,27 @@ describe('DnsHost — LAN behavior', () => {
     expect(errors).toHaveLength(1);
   });
 
+  it('pendingResolves tracks in-flight fetches (the run-loop stall signal)', async () => {
+    const lan = new EthernetSwitch();
+    const query = buildQuery(0x3333, 'stall.example');
+    const releaseBox: Array<(answer: Uint8Array) => void> = [];
+    const dns = new DnsHost({
+      resolve: () => new Promise((resolve) => { releaseBox.push(resolve); }),
+    });
+    dns.attachTo(lan);
+    const peer = new GuestPeer(lan);
+    peer.connect();
+    expect(dns.pendingResolves).toBe(0);
+
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(query));
+    expect(dns.pendingResolves).toBe(1); // fetch in flight — run loop stalls
+
+    releaseBox[0]?.(buildAnswer(query, [5, 5, 5, 5]));
+    await flush();
+    expect(dns.pendingResolves).toBe(0); // settled — run loop resumes
+    expect(peer.takeTcp().length).toBeGreaterThan(0); // answer transmitted
+  });
+
   it('drops a late answer when the guest already closed (2s alarm shape)', async () => {
     const lan = new EthernetSwitch();
     const query = buildQuery(0x2222, 'slow.example');

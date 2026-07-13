@@ -105,5 +105,18 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    proxy: {
+      // Dev mirror of the production worker's /gh-assets CORS proxy
+      // (deploy/cf-worker.ts) so the release-image download path behaves
+      // identically on localhost. followRedirects makes the proxy chase
+      // github.com → release-assets.githubusercontent.com itself; the
+      // browser only ever sees a same-origin response.
+      '/gh-assets': {
+        target: 'https://github.com',
+        changeOrigin: true,
+        followRedirects: true,
+        rewrite: (path: string) => path.replace(/^\/gh-assets/, ''),
+      },
+    },
   },
 });
