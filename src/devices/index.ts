@@ -6,3 +6,5 @@ export { KeyboardController8042 } from './keyboard-controller.js';
 export type { KeyboardController8042Options } from './keyboard-controller.js';
 export { UART16550, COM1_BASE, COM1_IRQ } from './uart-16550.js';
 export type { UART16550Options, UART16550InspectionState } from './uart-16550.js';
+export { NE2000, NE2K_BASE, NE2K_IRQ, NE2K_DEFAULT_MAC } from './ne2000.js';
+export type { NE2000Options } from './ne2000.js';

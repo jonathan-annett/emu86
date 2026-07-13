@@ -56,6 +56,7 @@ import {
   hasSerialConsole,
   patchBootoptsForSerial,
 } from './bootopts-patch.js';
+import { EthernetSwitch, type SwitchPort } from '../net/switch.js';
 
 /**
  * Size → (geometry, diskClass) lookup. The published-ELKS HD shapes were
@@ -190,6 +191,8 @@ export class WorkerHost {
   #console: BrowserConsole | null = null;
   #teardownMirror: (() => void) | null = null;
   #txBuffer: number[] = [];
+  #network: EthernetSwitch | null = null;
+  #nicPort: SwitchPort | null = null;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -206,6 +209,15 @@ export class WorkerHost {
   /** Underlying machine. Tests poke this for low-level inspection. */
   get machine(): IBMPCMachine | null {
     return this.#machine;
+  }
+
+  /**
+   * The browser-side LAN (Phase 14 M3a). The machine's NE2000 is
+   * attached as a port; pseudo-hosts (ARP, DNS, gateway — later
+   * milestones) attach here too. Null before the first boot.
+   */
+  get network(): EthernetSwitch | null {
+    return this.#network;
   }
 
   /**
@@ -367,6 +379,21 @@ export class WorkerHost {
     });
     this.#console = browserConsole;
 
+    // Browser-side LAN (Phase 14 M3a): one switch per boot, with the
+    // machine's NE2000 as its first port. Frames the guest transmits
+    // enter the switch; frames other ports send arrive via
+    // `nic.injectFrame`. No pseudo-hosts attach yet — the fabric
+    // exists so later milestones only add ports.
+    const network = new EthernetSwitch();
+    this.#network = network;
+    const nicPort = network.attach({
+      name: 'ne2000',
+      onFrame: (frame) => {
+        this.#machine?.nic.injectFrame(frame);
+      },
+    });
+    this.#nicPort = nicPort;
+
     const machine = new IBMPCMachine({
       disk: primary.disk,
       diskClass: primary.diskClass,
@@ -380,6 +407,7 @@ export class WorkerHost {
       hostClock: new NodeHostClock(),
       cyclesPerPitTick: 4,
       uartTransmit: (byte: number) => this.#txBuffer.push(byte),
+      nicTransmit: (frame: Uint8Array) => nicPort.transmit(frame),
     });
 
     // Silent CGA sink — Phase 9 has no canvas. Without a sink the kernel's
@@ -500,6 +528,11 @@ export class WorkerHost {
     if (this.#machine) {
       this.#machine.stop();
     }
+    if (this.#nicPort) {
+      this.#nicPort.detach();
+      this.#nicPort = null;
+    }
+    this.#network = null;
     this.#machine = null;
     this.#console = null;
     this.#txBuffer.length = 0;

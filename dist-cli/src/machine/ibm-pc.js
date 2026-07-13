@@ -1,6 +1,6 @@
 import { CPU8086 } from '../cpu8086/cpu.js';
 import { TrapRegistry } from '../cpu8086/trap-registry.js';
-import { KeyboardController8042, PIC8259, PIT8254, UART16550, COM1_BASE, COM1_IRQ, } from '../devices/index.js';
+import { KeyboardController8042, NE2000, NE2K_BASE, NE2K_IRQ, PIC8259, PIT8254, UART16550, COM1_BASE, COM1_IRQ, } from '../devices/index.js';
 import { BasicInterruptController } from '../interrupts/controller.js';
 import { BasicIOBus } from '../io/io-bus.js';
 import { PagedMemory } from '../memory/paged-memory.js';
@@ -58,6 +58,15 @@ export class IBMPCMachine {
      * RX bytes are pushed via `uart.injectByte` / `injectBytes`.
      */
     uart;
+    /**
+     * NE2000-compatible NIC at 0x300 with IRQ 5 wired into the PIC
+     * (Phase 14 M3a). Always present, like the other board devices — a
+     * kernel that doesn't probe it never notices; ELKS prints its
+     * detection line at boot. IRQ 5 (not the kernel-default 12) because
+     * IRQ 8-15 are unreachable behind the single master PIC; guests
+     * select it with a bootopts `ne0=5,0x300,,0x80` line.
+     */
+    nic;
     runLoop;
     /**
      * Trap registry holding every BIOS service handler. Defined when
@@ -147,11 +156,24 @@ export class IBMPCMachine {
             ...(uartTransmit ? { onTransmit: uartTransmit } : {}),
             onIRQ4: () => this.pic.assertIRQ(COM1_IRQ),
         });
+        // ---- NE2000 NIC at 0x300 / IRQ 5 (Phase 14 M3a) ----
+        // Same wiring shape as the UART: frame sink configurable, IRQ line
+        // into the master PIC. See the property docblock for the IRQ-5
+        // rationale.
+        const nicTransmit = config.nicTransmit;
+        this.nic = new NE2000({
+            basePort: NE2K_BASE,
+            ...(warn ? { warn } : {}),
+            ...(config.nicMac ? { mac: config.nicMac } : {}),
+            ...(nicTransmit ? { onTransmit: nicTransmit } : {}),
+            onIRQ: () => this.pic.assertIRQ(NE2K_IRQ),
+        });
         // ---- Bus registration ----
         this.pic.registerOn(this.bus);
         this.pit.registerOn(this.bus);
         this.keyboardController.registerOn(this.bus);
         this.uart.registerOn(this.bus);
+        this.nic.registerOn(this.bus);
         // ---- BIOS ROM + trap registry (optional but on by default) ----
         // Build the BIOS first so the CPU can be constructed with the trap
         // registry already in place. We delay `loadROM` until *after* the CPU

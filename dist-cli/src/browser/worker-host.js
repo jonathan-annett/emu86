@@ -41,6 +41,7 @@ import { InMemoryDisk } from '../disk/disk.js';
 import { NodeHostClock } from '../host-clock/host-clock.js';
 import { installCGAMirror, } from '../diagnostics/cga-mirror.js';
 import { hasSerialConsole, patchBootoptsForSerial, } from './bootopts-patch.js';
+import { EthernetSwitch } from '../net/switch.js';
 const SIZE_TABLE = [
     // ---- Floppies ----
     { bytes: 1474560, geometry: { cylinders: 80, heads: 2, sectorsPerTrack: 18 }, diskClass: 'floppy' }, // 1.44 MB
@@ -95,6 +96,8 @@ export class WorkerHost {
     #console = null;
     #teardownMirror = null;
     #txBuffer = [];
+    #network = null;
+    #nicPort = null;
     #stopping = false;
     /** Last in-flight async work — boot fetch + autoRun loop. */
     #pending = Promise.resolve();
@@ -109,6 +112,14 @@ export class WorkerHost {
     /** Underlying machine. Tests poke this for low-level inspection. */
     get machine() {
         return this.#machine;
+    }
+    /**
+     * The browser-side LAN (Phase 14 M3a). The machine's NE2000 is
+     * attached as a port; pseudo-hosts (ARP, DNS, gateway — later
+     * milestones) attach here too. Null before the first boot.
+     */
+    get network() {
+        return this.#network;
     }
     /**
      * Inbound message handler — call from the worker's `message` event
@@ -260,6 +271,20 @@ export class WorkerHost {
             txSink: (byte) => this.#txBuffer.push(byte),
         });
         this.#console = browserConsole;
+        // Browser-side LAN (Phase 14 M3a): one switch per boot, with the
+        // machine's NE2000 as its first port. Frames the guest transmits
+        // enter the switch; frames other ports send arrive via
+        // `nic.injectFrame`. No pseudo-hosts attach yet — the fabric
+        // exists so later milestones only add ports.
+        const network = new EthernetSwitch();
+        this.#network = network;
+        const nicPort = network.attach({
+            name: 'ne2000',
+            onFrame: (frame) => {
+                this.#machine?.nic.injectFrame(frame);
+            },
+        });
+        this.#nicPort = nicPort;
         const machine = new IBMPCMachine({
             disk: primary.disk,
             diskClass: primary.diskClass,
@@ -273,6 +298,7 @@ export class WorkerHost {
             hostClock: new NodeHostClock(),
             cyclesPerPitTick: 4,
             uartTransmit: (byte) => this.#txBuffer.push(byte),
+            nicTransmit: (frame) => nicPort.transmit(frame),
         });
         // Silent CGA sink — Phase 9 has no canvas. Without a sink the kernel's
         // early-printk writes to 0xB8000 still land in memory; the mirror is
@@ -381,6 +407,11 @@ export class WorkerHost {
         if (this.#machine) {
             this.#machine.stop();
         }
+        if (this.#nicPort) {
+            this.#nicPort.detach();
+            this.#nicPort = null;
+        }
+        this.#network = null;
         this.#machine = null;
         this.#console = null;
         this.#txBuffer.length = 0;
