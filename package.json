@@ -18,7 +18,7 @@
     "dev:browser": "vite",
     "build:browser": "vite build",
     "preview:browser": "vite preview",
-    "deploy:dev": "npm run build:browser && npx wrangler deploy",
+    "deploy:dev": "npm run build:browser && npx wrangler deploy --env=\"\"",
     "deploy:prod": "npm run build:browser && npx wrangler deploy --env production"
   },
   "dependencies": {
