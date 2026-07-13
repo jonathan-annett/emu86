@@ -118,6 +118,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'tx':     return 'tx';
       case 'halted': return 'halted';
       case 'error':  return 'error';
+      case 'tan-identity': return 'tan-identity';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -136,5 +137,6 @@ describe('browser protocol — exhaustiveness', () => {
     expect(describeWorker({ type: 'tx', bytes: new Uint8Array() })).toBe('tx');
     expect(describeWorker({ type: 'halted', reason: 'x' })).toBe('halted');
     expect(describeWorker({ type: 'error', message: 'x' })).toBe('error');
+    expect(describeWorker({ type: 'tan-identity', hostOctet: 42 })).toBe('tan-identity');
   });
 });

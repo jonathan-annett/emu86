@@ -80,6 +80,14 @@ export interface BootConfig {
    * primary apply.
    */
   secondary?: DiskSlotSpec;
+  /**
+   * Preferred TAN host octet (sticky IP). Main thread reads it from the
+   * tab's session store and the TAN lease tries it first — full
+   * defend/repick semantics still apply, so a duplicated tab offering
+   * a live octet repicks. The settled octet flows back via
+   * {@link TanIdentityMessage}.
+   */
+  tanPreferredOctet?: number;
 }
 
 // ============================================================
@@ -126,8 +134,19 @@ export interface ErrorMessage {
   stack?: string;
 }
 
+/**
+ * Settled TAN identity for this boot (Phase 14 — sticky IPs). Sent
+ * after the lease resolves so the main thread can persist the octet in
+ * the tab's session store for the next page load.
+ */
+export interface TanIdentityMessage {
+  type: 'tan-identity';
+  hostOctet: number;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
   | HaltedMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | TanIdentityMessage;

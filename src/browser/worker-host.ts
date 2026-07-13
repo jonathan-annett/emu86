@@ -415,14 +415,23 @@ export class WorkerHost {
     // once and kept across reboots: the tab keeps its address, and the
     // lease keeps defending it while the machine restarts.
     if (this.#tanConfig !== null && this.#tan === null) {
-      this.#tan = new TabAreaNetwork(
-        this.#tanConfig.channel,
-        this.#tanConfig.hostOctet !== undefined
+      this.#tan = new TabAreaNetwork(this.#tanConfig.channel, {
+        ...(this.#tanConfig.hostOctet !== undefined
           ? { hostOctet: this.#tanConfig.hostOctet }
-          : {},
-      );
+          : {}),
+        // Sticky IP (session store): the last session's octet gets
+        // first shot; defend/repick still applies.
+        ...(config.tanPreferredOctet !== undefined
+          ? { preferredOctet: config.tanPreferredOctet }
+          : {}),
+      });
     }
     const tanIdentity = this.#tan !== null ? await this.#tan.acquire() : null;
+    if (tanIdentity !== null) {
+      // Report the settled identity so the main thread can persist it
+      // for the next page load (and show the address to the user).
+      this.#post({ type: 'tan-identity', hostOctet: tanIdentity.hostOctet });
+    }
 
     const primary = await this.#resolveSlot(
       'primary',

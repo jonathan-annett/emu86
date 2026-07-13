@@ -148,4 +148,43 @@ describe('TAN identity lease', () => {
     expect(id.hostOctet).toBe(33);
     expect(claims).toEqual([33]);
   });
+
+  it('a free preferred octet is granted first try (sticky IP across reloads)', async () => {
+    const hub = makeHub();
+    const tan = new TabAreaNetwork(hub.join(), {
+      preferredOctet: 42,
+      claimWaitMs: 5,
+      random: () => { throw new Error('random must not be consulted'); },
+    });
+    const id = await tan.acquire();
+    expect(id.hostOctet).toBe(42);
+  });
+
+  it('a defended preferred octet is repicked (the duplicated-tab case)', async () => {
+    const hub = makeHub();
+    const original = new TabAreaNetwork(hub.join(), { hostOctet: 42 });
+    original.attach(new EthernetSwitch());
+
+    // The duplicate's copied session store offers the SAME octet; the
+    // live original defends it and the fallback pick lands on 57.
+    const duplicate = new TabAreaNetwork(hub.join(), {
+      preferredOctet: 42,
+      claimWaitMs: 5,
+      random: () => (57 - 16 + 0.5) / (199 - 16 + 1), // midpoint — float-safe
+    });
+    const id = await duplicate.acquire();
+    expect(id.hostOctet).toBe(57);
+    expect(original.identity?.hostOctet).toBe(42);
+  });
+
+  it('an out-of-range preferred octet is ignored, not thrown', async () => {
+    const hub = makeHub();
+    const tan = new TabAreaNetwork(hub.join(), {
+      preferredOctet: 3, // DNS pseudo-host — outside the lease range
+      claimWaitMs: 5,
+      random: () => (77 - 16 + 0.5) / (199 - 16 + 1), // midpoint — float-safe
+    });
+    const id = await tan.acquire();
+    expect(id.hostOctet).toBe(77);
+  });
 });

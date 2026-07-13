@@ -105,6 +105,18 @@ export function tanIdentityFor(octet: number): TanIdentity {
 export interface TabAreaNetworkOptions {
   /** Fixed host octet — skips the claim wait (deterministic tests). */
   hostOctet?: number;
+  /**
+   * Preferred host octet — tried as the FIRST pick, with the full
+   * claim/defend/repick flow still applying (unlike `hostOctet`, which
+   * settles unconditionally). This is the sticky-IP hook: the main
+   * thread persists the settled octet in the tab's session store and
+   * offers it back on the next page load, so reloads keep their
+   * address while a duplicated tab (whose copied sessionStorage offers
+   * the SAME octet) gets defended off it and repicks a fresh one.
+   * Ignored when `hostOctet` is set or the value is outside the lease
+   * range.
+   */
+  preferredOctet?: number;
   /** Claim-defence listening window. Default 150 ms. */
   claimWaitMs?: number;
   /** Random source for octet picks. Default Math.random. */
@@ -115,6 +127,7 @@ export class TabAreaNetwork {
   readonly #channel: FrameChannel;
   readonly #claimWaitMs: number;
   readonly #random: () => number;
+  readonly #preferredOctet: number | null;
 
   #identity: TanIdentity | null = null;
   #trunk: SwitchPort | null = null;
@@ -142,6 +155,13 @@ export class TabAreaNetwork {
     this.#channel = channel;
     this.#claimWaitMs = opts.claimWaitMs ?? DEFAULT_CLAIM_WAIT_MS;
     this.#random = opts.random ?? Math.random;
+    this.#preferredOctet =
+      opts.preferredOctet !== undefined
+        && Number.isInteger(opts.preferredOctet)
+        && opts.preferredOctet >= OCTET_MIN
+        && opts.preferredOctet <= OCTET_MAX
+        ? opts.preferredOctet
+        : null;
     if (opts.hostOctet !== undefined) {
       // Fixed identities are settled from birth and defend immediately.
       this.#identity = tanIdentityFor(opts.hostOctet);
@@ -168,7 +188,13 @@ export class TabAreaNetwork {
       return this.#identity;
     }
     for (let attempt = 0; attempt < 10; attempt++) {
-      const octet = OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
+      // Sticky IP: the persisted octet from the last session gets first
+      // shot; a live holder (e.g. the original of a duplicated tab)
+      // defends it and the fallback picks are random as before.
+      const octet =
+        attempt === 0 && this.#preferredOctet !== null
+          ? this.#preferredOctet
+          : OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
       this.#conflictSeen = false;
       this.#identity = tanIdentityFor(octet); // provisional
       this.#channel.postMessage({ tan: 'claim', octet });

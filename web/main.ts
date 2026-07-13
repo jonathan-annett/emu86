@@ -33,6 +33,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import type {
   BootConfig,
+  BootMessage,
   MainToWorkerMessage,
   WorkerToMainMessage,
 } from '../src/browser/protocol.js';
@@ -48,6 +49,7 @@ import { THEMES } from './themes.js';
 import { ImageLibrary } from './image-library.js';
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
+import { loadSession, saveSession } from './session-store.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -163,6 +165,13 @@ async function init(): Promise<void> {
       // messages — see worker-host.ts shared txBuffer.
       return;
     }
+    if (msg.type === 'tan-identity') {
+      // Sticky IP: persist the settled octet so the next reload offers
+      // it back to the lease; tell the user where they live.
+      saveSession({ tanHostOctet: msg.hostOctet });
+      term.writeln(`[TAN address: 10.0.2.${msg.hostOctet}]`);
+      return;
+    }
     if (msg.type === 'halted') {
       term.writeln('');
       term.writeln(`[emu86: halted — ${msg.reason}]`);
@@ -215,6 +224,12 @@ async function init(): Promise<void> {
     settings.imageSource,
     settings.secondaryImageSource,
   );
+  // Sticky IP: offer last session's TAN octet as the lease's first
+  // pick (defend/repick still applies — a duplicated tab repicks).
+  const session = loadSession();
+  if (session.tanHostOctet !== null) {
+    boot.config.tanPreferredOctet = session.tanHostOctet;
+  }
   worker.postMessage(boot);
 
   // Mount the settings UI. `bootedFrom` and `bootedSecondary` capture the
@@ -238,7 +253,7 @@ async function buildBootMessage(
   library: ImageLibrary,
   source: ImageSource,
   secondary: { kind: 'library'; id: string } | null,
-): Promise<MainToWorkerMessage> {
+): Promise<BootMessage> {
   // Primary slot — current behaviour: bundled URL or library bytes.
   const config: BootConfig = source.kind === 'library'
     ? { imageBytes: await library.getImageBytes(source.id) }
