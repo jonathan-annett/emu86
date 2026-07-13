@@ -176,6 +176,43 @@ describe('NE2000 — ELKS driver contract', () => {
     expect(nic.readByte(B + 0x07) & 0x10).toBe(0x10); // ISR.OVW
   });
 
+  it('remote DMA wraps the ring seam: a PSTOP-straddling packet reads back exactly', () => {
+    // The ELKS driver reads each packet in ONE dma_read and trusts the
+    // card to wrap at PSTOP (its own seam check is commented out,
+    // ne2k-asm.S:492). Regression for the telnet'd-invaders crash:
+    // without the wrap, the tail of a seam-straddling packet came back
+    // as garbage (client TCP bad checksums, server ktcp read panic).
+    const { nic } = makeNic();
+    startWithRing(nic);
+    // Park the ring so the next packet lands across PSTOP (0x80→0x46):
+    // CURR at the last page, BNRY safely mid-ring.
+    nic.writeByte(B + 0x03, 0x50); // BNRY
+    nic.writeByte(B, 0x42);        // page 1
+    nic.writeByte(B + 0x07, 0x7f); // CURR = last ring page
+    nic.writeByte(B, 0x02);        // page 0
+
+    const frame = new Uint8Array(300).map((_, i) => (i * 11 + 3) & 0xff);
+    expect(nic.injectFrame(frame)).toBe(true);
+
+    // Header at page 0x7F: next page wraps past PSTOP to 0x47.
+    remoteStart(nic, 'read', 0x7f00, 4);
+    const h0 = nic.readWord(B + 0x10);
+    const h1 = nic.readWord(B + 0x10);
+    expect(h0 & 0xff).toBe(0x01);       // status
+    expect(h0 >> 8).toBe(0x47);         // next page (wrapped)
+    expect(h1).toBe(304);               // 300 + 4
+    nic.writeByte(B + 0x07, 0x40);      // clear RDC
+
+    // One continuous DMA read across the seam, like ne2k_pack_get.
+    remoteStart(nic, 'read', 0x7f04, 300);
+    const bytes: number[] = [];
+    for (let i = 0; i < 300; i += 2) {
+      const w = nic.readWord(B + 0x10);
+      bytes.push(w & 0xff, w >> 8);
+    }
+    expect(bytes).toEqual(Array.from(frame));
+  });
+
   it('drops frames when stopped or in monitor mode', () => {
     const { nic } = makeNic();
     expect(nic.injectFrame(new Uint8Array(64))).toBe(false); // stopped

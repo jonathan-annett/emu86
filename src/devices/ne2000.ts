@@ -519,12 +519,7 @@ export class NE2000 implements PortHandler {
       return 0xff; // open bus — driver never reads outside a transfer
     }
     const b = this.#readMem(this.#dmaAddr);
-    this.#dmaAddr = (this.#dmaAddr + 1) & 0xffff;
-    this.#dmaRemaining--;
-    if (this.#dmaRemaining === 0) {
-      this.#remoteMode = 'idle';
-      this.#raiseISR(ISR_RDC);
-    }
+    this.#advanceDma();
     return b;
   }
 
@@ -534,7 +529,28 @@ export class NE2000 implements PortHandler {
       return;
     }
     this.#writeMem(this.#dmaAddr, v);
+    this.#advanceDma();
+  }
+
+  /**
+   * Advance the remote-DMA address one byte — WRAPPING at the receive
+   * ring's PSTOP seam back to PSTART, exactly like QEMU's ne2000 (and
+   * the RTL8019 class of real clones). This is load-bearing: ELKS's
+   * driver reads each packet in ONE dma_read and deliberately removed
+   * its own seam handling (`ne2k-asm.S:492`, commented-out wraparound
+   * check — "avoid the ring wraparound logic on every read"), trusting
+   * the card. Without the wrap, any packet straddling PSTOP returns a
+   * garbage tail: TCP bad checksums on one end, a ktcp read panic on
+   * the other — found live by Jonathan playing telnet'd invaders on
+   * the TAN until the ring pointer reached the seam.
+   */
+  #advanceDma(): void {
     this.#dmaAddr = (this.#dmaAddr + 1) & 0xffff;
+    const start = this.#pstart << 8;
+    const stop = this.#pstop << 8;
+    if (stop > start && this.#dmaAddr === stop) {
+      this.#dmaAddr = start;
+    }
     this.#dmaRemaining--;
     if (this.#dmaRemaining === 0) {
       this.#remoteMode = 'idle';

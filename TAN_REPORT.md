@@ -46,6 +46,20 @@ The first instrumentation attempt (a scripted `str.replace` adding drop counters
 - Node's real BroadcastChannel is not exercised by tests (sync stubs + the structural type are the contract; the browser is the production transport).
 - Tab-throttling: two *visible* tabs telnet snappily; a heavily background-throttled tab will feel like a very slow peer (TCP tolerates it — now that connect() is ARP-latency-proof).
 
+## 5b. Post-verification field bug (same evening): the DMA ring-seam wrap
+
+Playing TAN-pirated games OVER telnet crashed both ends once enough
+traffic flowed: `ktcp: panic in read` on the server tab, TCP bad
+checksums on the client. Root cause: the NE2000 model advanced its
+remote-DMA address linearly, but ELKS reads each packet in ONE
+`dma_read` and trusts the card to wrap at PSTOP (its own seam check is
+commented out — `ne2k-asm.S:492`; QEMU and RTL8019-class clones wrap).
+Any packet straddling the ring seam (page 0x7F→0x46) returned a
+garbage tail — position-dependent, so everything worked until the ring
+pointer reached the seam. Fixed in the device (`#advanceDma` wraps at
+PSTOP→PSTART); pinned by a seam-straddling round-trip regression test.
+Telnet gaming remains the best fuzzer this project has.
+
 ## 6. Reproduction / browser demo
 
 ```
