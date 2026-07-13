@@ -83,6 +83,10 @@ describe('Phase 14 M2 — stock hd32-minix.img boots to serial via WorkerHost au
       expect(boot).toContain('VFS: Mounted root device');
       // The image's own init runs — accept login: or a direct shell.
       expect(boot).toMatch(PROMPT_RE);
+      // M3b: the auto-patch's ne0= line moved the driver to IRQ 5 —
+      // without it, `net start ne0` dies with EINVAL on the kernel's
+      // default IRQ 12 (unreachable behind the single master PIC).
+      expect(boot).toContain('eth: ne0 at 300, irq 5');
 
       // ---- if login: log in as root (stock image: passwordless) ----
       if (/login: *$/.test(boot)) {
