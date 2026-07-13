@@ -168,14 +168,44 @@ custom events over — no new dependency:
 Dev-mode only by design — the production `dist-web` build carries none
 of it.
 
-### M3 — NE2000 + in-VM driver build (BLOCKED — do not start)
+### M3 — NE2000 device + virtual switch (UNBLOCKED 2026-07-13; addendum below)
 
-Unblocks when `emu86-networking-plan.md` (or Jonathan's restatement)
-is in the repo. Known constraints to carry into its design, from the
-audit: single master PIC (device must sit on IRQ 3/5-class lines,
-IRQ 8–15 unreachable); no DMA controller modeled; driver source
-naturally starts from `reference/elks` (`ne2k` driver tree). The
-in-VM build uses the M1 extraction path to harvest compiled objects.
+**Addendum (2026-07-13, after `emu86-networking-plan.md` landed in the
+tree).** The plan reshapes M3 per Jonathan's recorded instinct: *"we
+model outside of the VM first — before writing a line of C on the
+driver."* Two reality-deltas discovered since the plan was written:
+
+1. **The stock kernel already ships an NE2000 driver** — every HD boot
+   probes `eth: ne0 at 300, irq 12 not found` (M2 boot logs). Layer 1
+   networking therefore needs NO in-VM compilation: build the device
+   and the browser-side switch, and the existing driver finds it. The
+   dogfooding compile (rebuild the driver with the on-disk c86, extract
+   via M1) is a SEPARATE demonstration, valuable but not load-bearing.
+2. **IRQ:** the plan's "IRQ 9 typically" and the kernel's default probe
+   (IRQ 12) are both unreachable on our single master PIC. The device
+   goes at **0x300, IRQ 5** (classic NE2000 alternate), selected
+   guest-side by uncommenting/editing the image's own `#ne0=` bootopts
+   line to `ne0=5,0x300,,0x80` — the M2 bootopts patcher is the natural
+   place to add it.
+
+**M3a scope (next up):** `src/devices/ne2000.ts` — 8390-class NIC in
+the established device pattern (port I/O, `onTransmit(frame)`,
+`injectFrame(frame)`), wired into `IBMPCMachine` as an optional device;
+`src/net/switch.ts` — MAC-dispatch frame router with pseudo-host
+registration, no pseudo-hosts yet beyond a loopback/test peer.
+Acceptance: stock kernel detects ne0 at boot; frames flow both ways
+under an integration test (kernel transmits ARP/broadcast on `net
+start`-style activity or via the driver's own probe traffic); browser
+harness attaches the switch in the worker.
+**M3b+ (per the plan's phase ladder, each its own scope entry):**
+ARP/ICMP pseudo-hosts → DNS-over-DoH → TCP termination + HTTP gateway
+→ `webget`/second-UART escape hatch → NTP/RTC. Config surface (plan
+open-question 3): start as `BootConfig` fields in the worker protocol;
+promote to the settings UI when pseudo-hosts exist to configure.
+
+Substrate note: M3a touches `src/devices/`, `src/machine/ibm-pc.ts`
+(optional-device wiring), and `src/net/` (new) — this is the phase's
+subject, approved by the arc; hard rules 1–5 unchanged.
 
 ## Verification
 
