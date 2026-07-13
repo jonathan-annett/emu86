@@ -34,9 +34,9 @@
 - CLI (`tools/elks/run-serial.ts`) pacing, visible stats overlay, PIT multi-edge semantics, reduced-duty background mode — all out of scope per the plan.
 - No attempt to make instruction-paced integration tests real-time — they deliberately keep virtual time fast (a 30 s guest `sleep` in a test SHOULD take milliseconds).
 
-## 5. Field acceptance (pending Jonathan, on the DEV deploy tier)
+## 5. Field acceptance (on the DEV deploy tier)
 
-1. `sleep 30` takes ~30 wall seconds (the cleanest test of the idle direction).
+1. ✅ **`sleep 30` takes 30 wall seconds** — field-verified (Jonathan, 2026-07-15, emu86-dev tier): "i can confirm that 30 seconds is 30 seconds." The idle direction (previously ~1 wall second) is fixed.
 2. invaders/tetris over TAN telnet run at proper speed (the busy direction).
 3. First-try `nslookup` still works (stall + pacing compose).
 4. Turbo toggle visibly speeds an in-VM `c86` compile, and games slow back down when returned to authentic.
