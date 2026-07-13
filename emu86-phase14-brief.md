@@ -339,6 +339,45 @@ modal (picker + editor); one seeded example (`root` + `net start ne0`)
 so every tab can join the TAN hands-free. Scripts apply on reload,
 like image-source changes.
 
+### Pacing / real-time clock (scope addendum, 2026-07-14 — approved plan)
+
+The pacing-diagnosis note at the end of this brief, made scope. Problem:
+virtual time is instruction-paced (1 instr = 1 cycle), so guest clocks
+run SLOW under load (games) and FAST at idle (halt spins — the mechanism
+behind the M3c DNS stall workaround). Fix: in the browser worker's run
+loop ONLY, drive `clock.advance()` from host elapsed time at 4,772.7
+cycles/ms, sliced ≤10,000 cycles per call (the PIT fires at most one
+rising edge per advance — `pit.ts:43` — so unsliced catch-up would lose
+jiffies), catch-up capped at 100 ms (throttled tabs fall behind wall
+rather than fast-forwarding). Decisions (Jonathan, in-session):
+
+1. **CPU capped at authentic 4.77 MHz, with a live settings toggle**
+   ("turbo" uncaps instructions for in-VM compiles; clocks stay
+   wall-true in both modes).
+2. **Only the CPU clock is capped — never the networking.** The LAN
+   fabric (switch, pseudo-hosts, TAN trunk, DoH, injectFrame) stays
+   event-driven and unclocked, including during stalls and between
+   turns. RX drain and frame injection live outside the instruction
+   budget.
+3. **Background tabs keep running full pace** (TAN servers stay live);
+   the run-loop yield moves from clamped `setTimeout(0)` to a
+   MessageChannel ping, which also sidesteps background timer
+   throttling.
+4. **Throughput + measurement:** adaptive batch size (~4 ms of stepping
+   per turn, bounded [2k..250k]) and a once-per-second `stats` message
+   (instr/s, cycles/s, ratio to real time) surfaced via console and a
+   dev-server `GET /agent/stats` endpoint — the huxley/lite
+   pure-TS-vs-WASM evidence.
+
+Substrate note: touches `src/browser/` (new `pacing.ts`, worker-host
+loop, protocol) and `web/` only. CPU, machine, PIT, clock, run-loop,
+trace-runner, probe harness untouched — every existing test keeps
+instruction-paced determinism (`WorkerHost.runUntil` semantics
+unchanged). Field acceptance on the DEV deploy tier: games right-speed,
+first-try nslookup still works, turbo visibly speeds a compile.
+Deliverable: `BROWSER_PACING_REPORT.md` with measured numbers.
+(This supersedes the "Performance work" exclusion under Out of scope.)
+
 **Back burner (Jonathan, 2026-07-14, same conversation): two richer
 boot-customization layers, deliberately deferred in favour of the
 keystroke scripts above.**
