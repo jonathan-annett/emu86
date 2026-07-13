@@ -11,7 +11,15 @@ import { execSync } from 'node:child_process';
 function buildStamp(): string {
   let hash = 'unknown';
   try {
-    hash = execSync('git describe --always --dirty', { encoding: 'utf8' }).trim();
+    hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    // Dirty check EXCLUDING committed build outputs — rebuilding always
+    // touches dist-web before its own commit, which would make every
+    // stamp read "-dirty" forever.
+    const dirty = execSync(
+      "git status --porcelain -- . ':!dist-web' ':!dist-cli' ':!releases'",
+      { encoding: 'utf8' },
+    ).trim();
+    if (dirty !== '') hash += '-dirty';
   } catch {
     // Not a git checkout (tarball build) — 'unknown' is honest.
   }
