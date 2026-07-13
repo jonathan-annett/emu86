@@ -1,24 +1,55 @@
-// Cloudflare deployment for 8086-tab.net (worker service: emu86).
+// Cloudflare deployment for the emu86 browser harness — TWO services
+// from this one config (stable/dev gate, 2026-07-14):
 //
-// `npx wrangler deploy` from the repo root publishes:
-//   - dist-web/ as static assets (build first: npm run build:browser)
-//   - deploy/cf-worker.ts for requests no asset matches — today that is
-//     only /gh-assets/*, the narrow CORS proxy for ELKS release images
-//     (see the worker's header comment for the scope policy).
+//   npm run deploy:dev    →  service "emu86-dev"
+//                            https://emu86-dev.jonathan-max-annett.workers.dev
+//                            The testing tier. Bare `wrangler deploy` lands
+//                            here — the default can never clobber stable.
+//
+//   npm run deploy:prod   →  service "emu86" (requires --env production)
+//                            https://8086-tab.net ONLY (workers_dev off).
+//                            Promote deliberately, after the dev tier is
+//                            field-verified.
+//
+// Both tiers run the same deploy/cf-worker.ts (dist-web assets + the
+// /gh-assets CORS proxy for ELKS release images). Different origins mean
+// separate TANs / image libraries / settings — dev experiments cannot
+// touch public-site state.
 //
 // Auth: wrangler reads CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID from
-// the environment (`source ~/cf-token.env`). The 8086-tab.net custom
-// domain is attached to the service and survives redeploys.
+// the environment (`set -a; source ~/cf-token.env; set +a`). Deploys are
+// permission-gated for agents — Jonathan runs them. The 8086-tab.net
+// custom domain is attached to the `emu86` service and survives deploys.
 {
-  "name": "emu86",
+  "name": "emu86-dev",
   "main": "deploy/cf-worker.ts",
   "compatibility_date": "2026-07-13",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
   "assets": {
     "directory": "./dist-web",
     "binding": "ASSETS"
   },
   "observability": {
     "enabled": true
+  },
+  "env": {
+    "production": {
+      "name": "emu86",
+      // Stable serves at the custom domain only; its workers.dev URL is
+      // disabled so there is exactly one public entry point.
+      "workers_dev": false,
+      // Repeated explicitly (not relying on env inheritance rules):
+      "main": "deploy/cf-worker.ts",
+      "compatibility_date": "2026-07-13",
+      "compatibility_flags": ["nodejs_compat"],
+      "assets": {
+        "directory": "./dist-web",
+        "binding": "ASSETS"
+      },
+      "observability": {
+        "enabled": true
+      }
+    }
   }
 }

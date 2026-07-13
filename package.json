@@ -17,7 +17,9 @@
     "start:elks-serial": "tsc -p tsconfig.cli.json && node dist-cli/tools/elks/run-serial.js",
     "dev:browser": "vite",
     "build:browser": "vite build",
-    "preview:browser": "vite preview"
+    "preview:browser": "vite preview",
+    "deploy:dev": "npm run build:browser && npx wrangler deploy",
+    "deploy:prod": "npm run build:browser && npx wrangler deploy --env production"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

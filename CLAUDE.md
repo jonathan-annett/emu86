@@ -150,9 +150,11 @@ built against it.)
 - Root is littered with `corpus-baseline*.txt`, `diag-out*.txt` — scratch artifacts
   from old phases, not inputs.
 - Remote is `github.com/jonathan-annett/emu86` (**private**), branch `main`.
-  The deployed site (https://8086-tab.net) is NOT auto-deployed from git — it
-  ships via `npx wrangler deploy` from this checkout (see `wrangler.jsonc`),
-  run by Jonathan.
+  Deployment is two-tier and NOT git-triggered (see `wrangler.jsonc`):
+  `npm run deploy:dev` → emu86-dev.jonathan-max-annett.workers.dev (testing);
+  `npm run deploy:prod` → https://8086-tab.net (stable — promote only after
+  the dev tier is field-verified). Deploys are permission-gated for agents;
+  Jonathan runs them.
 
 ## 7. How to work in this repo
 
