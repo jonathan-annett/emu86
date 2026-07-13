@@ -4,8 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>emu86 — ELKS in the browser</title>
-    <script type="module" crossorigin src="./assets/index-DCDTwUf2.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-B9SGSCe8.css">
+    <!-- xterm.css is imported from main.ts. A bare package path in a
+         link tag is NOT resolved by Vite — dev served the SPA-fallback
+         HTML for it (MIME-rejected as a stylesheet), leaving xterm
+         unstyled since Phase 9: visible helper textarea, unstyled
+         scrollback viewport. Found by Jonathan, Phase 14. -->
+    <script type="module" crossorigin src="./assets/index-Ds9-6aNF.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DkkFhouQ.css">
   </head>
   <body>
     <main>

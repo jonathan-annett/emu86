@@ -48,6 +48,29 @@ header code {
   min-height: 0;
 }
 
+/* Make the scrollback scrollbar actually visible (Phase 14 field
+ * report): xterm's viewport scrolls natively and scrollback is 10,000
+ * lines, but the default thumb is dark-on-black and overlay scrollbars
+ * only flash mid-scroll — a full buffer looked like it had no
+ * scrollbar at all. Explicit thin grey thumb, both engines. */
+.xterm .xterm-viewport {
+  scrollbar-width: thin;              /* Firefox */
+  scrollbar-color: #666 transparent;  /* Firefox */
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: #666;
+  border-radius: 5px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ------------------------------------------------------------------ */
 /* Settings gear + modal                                                 */
 /* ------------------------------------------------------------------ */

@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>emu86 — ELKS in the browser</title>
     <link rel="stylesheet" href="./style.css" />
-    <link rel="stylesheet" href="@xterm/xterm/css/xterm.css" />
+    <!-- xterm.css is imported from main.ts. A bare package path in a
+         link tag is NOT resolved by Vite — dev served the SPA-fallback
+         HTML for it (MIME-rejected as a stylesheet), leaving xterm
+         unstyled since Phase 9: visible helper textarea, unstyled
+         scrollback viewport. Found by Jonathan, Phase 14. -->
   </head>
   <body>
     <main>

@@ -27,6 +27,9 @@
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+// Bundled by Vite (dev and build alike) — see the note in index.html
+// for why this must NOT be a <link> tag.
+import '@xterm/xterm/css/xterm.css';
 
 import type {
   BootConfig,
