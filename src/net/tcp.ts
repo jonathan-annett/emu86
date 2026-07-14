@@ -168,6 +168,7 @@ export class TcpStack {
   readonly #listeners = new Map<number, TcpListenerHandler>();
   /** Catch-all for any (IP, port) — the promiscuous gateway terminator. */
   #anyListener: TcpListenerHandler | null = null;
+  #anyAccept: ((localIp: Ipv4, localPort: number) => boolean) | null = null;
   /** `remoteIp|remotePort|localIp|localPort` → connection. */
   readonly #conns = new Map<string, Connection>();
   /** Deterministic ISS — no clocks on the LAN (and none allowed). */
@@ -200,13 +201,16 @@ export class TcpStack {
    * report the dialed identity via `localIp`/`localPort`. Exact-port
    * listeners still win; this is the fallback. The caller decides which
    * destinations reach the stack at all (the gateway feeds only
-   * off-subnet traffic).
+   * off-subnet traffic). A SYN the optional `accept` predicate declines
+   * falls through to the RST path — an honest connection-refused for
+   * ports the terminator cannot serve (:443 — fetch owns TLS).
    */
-  listenAny(handler: TcpListenerHandler): void {
+  listenAny(handler: TcpListenerHandler, accept?: (localIp: Ipv4, localPort: number) => boolean): void {
     if (this.#anyListener !== null) {
       throw new Error('TcpStack: already has a listenAny handler');
     }
     this.#anyListener = handler;
+    this.#anyAccept = accept ?? null;
   }
 
   /** Number of live (non-closed) connections — for tests. */
@@ -391,7 +395,12 @@ export class TcpStack {
     if ((seg.flags & TCP_RST) !== 0) return;
 
     if ((seg.flags & TCP_SYN) !== 0) {
-      const handler = this.#listeners.get(seg.dstPort) ?? this.#anyListener ?? undefined;
+      let handler = this.#listeners.get(seg.dstPort);
+      if (handler === undefined && this.#anyListener !== null) {
+        if (this.#anyAccept === null || this.#anyAccept(dstIp, seg.dstPort)) {
+          handler = this.#anyListener;
+        }
+      }
       if (handler !== undefined) {
         const conn = new Connection(
           this,

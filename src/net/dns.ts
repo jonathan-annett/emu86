@@ -7,11 +7,16 @@
  * length prefix, then the query message. This host listens on TCP/53
  * via {@link TcpStack}, strips the prefix, hands the raw query to an
  * injected {@link DnsResolve} function, and streams the answer back
- * with the prefix restored. It never parses DNS messages beyond the
- * two header bytes a SERVFAIL synthesis needs — in the browser the
- * resolve function is {@link dohResolve} (RFC 8484 GET pass-through to
- * a CORS-permissive DoH endpoint), so the guest's own query and the
- * resolver's real answer travel byte-authentically.
+ * with the prefix restored. The pass-through itself is byte-exact —
+ * in the browser the resolve function is {@link dohResolve} (RFC 8484
+ * GET pass-through to a CORS-permissive DoH endpoint), so the guest's
+ * own query and the resolver's real answer travel byte-authentically.
+ *
+ * Phase 15 M1 posture change (deliberate, recorded): when a
+ * {@link DnsAnswerCache} is supplied, successful answers are *read*
+ * (question name + A records) to build the IP→name reverse map the
+ * HTTP gateway needs for Host-less clients. Reading is all — the
+ * answer still travels to the guest untouched.
  *
  * First async pseudo-host: the query is ACKed synchronously (the
  * TcpStack does that before `onData` fires), and the answer transmits
@@ -82,6 +87,8 @@ export interface DnsHostOptions {
   mac?: Mac;
   /** Observe resolve failures (already answered with SERVFAIL). */
   onResolveError?: (err: unknown) => void;
+  /** Populated from successful answers — the M3d reverse map. */
+  cache?: DnsAnswerCache;
 }
 
 interface PendingQuery {
@@ -96,6 +103,7 @@ export class DnsHost {
   #port: SwitchPort | null = null;
   readonly #resolve: DnsResolve;
   readonly #onResolveError: (err: unknown) => void;
+  readonly #cache: DnsAnswerCache | null;
   readonly #tcp: TcpStack;
   /** IP (dotted string) → MAC, learned from ARP traffic. */
   readonly #arpTable = new Map<string, Mac>();
@@ -130,6 +138,7 @@ export class DnsHost {
     this.mac = opts.mac ?? DNS_MAC;
     this.#resolve = opts.resolve;
     this.#onResolveError = opts.onResolveError ?? (() => { /* unobserved */ });
+    this.#cache = opts.cache ?? null;
     this.#tcp = new TcpStack({
       localIp: this.ip,
       transmit: (dstIp, segment) => this.#transmitIp(dstIp, segment),
@@ -194,6 +203,7 @@ export class DnsHost {
     try {
       answer = await this.#resolve(query);
       this.queriesResolved++;
+      this.#cache?.noteAnswer(answer);
     } catch (err) {
       this.#onResolveError(err);
       answer = servfailFor(query);
@@ -292,6 +302,129 @@ export function servfailFor(query: Uint8Array): Uint8Array {
   r[10] = 0; // arcount
   r[11] = 0;
   return r;
+}
+
+/**
+ * IP→name reverse map for the M3d HTTP gateway (Phase 15 M1).
+ *
+ * Every A record in a successful answer maps its address to the
+ * *question* name — deliberately not the RR owner name: after a CNAME
+ * chain the owner is the canonical host, but the guest dials the name
+ * it asked for, and that is the Host header the gateway must
+ * reconstruct. Latest answer wins; there is no TTL (the LAN has no
+ * clock, and a stale name still beats a dotted IP in a Host header).
+ */
+export class DnsAnswerCache {
+  readonly #byIp = new Map<string, string>();
+
+  /** Read question + A records out of one answer message; bad messages are ignored. */
+  noteAnswer(message: Uint8Array): void {
+    const parsed = parseAnswerARecords(message);
+    if (parsed === null || parsed.question.length === 0) return;
+    for (const ip of parsed.addresses) {
+      this.#byIp.set(formatIp(ip), parsed.question);
+    }
+  }
+
+  lookup(ip: Ipv4): string | undefined {
+    return this.#byIp.get(formatIp(ip));
+  }
+
+  get size(): number {
+    return this.#byIp.size;
+  }
+}
+
+export interface ParsedAnswerARecords {
+  /** First question name, lowercased, dot-joined. */
+  question: string;
+  /** Every A-record address in the answer section, in order. */
+  addresses: Ipv4[];
+}
+
+/**
+ * Minimal RFC 1035 reader for {@link DnsAnswerCache}: first question
+ * name plus the answer-section A records (type 1, class IN). Anything
+ * else (AAAA, CNAME, authority/additional sections) is skipped, not
+ * an error. Returns null only for messages too malformed to walk.
+ */
+export function parseAnswerARecords(message: Uint8Array): ParsedAnswerARecords | null {
+  if (message.length < 12) return null;
+  const qdcount = ((message[4] ?? 0) << 8) | (message[5] ?? 0);
+  const ancount = ((message[6] ?? 0) << 8) | (message[7] ?? 0);
+
+  let offset = 12;
+  let question = '';
+  for (let q = 0; q < qdcount; q++) {
+    const name = readDnsName(message, offset);
+    if (name === null) return null;
+    if (q === 0) question = name.name;
+    offset = name.next + 4; // qtype + qclass
+    if (offset > message.length) return null;
+  }
+
+  const addresses: Ipv4[] = [];
+  for (let a = 0; a < ancount; a++) {
+    const name = readDnsName(message, offset);
+    if (name === null) return null;
+    offset = name.next;
+    if (offset + 10 > message.length) return null;
+    const type = ((message[offset] ?? 0) << 8) | (message[offset + 1] ?? 0);
+    const klass = ((message[offset + 2] ?? 0) << 8) | (message[offset + 3] ?? 0);
+    const rdlength = ((message[offset + 8] ?? 0) << 8) | (message[offset + 9] ?? 0);
+    const rdata = offset + 10;
+    if (rdata + rdlength > message.length) return null;
+    if (type === 1 && klass === 1 && rdlength === 4) {
+      addresses.push([
+        message[rdata] ?? 0,
+        message[rdata + 1] ?? 0,
+        message[rdata + 2] ?? 0,
+        message[rdata + 3] ?? 0,
+      ]);
+    }
+    offset = rdata + rdlength;
+  }
+  return { question, addresses };
+}
+
+/**
+ * Read one possibly-compressed domain name (RFC 1035 §4.1.4). `next`
+ * is the offset after the name *in the original stream* — after the
+ * first pointer for compressed names. Null on truncation, a reserved
+ * label type, or a pointer loop.
+ */
+function readDnsName(message: Uint8Array, offset: number): { name: string; next: number } | null {
+  const parts: string[] = [];
+  let o = offset;
+  let next = -1; // fixed at the first pointer jump
+  let jumps = 0;
+  for (;;) {
+    const len = message[o];
+    if (len === undefined) return null;
+    if (len === 0) {
+      o += 1;
+      break;
+    }
+    if ((len & 0xc0) === 0xc0) {
+      const lo = message[o + 1];
+      if (lo === undefined) return null;
+      if (next < 0) next = o + 2;
+      o = ((len & 0x3f) << 8) | lo;
+      if (++jumps > 32) return null; // pointer loop
+      continue;
+    }
+    if ((len & 0xc0) !== 0) return null; // 01/10 label types are reserved
+    const end = o + 1 + len;
+    if (end > message.length) return null;
+    let label = '';
+    for (let i = o + 1; i < end; i++) {
+      label += String.fromCharCode(message[i] ?? 0);
+    }
+    parts.push(label.toLowerCase());
+    o = end;
+    if (parts.length > 128) return null;
+  }
+  return { name: parts.join('.'), next: next >= 0 ? next : o };
 }
 
 /** RFC 4648 §5 base64url (no padding) over raw bytes — RFC 8484's dns= form. */

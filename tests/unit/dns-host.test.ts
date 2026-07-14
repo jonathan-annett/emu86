@@ -14,8 +14,10 @@ import { EthernetSwitch, type SwitchPort } from '../../src/net/switch.js';
 import {
   DNS_IP,
   DNS_MAC,
+  DnsAnswerCache,
   DnsHost,
   base64url,
+  parseAnswerARecords,
   servfailFor,
 } from '../../src/net/dns.js';
 import {
@@ -325,6 +327,73 @@ describe('DnsHost — LAN behavior', () => {
     await flush();
     expect(peer.takeTcp()).toHaveLength(0); // nothing transmitted
     expect(dns.answersDropped).toBe(1);
+  });
+});
+
+describe('DnsAnswerCache (Phase 15 M1 — the M3d reverse map)', () => {
+  it('reads the question and A records out of a compressed answer', () => {
+    const query = buildQuery(0x1234, 'Example.COM'); // case folds
+    const answer = buildAnswer(query, [93, 184, 216, 34]);
+    const parsed = parseAnswerARecords(answer);
+    expect(parsed?.question).toBe('example.com');
+    expect(parsed?.addresses).toEqual([[93, 184, 216, 34]]);
+  });
+
+  it('maps A records after a CNAME chain to the *question* name', () => {
+    const query = buildQuery(0x2222, 'www.example.com');
+    // Answer: CNAME www.example.com → cdn.example.net, then the A record.
+    const cnameTarget = [3, 99, 100, 110, 7, 101, 120, 97, 109, 112, 108, 101, 3, 110, 101, 116, 0];
+    const answer = new Uint8Array(query.length + 12 + cnameTarget.length + 16);
+    answer.set(query, 0);
+    answer[2] = 0x81;
+    answer[3] = 0x80;
+    answer[7] = 0x02; // ancount 2
+    let o = query.length;
+    // RR1: CNAME
+    answer[o++] = 0xc0; answer[o++] = 0x0c; // name → question
+    answer[o++] = 0x00; answer[o++] = 0x05; // type CNAME
+    answer[o++] = 0x00; answer[o++] = 0x01;
+    answer[o++] = 0; answer[o++] = 0; answer[o++] = 0x0e; answer[o++] = 0x10;
+    answer[o++] = 0x00; answer[o++] = cnameTarget.length;
+    for (const b of cnameTarget) answer[o++] = b;
+    // RR2: A, owned by the CNAME target (uncompressed would be longer;
+    // point back at the target inside RR1's rdata).
+    const targetOffset = query.length + 12;
+    answer[o++] = 0xc0; answer[o++] = targetOffset;
+    answer[o++] = 0x00; answer[o++] = 0x01; // type A
+    answer[o++] = 0x00; answer[o++] = 0x01;
+    answer[o++] = 0; answer[o++] = 0; answer[o++] = 0x0e; answer[o++] = 0x10;
+    answer[o++] = 0x00; answer[o++] = 0x04;
+    answer[o++] = 1; answer[o++] = 2; answer[o++] = 3; answer[o++] = 4;
+
+    const cache = new DnsAnswerCache();
+    cache.noteAnswer(answer);
+    // The guest dialed the name it asked for — that's the Host header.
+    expect(cache.lookup([1, 2, 3, 4])).toBe('www.example.com');
+  });
+
+  it('ignores garbage without throwing', () => {
+    const cache = new DnsAnswerCache();
+    cache.noteAnswer(new Uint8Array(0));
+    cache.noteAnswer(Uint8Array.from([1, 2, 3]));
+    cache.noteAnswer(Uint8Array.from({ length: 40 }, () => 0xc0)); // pointer loop
+    expect(cache.size).toBe(0);
+  });
+
+  it('is populated by DnsHost on successful resolves', async () => {
+    const lan = new EthernetSwitch();
+    const cache = new DnsAnswerCache();
+    const query = buildQuery(0x7777, 'example.com');
+    const dns = new DnsHost({
+      resolve: (q) => Promise.resolve(buildAnswer(q, [93, 184, 216, 34])),
+      cache,
+    });
+    dns.attachTo(lan);
+    const peer = new GuestPeer(lan);
+    peer.connect();
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(query));
+    await flush();
+    expect(cache.lookup([93, 184, 216, 34])).toBe('example.com');
   });
 });
 

@@ -35,6 +35,7 @@ import {
   ICMP_ECHO_REPLY,
   ICMP_ECHO_REQUEST,
   IPPROTO_ICMP,
+  IPPROTO_TCP,
   MAC_BROADCAST,
   buildArp,
   buildEthernetFrame,
@@ -95,6 +96,8 @@ export class LanGateway {
   /** IP (dotted string) → MAC, learned from ARP traffic. */
   readonly #arpTable = new Map<string, Mac>();
   readonly #pendingPings: PendingPing[] = [];
+  /** Off-subnet TCP handler (Phase 15 M1 — the HTTP gateway terminator). */
+  #tcpTerminator: ((srcIp: Ipv4, dstIp: Ipv4, tcpPayload: Uint8Array) => void) | null = null;
   #ipId = 1;
 
   // Counters for tests/diagnostics.
@@ -102,6 +105,7 @@ export class LanGateway {
   echoRequestsSent = 0;
   echoRepliesSent = 0;
   echoRepliesReceived = 0;
+  tcpForwarded = 0;
 
   constructor(opts: LanGatewayOptions = {}) {
     this.ip = opts.ip ?? GATEWAY_IP;
@@ -129,6 +133,41 @@ export class LanGateway {
   /** Read-only view of the learned IP→MAC table (dotted-IP keys). */
   get arpTable(): ReadonlyMap<string, Mac> {
     return this.#arpTable;
+  }
+
+  /**
+   * Register the off-subnet TCP terminator (Phase 15 M1). Routing
+   * means the guest sends every off-subnet packet to the gateway MAC;
+   * TCP among it is handed here instead of dropped. One terminator per
+   * gateway.
+   */
+  registerTcpTerminator(handler: (srcIp: Ipv4, dstIp: Ipv4, tcpPayload: Uint8Array) => void): void {
+    if (this.#tcpTerminator !== null) {
+      throw new Error('LanGateway: already has a TCP terminator');
+    }
+    this.#tcpTerminator = handler;
+  }
+
+  /**
+   * Transmit an IPv4 packet to a LAN host from an arbitrary source
+   * identity — the terminator's replies speak as whatever destination
+   * the guest dialed, from the gateway's MAC (exactly how a router
+   * looks on the wire). False when the LAN host's MAC is unknown; the
+   * guest always ARPs the gateway before routing through it, so its
+   * MAC is learned by then.
+   */
+  sendIpv4To(dstIp: Ipv4, srcIp: Ipv4, protocol: number, payload: Uint8Array): boolean {
+    const mac = this.#arpTable.get(formatIp(dstIp));
+    if (mac === undefined) return false;
+    this.#transmit(
+      buildEthernetFrame(
+        mac,
+        this.mac,
+        ETHERTYPE_IPV4,
+        buildIpv4(protocol, srcIp, dstIp, payload, this.#ipId++),
+      ),
+    );
+    return true;
   }
 
   /**
@@ -198,7 +237,15 @@ export class LanGateway {
   #onIpv4(payload: Uint8Array): void {
     const ip = parseIpv4(payload);
     if (ip === null) return;
-    if (!ipEquals(Uint8Array.from(ip.dstIp), 0, this.ip)) return;
+    if (!ipEquals(Uint8Array.from(ip.dstIp), 0, this.ip)) {
+      // Routed traffic — the guest's ktcp sends anything off-subnet to
+      // the gateway MAC. TCP is terminated (M3d); the rest still drops.
+      if (ip.protocol === IPPROTO_TCP && this.#tcpTerminator !== null) {
+        this.tcpForwarded++;
+        this.#tcpTerminator(ip.srcIp, ip.dstIp, ip.payload);
+      }
+      return;
+    }
     if (ip.protocol !== IPPROTO_ICMP) return;
 
     const echo = parseIcmpEcho(ip.payload);

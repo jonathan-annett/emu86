@@ -58,7 +58,8 @@ import {
 } from './bootopts-patch.js';
 import { EthernetSwitch, type SwitchPort } from '../net/switch.js';
 import { LanGateway } from '../net/gateway.js';
-import { DnsHost, dohResolve } from '../net/dns.js';
+import { DnsAnswerCache, DnsHost, dohResolve } from '../net/dns.js';
+import { HttpGatewayHost, realGatewayFetch } from '../net/http.js';
 import { TabAreaNetwork, type FrameChannel } from '../net/tan.js';
 import {
   AUTHENTIC_CYCLES_PER_MS,
@@ -218,6 +219,7 @@ export class WorkerHost {
   #nicPort: SwitchPort | null = null;
   #gateway: LanGateway | null = null;
   #dns: DnsHost | null = null;
+  #httpGateway: HttpGatewayHost | null = null;
   #tanConfig: { channel: FrameChannel; hostOctet?: number } | null = null;
   #tan: TabAreaNetwork | null = null;
   #stopping = false;
@@ -448,11 +450,15 @@ export class WorkerHost {
     while (!this.#stopping && this.#machine !== null && this.#console !== null) {
       const machine = this.#machine;
 
-      // DNS resolve in flight: stall the machine (and its clock) until
-      // the DoH fetch settles — with honest pacing this is bounded
-      // belt-and-braces (a slow fetch can still outlast the guest's 2 s
-      // resolver alarm). Stalled wall time must not become guest time.
-      if (this.#dns !== null && this.#dns.pendingResolves > 0) {
+      // DNS resolve or gateway fetch in flight: stall the machine (and
+      // its clock) until it settles — with honest pacing this is
+      // bounded belt-and-braces (a slow fetch can still outlast the
+      // guest's own timeouts: in_resolv's 2 s alarm, urlget's read).
+      // Stalled wall time must not become guest time.
+      if (
+        (this.#dns !== null && this.#dns.pendingResolves > 0) ||
+        (this.#httpGateway !== null && this.#httpGateway.pendingFetches > 0)
+      ) {
         this.#pacer.skip();
         await yieldMacrotask();
         continue;
@@ -630,10 +636,23 @@ export class WorkerHost {
     // M3c: the DNS pseudo-host at 10.0.2.3 — the guest's DNS-over-TCP
     // queries (nslookup, telnet-by-hostname) resolve through DoH. The
     // bootopts patch stamps DNSIP=10.0.2.3 so the stock resolver finds
-    // it without an explicit server argument.
-    const dns = new DnsHost({ resolve: dohResolve() });
+    // it without an explicit server argument. The answer cache feeds
+    // the HTTP gateway's IP→name reverse map (Phase 15 M1).
+    const answerCache = new DnsAnswerCache();
+    const dns = new DnsHost({ resolve: dohResolve(), cache: answerCache });
     dns.attachTo(network);
     this.#dns = dns;
+    // Phase 15 M1 (M3d): terminate off-subnet TCP at the gateway —
+    // `urlget http://…` fetches the real internet (HTTP + CORS bounds
+    // apply), and off-subnet :53 (OpenDNS, the resolver's no-DNSIP
+    // default) answers via the same DoH path as the DNS host.
+    const httpGateway = new HttpGatewayHost({
+      fetchFn: realGatewayFetch(),
+      reverseLookup: (ip) => answerCache.lookup(ip),
+      dnsResolve: dohResolve(),
+    });
+    httpGateway.attachTo(gateway);
+    this.#httpGateway = httpGateway;
 
     // M3-tabs: bridge this LAN onto the Tab Area Network.
     if (this.#tan !== null) this.#tan.attach(network);
@@ -787,6 +806,9 @@ export class WorkerHost {
       this.#gateway.detach();
       this.#gateway = null;
     }
+    // The HTTP gateway has no switch port of its own — it dies with
+    // the gateway it was plugged into.
+    this.#httpGateway = null;
     if (this.#dns) {
       this.#dns.detach();
       this.#dns = null;
