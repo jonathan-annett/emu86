@@ -631,8 +631,14 @@ header code {
 
 #drive-banner {
   position: fixed;
-  left: 0.75rem;
+  /* Right-anchored (field request): bottom-left sits exactly where
+     the prompt lands once the terminal scrollback fills. Draggable
+     from any point except the button — see ensureDriveBanner. */
+  right: 0.75rem;
   bottom: 0.75rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   z-index: 15;
   max-width: min(30rem, calc(100vw - 2rem));
   display: flex;
@@ -649,6 +655,10 @@ header code {
 #drive-banner.is-warning {
   border-color: #b8860b;
   color: #e8d8a0;
+}
+
+#drive-banner.dragging {
+  cursor: grabbing;
 }
 
 .drive-save {

@@ -521,6 +521,41 @@ function ensureDriveBanner(onSave: () => void): {
   el.append(text, btn);
   document.body.appendChild(el);
 
+  // Draggable (field request, 2026-07-14): any fixed corner ends up
+  // over something — the original bottom-left sat exactly where the
+  // prompt lands once the scrollback fills. Pointer events cover
+  // mouse and touch; grabbing anywhere except the Save button moves
+  // the pill, clamped to the viewport. Position is page-lifetime
+  // only (a reload returns it to the bottom-right anchor).
+  let dragPointer: number | null = null;
+  let dragDx = 0;
+  let dragDy = 0;
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.target === btn) return;
+    dragPointer = ev.pointerId;
+    const rect = el.getBoundingClientRect();
+    dragDx = ev.clientX - rect.left;
+    dragDy = ev.clientY - rect.top;
+    el.setPointerCapture(ev.pointerId);
+    el.classList.add('dragging');
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (dragPointer !== ev.pointerId) return;
+    const x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, ev.clientX - dragDx));
+    const y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, ev.clientY - dragDy));
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+  });
+  const endDrag = (ev: PointerEvent): void => {
+    if (dragPointer !== ev.pointerId) return;
+    dragPointer = null;
+    el.classList.remove('dragging');
+  };
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', endDrag);
+
   let state: 'idle' | 'saving' | 'saved' | 'locked' = 'idle';
   let savedTimer: number | null = null;
 
