@@ -156,7 +156,7 @@ describe('AutoexecRunner — showcase directives (2026-07-15)', () => {
     expect(rig.sent.join('')).toBe('echo hi\necho bye\n');
   });
 
-  it('@here block lines flow without prompt waits (the heredoc shape)', () => {
+  it('@here block lines flow-control on the `> ` continuation prompt', () => {
     const rig = makeTypedRunner([
       "cat > h.c << 'EOF'",
       '@here',
@@ -169,9 +169,22 @@ describe('AutoexecRunner — showcase directives (2026-07-15)', () => {
     ].join('\n'));
     rig.runner.feed('# ');
     rig.drain();
-    // cat line + all three block lines (blank kept) sent with no
-    // further prompts; the compile line still waits for a fresh #.
+    // Only the cat line rides the shell prompt. Each body line (blank
+    // included) waits for the `> ` the shell prints after CONSUMING
+    // the previous one — the guest tty paces the paste. The original
+    // no-wait design overran the raw tty queue at ~35 lines (field
+    // find, 2026-07-14: the 380-line ping installer arrived as soup).
+    expect(rig.sent.join('')).toBe("cat > h.c << 'EOF'\n");
+    rig.runner.feed('> ');
+    rig.drain();
+    expect(rig.sent.join('')).toBe("cat > h.c << 'EOF'\nint main(void)\n");
+    rig.runner.feed('> ');
+    rig.drain();
+    expect(rig.sent.join('')).toBe("cat > h.c << 'EOF'\nint main(void)\n\n");
+    rig.runner.feed('> ');
+    rig.drain();
     expect(rig.sent.join('')).toBe("cat > h.c << 'EOF'\nint main(void)\n\nEOF\n");
+    // Heredoc closed: the next command needs a fresh shell prompt.
     rig.runner.feed('# ');
     rig.drain();
     expect(rig.sent.join('')).toContain('cc h.c\n');

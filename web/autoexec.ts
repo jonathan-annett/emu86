@@ -20,11 +20,14 @@
  *     types character by character at fake-human cadence, firing
  *     `onKeystroke` per character (the keyboard-FX hook); instant mode
  *     (default) sends whole lines.
- *   - `@here` … `@end` — a no-wait block: the enclosed lines are sent
- *     in sequence WITHOUT waiting for prompts between them. This is
- *     the heredoc device: ELKS sh prompts `> ` for continuation lines
- *     (probed 2026-07-15), which the prompt matcher rightly ignores —
- *     a human typing a heredoc doesn't wait for anything either.
+ *   - `@here` … `@end` — a verbatim block, the heredoc device: every
+ *     enclosed line (blanks included) is sent as-is, each one waiting
+ *     for the shell's `> ` continuation prompt first. That wait IS
+ *     the flow control: the shell prints `> ` only after consuming
+ *     the previous line, so the guest tty paces the paste. (The
+ *     original no-wait design overran the kernel's raw tty queue at
+ *     ~35 lines — the 380-line ping installer arrived as soup; field
+ *     find 2026-07-14.)
  *   - `@turbo` / `@authentic` — fire the `setSpeed` hook (live CPU
  *     speed change) when the script reaches them; no send. The
  *     showcase compiles in turbo and reveals in authentic.
@@ -62,7 +65,8 @@ export type SpeedDirective = 'authentic' | 'turbo';
 interface Step {
   /** Substring to wait for (from `@expect`), or null for a prompt. */
   readonly expect: string | null;
-  /** Send without waiting for anything (a @here block line). */
+  /** Send without waiting for anything. Dormant since the @here
+   *  flow-control change — no parser output sets it anymore. */
   readonly nowait: boolean;
   /** Send character by character with keystroke FX. */
   readonly typed: boolean;
@@ -180,12 +184,13 @@ export class AutoexecRunner {
         return; // #typeOut resumes the chain when the last char lands
       }
       this.#send(`${text}\n`);
-      // Chain onward ONLY into a heredoc-body line (nowait, not a
-      // speed action): the heredoc flows without prompts. Anything
-      // else — a waited command, or a @turbo/@authentic that should
-      // reflect this command COMPLETING — waits for the next prompt.
-      // (Without this, @authentic after a build fired the instant the
-      // build was *sent*, not when it finished.)
+      // Chain onward only into a nowait text step. Since the @here
+      // flow-control change no parser output is nowait anymore (every
+      // line waits for a prompt — heredoc bodies wait for `> `), so
+      // this branch is dormant; it stays because the shape is correct
+      // if a future directive reintroduces unwaited sends. Speed
+      // actions must NOT chain here: @turbo/@authentic reflect the
+      // previous command COMPLETING, not being sent.
       const nxt = this.#steps[this.#next];
       // No next step: loop once more so the done branch announces
       // completion (an instant final line otherwise exited here and
@@ -262,9 +267,15 @@ function parseScript(script: string): Step[] {
       pendingExpect = null;
     } else {
       if (line === '@end') { inHere = false; continue; }
-      // Inside @here: everything verbatim (blank lines included) and
-      // no prompt waits — the heredoc continuation prompt is `> `.
-      steps.push({ expect: null, nowait: true, typed, text: line });
+      // Inside @here: everything verbatim (blank lines included), each
+      // line WAITING for the `> ` continuation prompt like any other
+      // step (DEFAULT_PROMPT includes it). The shell only prints `> `
+      // after consuming the previous line, so the guest tty paces the
+      // paste — a ~380-line heredoc sent without waits overran the
+      // kernel's raw tty queue and arrived as soup (field find,
+      // 2026-07-14: the ping installer). The UART-FIFO pacing in the
+      // worker can't help with that; only end-to-end flow control can.
+      steps.push({ expect: null, nowait: false, typed, text: line });
     }
   }
   return steps;

@@ -1034,8 +1034,8 @@ function renderBootScriptPane(opts: BootScriptPaneOpts): HTMLDivElement {
     '@expect TEXT    next line waits for TEXT in output instead of a prompt',
     '@type           lines below are typed key-by-key, with key clicks',
     '@instant        lines below are sent whole (default)',
-    '@here … @end    verbatim block: every line incl. blanks, no prompt waits',
-    '                (use for heredocs — the shell continuation prompt is "> ")',
+    '@here … @end    verbatim block for heredocs: every line incl. blanks,',
+    '                each waiting for the "> " continuation prompt (tty-safe)',
     '@turbo          uncap CPU speed from here on (this session only)',
     '@authentic      back to 4.77 MHz pacing (this session only)',
   ].join('\n');
