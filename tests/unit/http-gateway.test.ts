@@ -413,8 +413,11 @@ describe('HttpGatewayHost — :53 DNS-over-TCP (OpenDNS default path)', () => {
   });
 });
 
-describe('realGatewayFetch — mixed-content upgrade', () => {
-  it('upgrades EVERY http URL to https, ports included, unless opted out', async () => {
+describe('realGatewayFetch — the origin-conditional https upgrade', () => {
+  async function urlsFetched(
+    opts: { upgradeToHttps?: boolean },
+    urls: readonly string[],
+  ): Promise<string[]> {
     const { realGatewayFetch } = await import('../../src/net/http.js');
     const seen: string[] = [];
     const stub = (input: string | URL | Request): Promise<Response> => {
@@ -424,25 +427,41 @@ describe('realGatewayFetch — mixed-content upgrade', () => {
     const original = globalThis.fetch;
     globalThis.fetch = stub as typeof fetch;
     try {
-      const gw = realGatewayFetch();
-      await gw({ url: 'http://example.com/a', method: 'GET', headers: [], body: null });
-      // Ported URLs upgrade too: a plain-http fetch from an https page
-      // is hard-blocked as mixed content, so leaving it alone
-      // guaranteed failure (field find — the :81 block).
-      await gw({ url: 'http://1.2.3.4:8080/b', method: 'GET', headers: [], body: null });
-      // Already-https (the :443 bridge's output) passes through.
-      await gw({ url: 'https://example.com/d', method: 'GET', headers: [], body: null });
-      const plain = realGatewayFetch({ upgradeToHttps: false });
-      await plain({ url: 'http://example.com/c', method: 'GET', headers: [], body: null });
+      const gw = realGatewayFetch(opts);
+      for (const url of urls) {
+        await gw({ url, method: 'GET', headers: [], body: null });
+      }
     } finally {
       globalThis.fetch = original;
     }
+    return seen;
+  }
+
+  it('on an https origin, upgrades EVERY http URL — explicit ports included', async () => {
+    // Mixed content hard-blocks plain http from a secure page (the
+    // request never leaves the tab), so leaving the scheme alone
+    // guarantees failure. The :81 field block is the ported case.
+    const seen = await urlsFetched({ upgradeToHttps: true }, [
+      'http://example.com/a',
+      'http://1.2.3.4:8080/b',
+      'https://example.com/c', // the :443 bridge's output passes through
+    ]);
     expect(seen).toEqual([
       'https://example.com/a',
       'https://1.2.3.4:8080/b',
-      'https://example.com/d',
-      'http://example.com/c',
+      'https://example.com/c',
     ]);
+  });
+
+  it('on an http origin (localhost dev), leaves http alone — captive portals stay honest', async () => {
+    // captive.apple.com is plain-http BY DESIGN: a captive portal
+    // intercepts http, not https, so upgrading defeats the endpoint.
+    // No mixed-content rule applies on an http page, so don't.
+    const seen = await urlsFetched({ upgradeToHttps: false }, [
+      'http://captive.apple.com/',
+      'http://example.com:81/x',
+    ]);
+    expect(seen).toEqual(['http://captive.apple.com/', 'http://example.com:81/x']);
   });
 });
 

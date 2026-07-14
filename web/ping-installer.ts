@@ -1,0 +1,149 @@
+/**
+ * The ping-installer boot script (Phase 15 M3 follow-on).
+ *
+ * Jonathan's design: the autoexec layer only pastes and runs — ALL the
+ * logic lives in the guest shell, which can actually branch. What this
+ * module does is assemble the paste, and the assembly is where the
+ * real constraints live.
+ *
+ * # Two hard-won constraints (field, 2026-07-14 — `ping-paste-log.txt`)
+ *
+ * 1. **Never nest heredocs.** The first version wrapped the whole
+ *    installer — including a 14 KB `ping.c` — inside one
+ *    `cat > getping.sh << 'EOS'`. ELKS `sh` buffers a heredoc body in
+ *    its heap, so it tried to hold the entire thing at once and died:
+ *    `(7)SBRK 8226 FAIL, OUT OF HEAP SPACE`. The shell then fell out of
+ *    heredoc mode and interpreted the C source as commands.
+ * 2. **Chunk the source.** Even un-nested, one 14 KB heredoc would hit
+ *    the same wall (the failure came ~6 KB in). The source is written
+ *    in {@link CHUNK_LINES}-line appends, each its own small heredoc —
+ *    the shell's buffer is freed between them.
+ *
+ * Flow control is the `> ` continuation prompt (see web/autoexec.ts):
+ * every heredoc body line waits for it, so the guest tty paces the
+ * paste and it cannot outrun the kernel's raw tty queue.
+ *
+ * The source of truth for the C is `web/guest/ping.c` — the same file
+ * the Node probe harness compiles in-VM (tests/probe/surveys/elks-ping.ts).
+ * One file, two consumers, no drift.
+ */
+
+/**
+ * Source lines per heredoc chunk. ~20 lines ≈ 1 KB — comfortably under
+ * the ~6 KB at which ELKS sh's heredoc buffer blew up, with room for a
+ * machine already loaded with other work.
+ */
+export const CHUNK_LINES = 20;
+
+/** Heredoc terminators chosen not to collide with any line of C or shell. */
+const SH_EOF = 'EOF_GETPING_SH';
+const C_EOF = 'EOF_PING_C';
+
+/**
+ * The installer proper — a normal shell script, idempotent by design:
+ *
+ *   /bin/ping exists        → nothing to do
+ *   ping found on /dev/hdb  → copy it in (a second boot costs no compile)
+ *   otherwise               → build /tmp/ping.c with the on-disk c86
+ *                             toolchain, install it, and stash a copy on
+ *                             the drive when one is mounted
+ *
+ * The drive is only written when the mount actually succeeded — writing
+ * to /mnt with nothing mounted silently lands on the root filesystem
+ * (found reading the field log; the first version had that bug).
+ */
+const INSTALLER_SH: readonly string[] = [
+  '# emu86 ping installer -- idempotent, safe to run at every boot.',
+  '# ping drives the NIC directly, so it needs the device to itself:',
+  '# run it before "net start", or "net stop" first.',
+  'if test -f /bin/ping',
+  'then',
+  'echo "ping: already installed"',
+  'exit 0',
+  'fi',
+  'drive=no',
+  'if mount /dev/hdb /mnt 2>/dev/null',
+  'then',
+  'drive=yes',
+  'fi',
+  'if test -f /mnt/ping',
+  'then',
+  'echo "ping: restoring from /dev/hdb"',
+  'cp /mnt/ping /bin/ping',
+  'umount /mnt',
+  'exit 0',
+  'fi',
+  'echo "ping: building it with the in-VM c86 toolchain, please wait..."',
+  'cd /tmp',
+  'cpp -0 -I/usr/include -I/usr/include/c86 ping.c -o ping.i',
+  'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no ping.i ping.as',
+  'as -0 -j ping.as -o ping.o',
+  'ld -0 -i -L/usr/lib -o ping ping.o -lc86',
+  'if test -f /tmp/ping',
+  'then',
+  'cp /tmp/ping /bin/ping',
+  'echo "ping: installed /bin/ping"',
+  'if test "$drive" = yes',
+  'then',
+  'cp /tmp/ping /mnt/ping',
+  'sync',
+  'echo "ping: copied to /dev/hdb -- press Save to keep it for good"',
+  'fi',
+  'else',
+  'echo "ping: BUILD FAILED -- transcript above has the reason"',
+  'fi',
+  'if test "$drive" = yes',
+  'then',
+  'umount /mnt',
+  'fi',
+];
+
+/**
+ * Assemble the boot script that installs ping. `pingSource` is the
+ * contents of `web/guest/ping.c`.
+ */
+export function buildPingInstallerScript(pingSource: string): string {
+  const source = pingSource.replace(/\n+$/, '').split('\n');
+  for (const line of source) {
+    if (line === C_EOF || line === SH_EOF) {
+      throw new Error(`ping-installer: source line collides with a heredoc terminator: ${line}`);
+    }
+  }
+
+  const out: string[] = [
+    'root',
+    // Turbo for the paste AND the build — the paste is hundreds of
+    // prompt round-trips, and at 4.77 MHz that is a slow minute of
+    // nothing much. Back to authentic before the demo ping, so its
+    // RTTs are the machine's honest ones.
+    '@turbo',
+    'echo "installing ping -- pasting sources, then building in-VM"',
+    // 1. The installer script (small: no nested heredoc, ever).
+    `cat > /tmp/getping.sh << '${SH_EOF}'`,
+    '@here',
+    ...INSTALLER_SH,
+    SH_EOF,
+    '@end',
+  ];
+
+  // 2. The C source, in chunks small enough for the shell's heredoc heap.
+  for (let i = 0; i < source.length; i += CHUNK_LINES) {
+    out.push(
+      `cat ${i === 0 ? '>' : '>>'} /tmp/ping.c << '${C_EOF}'`,
+      '@here',
+      ...source.slice(i, i + CHUNK_LINES),
+      C_EOF,
+      '@end',
+    );
+  }
+
+  // 3. Run it, then show it working, then join the LAN as usual.
+  out.push(
+    'sh /tmp/getping.sh',
+    '@authentic',
+    'ping 10.0.2.2 3',
+    'net start ne0',
+    '',
+  );
+  return out.join('\n');
+}

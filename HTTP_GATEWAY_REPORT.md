@@ -249,6 +249,43 @@ explicit ports included; an http-only origin was unreachable from a
 secure page either way, so nothing is lost and TLS-capable origins on
 odd ports now work.
 
+## 8c. UPSTREAM BUG FOUND: urlget leaks its environment into the path
+
+Field console showed requests like `https://www.google.com/USER=root`
+and `http://captive.apple.com:81/USER=root`. Jonathan read it as the
+gateway leaking the username. It is not — the gateway never touches
+the path; it forwards the guest's request line verbatim. **The bug is
+in ELKS's own `urlget`** (`elkscmd/inet/urlget.c:703-720`, read this
+session):
+
+```c
+p = ps;
+while (*p && *p != '/') p++;   /* find '/' ... or the NUL terminator */
+path = p;
+*path = '\0';                  /* cut the host out for user:pass parsing */
+   ...
+*path = '/';                   /* restore it — BUT if there was no '/', */
+                               /* this overwrites argv[1]'s NUL!        */
+```
+
+A URL with **no path component** (`http://google.com`, no trailing
+slash) leaves `path` on the string's terminator, and the restore writes
+`/` over it. `argv[1]` is then unterminated and runs into the adjacent
+process memory — the environment block, whose first entry is
+`USER=root`. urlget parses that as the path and sends
+`GET /USER=root HTTP/1.0`.
+
+- **Not an emu86 defect**; a faithful router forwarding a malformed
+  request. Nothing to fix on our side (rewriting guest paths would be
+  the wrong behavior for a router).
+- **Workaround for users**: always give urlget a trailing slash —
+  `urlget http://example.com/`. Jonathan's ipinfo.io test worked
+  precisely because `/json` was a real path.
+- **Worth filing upstream** (ghaerr/elks): the fix is one line — only
+  restore the `/` when one was found. Note emu86 found a real
+  memory-safety bug in ELKS userland simply by watching what the guest
+  put on the wire; that is the browser-visible-network dividend.
+
 ## 8. Field verification needed (dev tier only, per the standing constraint)
 
 Deploy `npm run deploy:dev`, then from a tab on the dev URL:

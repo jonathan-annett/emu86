@@ -67,20 +67,31 @@ export type GatewayFetch = (req: GatewayFetchRequest) => Promise<FetchedResponse
  * Wrap the platform fetch(). Redirects are followed silently (the
  * guest sees the final body).
  *
- * **Every** http URL is upgraded to https by default (not just the
- * port-less ones — field find, 2026-07-14: a guest dialing :81
- * produced `http://host:81/`, which the browser hard-blocked as mixed
- * content before the fetch even left the tab). The deployed page is
- * HTTPS, so a plain-http fetch from it is *always* blocked: leaving
- * the scheme alone guarantees failure, while upgrading at least
- * succeeds against any TLS-capable origin. An http-only origin is
- * unreachable from a secure page either way — nothing is lost. The
- * guest still speaks HTTP/1.0 on the LAN wire; only the host-side hop
- * travels TLS. Explicit ports are preserved (TLS is attempted on the
- * port the guest named).
+ * **The http→https upgrade is conditional on our own origin**, and the
+ * reasoning is worth keeping (two field finds, 2026-07-14):
+ *
+ *   - From an **https page** (the deployed worker), a plain-http fetch
+ *     is *hard-blocked* as mixed content — it never leaves the tab.
+ *     Leaving the scheme alone therefore guarantees failure, while
+ *     upgrading at least succeeds against any TLS-capable origin. So on
+ *     https we upgrade EVERY http URL, explicit ports included (a guest
+ *     dialing `:81` produced `http://host:81/` and got blocked; the
+ *     original rule only covered port-less URLs).
+ *   - From an **http page** (localhost dev), no such restriction exists,
+ *     so we leave http alone — and plain-http semantics genuinely
+ *     survive. That matters: `captive.apple.com` is http *by design*
+ *     (a captive portal intercepts http, not https), so upgrading it
+ *     defeats the endpoint's whole purpose. On the deployed site that
+ *     test can never be honest; on localhost it can.
+ *
+ * Either way the guest speaks HTTP/1.0 on the LAN wire — only the
+ * host-side hop ever travels TLS. Explicit https is always available
+ * to the guest via the :443 bridge (see the module header).
  */
 export function realGatewayFetch(opts: { upgradeToHttps?: boolean } = {}): GatewayFetch {
-  const upgrade = opts.upgradeToHttps ?? true;
+  const upgrade =
+    opts.upgradeToHttps ??
+    (typeof location !== 'undefined' && location.protocol === 'https:');
   return async (req: GatewayFetchRequest): Promise<FetchedResponse> => {
     const url =
       upgrade && req.url.startsWith('http://') ? `https://${req.url.slice(7)}` : req.url;

@@ -34,6 +34,7 @@ import {
   type ThemePresetName,
 } from './themes.js';
 import pingSource from './guest/ping.c?raw';
+import { buildPingInstallerScript } from './ping-installer.js';
 
 /**
  * Discriminated union so adding new sources later (e.g. github in 9.3) is
@@ -146,62 +147,16 @@ export const SEED_DEMO_SCRIPT: BootScript = {
 
 /**
  * The ping installer (Phase 15 M3 follow-on, Jonathan's design): the
- * autoexec layer only pastes a shell script and runs it — ALL the
- * logic lives in the guest, where the shell can actually branch. The
- * pasted `getping.sh` is idempotent: found on /bin → done; found on
- * an attached /dev/hdb → copy in; else heredoc-inject `ping.c` (the
- * same source the Node harness compiles — web/guest/ping.c) and
- * build it with the on-disk c86 toolchain, keeping a copy on the
- * drive when one is attached. Runs BEFORE `net start` because the
- * raw-frame ping needs the NIC to itself; the script ends by joining
- * the LAN as usual. Sits in the picker, not active — for discovery.
+ * autoexec layer only pastes and runs — ALL the logic lives in the
+ * guest shell, which can actually branch. The assembly (and the two
+ * ELKS-heap constraints that shape it) lives in `ping-installer.ts`;
+ * the C is `guest/ping.c`, the same file the Node harness compiles
+ * in-VM. Sits in the picker unactivated — for discovery.
  */
 export const SEED_PING_SCRIPT: BootScript = {
   id: 'seed-ping-installer',
   name: 'ping installer (builds it in-VM if missing)',
-  text: [
-    'root',
-    "cat > /tmp/getping.sh << 'EOS'",
-    '@here',
-    '# emu86 ping installer -- idempotent, safe to run every boot.',
-    '# ping talks to the NIC directly: use before net start, or net stop first.',
-    'if test -f /bin/ping',
-    'then',
-    'echo ping already installed',
-    'exit 0',
-    'fi',
-    'mount /dev/hdb /mnt 2>/dev/null',
-    'if test -f /mnt/ping',
-    'then',
-    'echo found ping on /dev/hdb',
-    'cp /mnt/ping /bin/ping',
-    'umount /mnt 2>/dev/null',
-    'exit 0',
-    'fi',
-    'echo building ping with the in-VM c86 toolchain...',
-    "cat > /tmp/ping.c << 'EOF'",
-    ...pingSource.replace(/\n$/, '').split('\n'),
-    'EOF',
-    'cd /tmp',
-    'cpp -0 -I/usr/include -I/usr/include/c86 ping.c -o ping.i',
-    'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no ping.i ping.as',
-    'as -0 -j ping.as -o ping.o',
-    'ld -0 -i -L/usr/lib -o ping ping.o -lc86',
-    'cp /tmp/ping /bin/ping',
-    'cp /tmp/ping /mnt/ping 2>/dev/null',
-    'sync',
-    'umount /mnt 2>/dev/null',
-    'echo installed /bin/ping for this session',
-    'echo if a drive was attached it is also on /dev/hdb -- Save to keep it',
-    'EOS',
-    '@end',
-    '@turbo',
-    'sh /tmp/getping.sh',
-    '@authentic',
-    'ping 10.0.2.2 3',
-    'net start ne0',
-    '',
-  ].join('\n'),
+  text: buildPingInstallerScript(pingSource),
 };
 
 export const DEFAULT_SETTINGS: Settings = {
