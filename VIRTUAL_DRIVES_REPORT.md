@@ -137,6 +137,29 @@ banner exists precisely to say so.
 - **MINIX v1 filesystem ceiling** (~64 MB / 16-bit block counts) was
   not probed; presets stop at 32 MB, inside any plausible limit.
 
+## 6a. Field verification — THE LOOP CLOSES (2026-07-14)
+
+Jonathan, dev tier, real browser: a boot script (using the full
+directive set — @turbo for the compile, @here/@end for the heredoc,
+@authentic for the run) typed hello.c, built it with the on-disk
+toolchain, ran it, `cp ./hello /mnt` onto the persistent drive,
+sync + umount, Save; after reboot, `/mnt/hello` printed
+`hello human` cold. Compile once in a browser tab, keep the binary
+forever — M2 and the in-VM toolchain composing exactly as intended.
+
+**Finding from the same pass — the sticky "unchecked filesystem"
+warning (refines §3):** the kernel clears MINIX_VALID_FS at mount
+and umount only restores the *pre-mount* state
+(`fs/minix/inode.c:63-79`) — so a snapshot saved while the drive was
+mounted bakes the cleared flag in, and every later mount warns
+"running fsck recommended" forever, clean umounts included. Plain
+`fsck /dev/hdb` is read-only and silently repairs nothing; the cure
+is one `fsck -a /dev/hdb` while unmounted (repair mode rewrites the
+flag, `fsck.c:495`), then Save. Cosmetic only — data integrity was
+never affected — but §3's "sync suffices" gains a footnote: sync
+flushes *data*; only umount-before-Save keeps the *clean flag*
+intact too. The Save banner copy already says umount first.
+
 ## 6. Field verification (dev tier only, per the standing constraint)
 
 `npm run deploy:dev`, then: create an 8 MB drive in settings → reload
