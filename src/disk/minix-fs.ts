@@ -1,6 +1,30 @@
 /**
- * MINIX v1 filesystem, read-only (Phase 16 M1 — the editor seam's
- * enabling piece).
+ * MINIX v1 filesystem — read (Phase 16 M1) and whole-file write
+ * (Phase 16 M2): the editor seam's enabling piece.
+ *
+ * WRITE MODEL (M2): `writeFile` (create or whole-file replace),
+ * `remove` (files only), `mkdir`. Whole-file semantics only — no
+ * partial writes, no append (brief §3 M2). Writes MUTATE the buffer
+ * passed to `openMinixImage` — the caller owns the bytes and hands
+ * the whole image back to the worker (`write-secondary`, M3), so
+ * in-place mutation is exactly the contract. Allocation follows the
+ * mfs reference: first-free-bit bitmap scans, zones allocated on
+ * demand including the indirect table, all-zero blocks stored as
+ * HOLES (writer.c writefile() does the same). The write path refuses
+ * files needing the double-indirect chain (> 7+512 blocks = 531,456
+ * bytes) with an honest error — brief §2 allows this; drive-sized
+ * sources are not the use case. Truncation (replace-with-smaller)
+ * DOES walk double-indirect chains, so replacing a 976 KB file with
+ * a line of text frees everything correctly. ELKS `fsck` is the
+ * judge (integration test), backed by a TS fsck-lite in the unit
+ * suite (bitmaps vs reachable zones, exactly).
+ *
+ * One deliberate deviation from the reference, recorded: mfs
+ * `dname_rem` (iname.c) frees dir block `size/BLOCK_SIZE + 1` when a
+ * shrink lands exactly on a block boundary — one block PAST the one
+ * the removed entry occupied, leaking the real block (its freezone
+ * of the never-allocated next block is a no-op). This module frees
+ * `size/BLOCK_SIZE`, the block that actually emptied.
  *
  * Parses the filesystem the ELKS guest's own `mkfs` writes to /dev/hdb
  * (`mkfs /dev/hdb 8086`): MINIX_SUPER_MAGIC 0x137F, 1 KB blocks,
@@ -137,6 +161,25 @@ export type MinixResult<T> =
       readonly kind: MinixPathErrorKind;
       readonly detail: string;
     };
+
+export type MinixWriteErrorKind =
+  | MinixPathErrorKind
+  | 'exists'
+  | 'no-space'
+  | 'too-large'
+  | 'name-too-long';
+
+export type MinixWriteResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly kind: MinixWriteErrorKind;
+      readonly detail: string;
+    };
+
+/** v1 write cap: 7 direct + 512 indirect blocks. Double-indirect
+ *  WRITES are refused (reads are not) — brief §2's honest limit. */
+export const MINIX_MAX_WRITE_BYTES = (DIRECT_ZONES + ZONES_PER_INDIRECT) * MINIX_BLOCK_SIZE;
 
 /**
  * Open a MINIX v1 image. The bytes are NOT copied — the caller owns
@@ -350,6 +393,505 @@ export class MinixFileSystem {
     };
   }
 
+  /* ---------------- write path (M2) ---------------- */
+
+  /**
+   * Create or whole-file-replace a regular file. Mutates the image
+   * buffer. All-zero 1 KB blocks are stored as holes (the reference
+   * writer does the same). Refuses double-indirect sizes — see
+   * MINIX_MAX_WRITE_BYTES.
+   */
+  writeFile(path: string, bytes: Uint8Array): MinixWriteResult<MinixStat> {
+    if (bytes.byteLength > MINIX_MAX_WRITE_BYTES) {
+      return {
+        ok: false,
+        kind: 'too-large',
+        detail:
+          `${bytes.byteLength} bytes needs the double-indirect chain; the v1 write path ` +
+          `stops at ${MINIX_MAX_WRITE_BYTES} (7 direct + 512 indirect blocks) — brief §2`,
+      };
+    }
+    const split = this.#splitForWrite(path);
+    if (!split.ok) return split;
+    const { parentInode, name } = split.value;
+
+    const existing = this.#lookupIn(parentInode, name);
+    if (typeof existing === 'string') return { ok: false, kind: 'corrupt', detail: existing };
+
+    let target: number;
+    let created = false;
+    if (existing !== null) {
+      const st = this.statInode(existing);
+      if (!st.ok) return st;
+      if (st.value.type !== 'file') {
+        return {
+          ok: false,
+          kind: 'not-a-file',
+          detail: `${path} is a ${st.value.type}, not a regular file`,
+        };
+      }
+      target = existing;
+    } else {
+      const alloc = this.#allocInode();
+      if (alloc === null) {
+        return { ok: false, kind: 'no-space', detail: 'no free inodes' };
+      }
+      this.#storeInode(alloc, {
+        mode: 0o100644,
+        uid: 0,
+        size: 0,
+        time: nowSeconds(),
+        gid: 0,
+        nlinks: 1,
+        zones: [0, 0, 0, 0, 0, 0, 0],
+        indirZone: 0,
+        dblIndirZone: 0,
+      });
+      const added = this.#dnameAdd(parentInode, name, alloc);
+      if (added !== null) {
+        this.#freeInode(alloc); // unwind: nothing references it yet
+        return { ok: false, ...added };
+      }
+      target = alloc;
+      created = true;
+    }
+
+    const wrote = this.#writeData(target, bytes);
+    if (wrote !== null) {
+      if (created) {
+        // Unwind a half-created file: free its zones, drop the dirent,
+        // release the inode. Replacing an EXISTING file that ran out of
+        // space stays as-written-so-far — recorded, and fsck-clean.
+        this.#truncInode(target, 0);
+        this.#dnameRem(parentInode, name);
+        this.#freeInode(target);
+      }
+      return { ok: false, ...wrote };
+    }
+    return this.statInode(target);
+  }
+
+  /** Unlink a regular file (or symlink). Directories are refused —
+   *  rmdir is not in M2's scope. Mutates the image buffer. */
+  remove(path: string): MinixWriteResult<null> {
+    const split = this.#splitForWrite(path);
+    if (!split.ok) return split;
+    const { parentInode, name } = split.value;
+
+    const found = this.#lookupIn(parentInode, name);
+    if (typeof found === 'string') return { ok: false, kind: 'corrupt', detail: found };
+    if (found === null) return { ok: false, kind: 'not-found', detail: `${path}: not found` };
+
+    const ino = this.#readInode(found);
+    if (ino === null) {
+      return { ok: false, kind: 'corrupt', detail: `inode ${found} is outside the inode table` };
+    }
+    if ((ino.mode & S_IFMT) === 0o040000) {
+      return {
+        ok: false,
+        kind: 'not-a-file',
+        detail: `${path} is a directory — rmdir is not in M2 (brief §3)`,
+      };
+    }
+    this.#dnameRem(parentInode, name);
+    if (ino.nlinks > 1) {
+      this.#storeInode(found, { ...ino, nlinks: ino.nlinks - 1 });
+    } else {
+      this.#truncInode(found, 0);
+      this.#storeInode(found, {
+        mode: 0, uid: 0, size: 0, time: 0, gid: 0, nlinks: 0,
+        zones: [0, 0, 0, 0, 0, 0, 0], indirZone: 0, dblIndirZone: 0,
+      });
+      this.#freeInode(found);
+    }
+    return { ok: true, value: null };
+  }
+
+  /** Create a directory (with `.` and `..`). Mutates the image buffer. */
+  mkdir(path: string): MinixWriteResult<MinixStat> {
+    const split = this.#splitForWrite(path);
+    if (!split.ok) return split;
+    const { parentInode, name } = split.value;
+
+    const existing = this.#lookupIn(parentInode, name);
+    if (typeof existing === 'string') return { ok: false, kind: 'corrupt', detail: existing };
+    if (existing !== null) {
+      return { ok: false, kind: 'exists', detail: `${path}: already exists` };
+    }
+    const alloc = this.#allocInode();
+    if (alloc === null) return { ok: false, kind: 'no-space', detail: 'no free inodes' };
+    this.#storeInode(alloc, {
+      mode: 0o040755,
+      uid: 0,
+      size: 0,
+      time: nowSeconds(),
+      gid: 0,
+      nlinks: 1, // '.' bumps it to 2 below — domkdir's arithmetic
+      zones: [0, 0, 0, 0, 0, 0, 0],
+      indirZone: 0,
+      dblIndirZone: 0,
+    });
+    const failures =
+      this.#dnameAdd(parentInode, name, alloc) ??
+      this.#dnameAdd(alloc, '.', alloc) ??
+      this.#dnameAdd(alloc, '..', parentInode);
+    if (failures !== null) {
+      this.#truncInode(alloc, 0);
+      this.#dnameRem(parentInode, name);
+      this.#freeInode(alloc);
+      return { ok: false, ...failures };
+    }
+    const self = this.#readInode(alloc);
+    const parent = this.#readInode(parentInode);
+    if (self === null || parent === null) {
+      return { ok: false, kind: 'corrupt', detail: 'inode vanished during mkdir' };
+    }
+    this.#storeInode(alloc, { ...self, nlinks: self.nlinks + 1 });
+    this.#storeInode(parentInode, { ...parent, nlinks: parent.nlinks + 1 });
+    return this.statInode(alloc);
+  }
+
+  /* ---------------- write internals ---------------- */
+
+  get #imapOffset(): number {
+    return 2 * MINIX_BLOCK_SIZE;
+  }
+
+  get #zmapOffset(): number {
+    return (2 + this.superblock.imapBlocks) * MINIX_BLOCK_SIZE;
+  }
+
+  #bit(mapOffset: number, n: number): boolean {
+    const byte = this.#bytes[mapOffset + (n >> 3)] ?? 0;
+    return (byte & (1 << (n & 7))) !== 0;
+  }
+
+  #setBit(mapOffset: number, n: number, on: boolean): void {
+    const idx = mapOffset + (n >> 3);
+    const cur = this.#bytes[idx] ?? 0;
+    this.#bytes[idx] = on ? cur | (1 << (n & 7)) : cur & ~(1 << (n & 7));
+  }
+
+  /** First clear bit in a map, or null. mkfs sets bit 0 and all
+   *  padding bits past the valid range, so a plain scan is safe. */
+  #firstFreeBit(mapOffset: number, mapBlocks: number): number | null {
+    const totalBits = mapBlocks * MINIX_BLOCK_SIZE * 8;
+    for (let n = 0; n < totalBits; n += 1) {
+      if (!this.#bit(mapOffset, n)) return n;
+    }
+    return null;
+  }
+
+  #allocInode(): number | null {
+    const n = this.#firstFreeBit(this.#imapOffset, this.superblock.imapBlocks);
+    // n < ninodes, not <=: ELKS mkfs never clears bit ninodes (its
+    // clear loop is `i < INODES`), so inode №ninodes is padding in
+    // every image the guest formats. The bitmap enforces this on its
+    // own — the guard just keeps us honest against foreign images.
+    if (n === null || n < 1 || n >= this.superblock.ninodes) return null;
+    this.#setBit(this.#imapOffset, n, true);
+    return n; // inode N ↔ bit N
+  }
+
+  #freeInode(inodeNo: number): void {
+    this.#setBit(this.#imapOffset, inodeNo, false);
+  }
+
+  /** Allocate a data zone: mark its bit and zero its bytes. */
+  #allocZone(): number | null {
+    const n = this.#firstFreeBit(this.#zmapOffset, this.superblock.zmapBlocks);
+    if (n === null) return null;
+    const zone = n + this.superblock.firstDataZone - 1; // bit 1 ↔ firstdatazone
+    if (zone < this.superblock.firstDataZone || zone >= this.superblock.nzones) return null;
+    this.#setBit(this.#zmapOffset, n, true);
+    this.#bytes.fill(0, zone * MINIX_BLOCK_SIZE, (zone + 1) * MINIX_BLOCK_SIZE);
+    return zone;
+  }
+
+  #freeZone(zone: number): void {
+    if (zone === 0) return;
+    this.#setBit(this.#zmapOffset, zone - this.superblock.firstDataZone + 1, false);
+  }
+
+  #storeInode(inodeNo: number, ino: RawInode): void {
+    const off = this.#inodeTableOffset + (inodeNo - 1) * INODE_SIZE;
+    const v = this.#view;
+    v.setUint16(off + 0, ino.mode, true);
+    v.setUint16(off + 2, ino.uid, true);
+    v.setUint32(off + 4, ino.size, true);
+    v.setUint32(off + 8, ino.time, true);
+    v.setUint8(off + 12, ino.gid);
+    v.setUint8(off + 13, ino.nlinks);
+    for (let i = 0; i < DIRECT_ZONES; i += 1) {
+      v.setUint16(off + 14 + i * 2, ino.zones[i] ?? 0, true);
+    }
+    v.setUint16(off + 28, ino.indirZone, true);
+    v.setUint16(off + 30, ino.dblIndirZone, true);
+  }
+
+  /** Ensure file block `blk` has a zone; allocate (and wire the
+   *  indirect table) as needed. Returns the zone or a write error. */
+  #ensureZone(
+    inodeNo: number,
+    blk: number,
+  ): number | { kind: MinixWriteErrorKind; detail: string } {
+    const ino = this.#readInode(inodeNo);
+    if (ino === null) return { kind: 'corrupt', detail: `inode ${inodeNo} unreadable` };
+    if (blk < DIRECT_ZONES) {
+      const cur = ino.zones[blk] ?? 0;
+      if (cur !== 0) return cur;
+      const zone = this.#allocZone();
+      if (zone === null) return { kind: 'no-space', detail: 'no free zones' };
+      const zones = [...ino.zones];
+      zones[blk] = zone;
+      this.#storeInode(inodeNo, { ...ino, zones });
+      return zone;
+    }
+    const idx = blk - DIRECT_ZONES;
+    if (idx >= ZONES_PER_INDIRECT) {
+      return { kind: 'too-large', detail: `file block ${blk} is past the v1 write cap` };
+    }
+    let table = ino.indirZone;
+    if (table === 0) {
+      const t = this.#allocZone();
+      if (t === null) return { kind: 'no-space', detail: 'no free zones (indirect table)' };
+      table = t;
+      this.#storeInode(inodeNo, { ...ino, indirZone: table });
+    }
+    const ptrOff = table * MINIX_BLOCK_SIZE + idx * 2;
+    const cur = this.#view.getUint16(ptrOff, true);
+    if (cur !== 0) return cur;
+    const zone = this.#allocZone();
+    if (zone === null) return { kind: 'no-space', detail: 'no free zones' };
+    this.#view.setUint16(ptrOff, zone, true);
+    return zone;
+  }
+
+  /**
+   * Free file block `blk`'s zone, collapsing indirect tables that
+   * empty out — the full ino_freezone port, double-indirect included
+   * (truncating a big READ-side file must free its whole chain even
+   * though the WRITE side never creates one).
+   */
+  #freeFileBlock(inodeNo: number, blk: number): void {
+    const ino = this.#readInode(inodeNo);
+    if (ino === null) return;
+    if (blk < DIRECT_ZONES) {
+      const cur = ino.zones[blk] ?? 0;
+      if (cur === 0) return;
+      this.#freeZone(cur);
+      const zones = [...ino.zones];
+      zones[blk] = 0;
+      this.#storeInode(inodeNo, { ...ino, zones });
+      return;
+    }
+    let rest = blk - DIRECT_ZONES;
+    if (rest < ZONES_PER_INDIRECT) {
+      if (ino.indirZone === 0) return;
+      const base = ino.indirZone * MINIX_BLOCK_SIZE;
+      const cur = this.#view.getUint16(base + rest * 2, true);
+      if (cur !== 0) this.#freeZone(cur);
+      this.#view.setUint16(base + rest * 2, 0, true);
+      if (this.#tableEmpty(ino.indirZone)) {
+        this.#freeZone(ino.indirZone);
+        this.#storeInode(inodeNo, { ...ino, indirZone: 0 });
+      }
+      return;
+    }
+    rest -= ZONES_PER_INDIRECT;
+    if (ino.dblIndirZone === 0) return;
+    const outerBase = ino.dblIndirZone * MINIX_BLOCK_SIZE;
+    const outerIdx = Math.floor(rest / ZONES_PER_INDIRECT);
+    const mid = this.#view.getUint16(outerBase + outerIdx * 2, true);
+    if (mid === 0) return;
+    const innerBase = mid * MINIX_BLOCK_SIZE;
+    const innerIdx = rest % ZONES_PER_INDIRECT;
+    const cur = this.#view.getUint16(innerBase + innerIdx * 2, true);
+    if (cur !== 0) this.#freeZone(cur);
+    this.#view.setUint16(innerBase + innerIdx * 2, 0, true);
+    if (this.#tableEmpty(mid)) {
+      this.#freeZone(mid);
+      this.#view.setUint16(outerBase + outerIdx * 2, 0, true);
+      if (this.#tableEmpty(ino.dblIndirZone)) {
+        this.#freeZone(ino.dblIndirZone);
+        this.#storeInode(inodeNo, { ...ino, dblIndirZone: 0 });
+      }
+    }
+  }
+
+  #tableEmpty(tableZone: number): boolean {
+    const base = tableZone * MINIX_BLOCK_SIZE;
+    for (let i = 0; i < ZONES_PER_INDIRECT; i += 1) {
+      if (this.#view.getUint16(base + i * 2, true) !== 0) return false;
+    }
+    return true;
+  }
+
+  /** Whole-file write onto an existing inode: blocks in, size set,
+   *  excess blocks (a previously-larger file) freed, mtime bumped. */
+  #writeData(
+    inodeNo: number,
+    bytes: Uint8Array,
+  ): { kind: MinixWriteErrorKind; detail: string } | null {
+    const blockCount = Math.ceil(bytes.byteLength / MINIX_BLOCK_SIZE);
+    for (let blk = 0; blk < blockCount; blk += 1) {
+      const start = blk * MINIX_BLOCK_SIZE;
+      const chunk = bytes.subarray(start, Math.min(start + MINIX_BLOCK_SIZE, bytes.byteLength));
+      if (chunk.every((b) => b === 0)) {
+        this.#freeFileBlock(inodeNo, blk); // store a hole, like writer.c
+        continue;
+      }
+      const zone = this.#ensureZone(inodeNo, blk);
+      if (typeof zone !== 'number') return zone;
+      const dst = zone * MINIX_BLOCK_SIZE;
+      this.#bytes.fill(0, dst, dst + MINIX_BLOCK_SIZE);
+      this.#bytes.set(chunk, dst);
+    }
+    this.#truncInode(inodeNo, bytes.byteLength);
+    return null;
+  }
+
+  /** Set size, freeing blocks past the new end (trunc_inode). */
+  #truncInode(inodeNo: number, newSize: number): void {
+    const ino = this.#readInode(inodeNo);
+    if (ino === null) return;
+    const startBlk = Math.ceil(newSize / MINIX_BLOCK_SIZE);
+    const endBlk = Math.ceil(ino.size / MINIX_BLOCK_SIZE);
+    for (let blk = startBlk; blk < endBlk; blk += 1) {
+      this.#freeFileBlock(inodeNo, blk);
+    }
+    const after = this.#readInode(inodeNo);
+    if (after === null) return;
+    this.#storeInode(inodeNo, { ...after, size: newSize, time: nowSeconds() });
+  }
+
+  /** Add a dirent: first inode-0 slot, else extend by one entry
+   *  (dname_add). Returns null on success or a write error. */
+  #dnameAdd(
+    dirInode: number,
+    name: string,
+    targetInode: number,
+  ): { kind: MinixWriteErrorKind; detail: string } | null {
+    const dir = this.#readInode(dirInode);
+    if (dir === null) return { kind: 'corrupt', detail: `dir inode ${dirInode} unreadable` };
+    const dentsz = 2 + this.superblock.nameLen;
+
+    // Find the first deleted slot, else place at end-of-file.
+    let slotOffset = dir.size;
+    scan: for (let off = 0; off < dir.size; off += MINIX_BLOCK_SIZE) {
+      const zone = this.#zoneForFileBlock(dir, off / MINIX_BLOCK_SIZE);
+      if (typeof zone === 'string') return { kind: 'corrupt', detail: zone };
+      const bsz = Math.min(MINIX_BLOCK_SIZE, dir.size - off);
+      for (let j = 0; j + dentsz <= bsz; j += dentsz) {
+        const ino =
+          zone === 0 ? 0 : this.#view.getUint16(zone * MINIX_BLOCK_SIZE + j, true);
+        if (ino === 0) {
+          slotOffset = off + j;
+          break scan;
+        }
+      }
+    }
+
+    const blk = Math.floor(slotOffset / MINIX_BLOCK_SIZE);
+    const j = slotOffset % MINIX_BLOCK_SIZE;
+    const zone = this.#ensureZone(dirInode, blk);
+    if (typeof zone !== 'number') return zone;
+    const base = zone * MINIX_BLOCK_SIZE + j;
+    this.#view.setUint16(base, targetInode, true);
+    for (let i = 0; i < this.superblock.nameLen; i += 1) {
+      this.#bytes[base + 2 + i] = i < name.length ? name.charCodeAt(i) & 0xff : 0;
+    }
+    if (slotOffset >= dir.size) {
+      const cur = this.#readInode(dirInode);
+      if (cur !== null) {
+        this.#storeInode(dirInode, { ...cur, size: dir.size + dentsz, time: nowSeconds() });
+      }
+    }
+    return null;
+  }
+
+  /** Remove a dirent: shrink if it was the last entry (freeing the
+   *  block that emptied — the corrected boundary; see module doc),
+   *  else zero the slot (dname_rem). */
+  #dnameRem(dirInode: number, name: string): void {
+    const dir = this.#readInode(dirInode);
+    if (dir === null) return;
+    const dentsz = 2 + this.superblock.nameLen;
+
+    let entryOffset = -1;
+    scan: for (let off = 0; off < dir.size; off += MINIX_BLOCK_SIZE) {
+      const zone = this.#zoneForFileBlock(dir, off / MINIX_BLOCK_SIZE);
+      if (typeof zone === 'string' || zone === 0) continue;
+      const bsz = Math.min(MINIX_BLOCK_SIZE, dir.size - off);
+      for (let j = 0; j + dentsz <= bsz; j += dentsz) {
+        const base = zone * MINIX_BLOCK_SIZE + j;
+        if (this.#view.getUint16(base, true) === 0) continue;
+        if (this.#decodeName(base + 2) === name) {
+          entryOffset = off + j;
+          break scan;
+        }
+      }
+    }
+    if (entryOffset === -1) return;
+
+    const newSize = dir.size - dentsz;
+    if (entryOffset === newSize) {
+      if (newSize % MINIX_BLOCK_SIZE === 0 && newSize < dir.size) {
+        this.#freeFileBlock(dirInode, newSize / MINIX_BLOCK_SIZE);
+      }
+      const cur = this.#readInode(dirInode);
+      if (cur !== null) this.#storeInode(dirInode, { ...cur, size: newSize, time: nowSeconds() });
+    } else {
+      const blk = Math.floor(entryOffset / MINIX_BLOCK_SIZE);
+      const zone = this.#zoneForFileBlock(dir, blk);
+      if (typeof zone === 'string' || zone === 0) return;
+      const base = zone * MINIX_BLOCK_SIZE + (entryOffset % MINIX_BLOCK_SIZE);
+      this.#bytes.fill(0, base, base + dentsz);
+      const cur = this.#readInode(dirInode);
+      if (cur !== null) this.#storeInode(dirInode, { ...cur, time: nowSeconds() });
+    }
+  }
+
+  /** Look `name` up in a directory inode: inode number, null if
+   *  absent, or a corrupt-detail string. */
+  #lookupIn(dirInode: number, name: string): number | null | string {
+    const listed = this.#listInode(dirInode, name);
+    if (!listed.ok) return listed.detail;
+    const hit = listed.value.find((e) => e.name === name);
+    return hit === undefined ? null : hit.stat.inode;
+  }
+
+  /** Split a write path into (parent dir inode, final name), with the
+   *  name-length check writes need. */
+  #splitForWrite(
+    path: string,
+  ): MinixWriteResult<{ parentInode: number; name: string }> {
+    const parts = path.split('/').filter((p) => p.length > 0);
+    const name = parts.pop();
+    if (name === undefined) {
+      return { ok: false, kind: 'not-a-file', detail: 'the root is a directory' };
+    }
+    if (name.length > this.superblock.nameLen) {
+      return {
+        ok: false,
+        kind: 'name-too-long',
+        detail: `"${name}" is ${name.length} chars; this fs stores ${this.superblock.nameLen} — mangle upstream (brief §2)`,
+      };
+    }
+    const parent = this.#resolvePath(parts.join('/'));
+    if (!parent.ok) return parent;
+    const st = this.statInode(parent.value);
+    if (!st.ok) return st;
+    if (st.value.type !== 'dir') {
+      return {
+        ok: false,
+        kind: 'not-a-directory',
+        detail: `/${parts.join('/')} is a ${st.value.type}, not a directory`,
+      };
+    }
+    return { ok: true, value: { parentInode: parent.value, name } };
+  }
+
   /* ---------------- internals ---------------- */
 
   #readInode(inodeNo: number): RawInode | null {
@@ -501,4 +1043,8 @@ export class MinixFileSystem {
 
 function typeOfMode(mode: number): MinixFileType {
   return TYPE_BY_IFMT.get(mode & S_IFMT) ?? 'unknown';
+}
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
 }

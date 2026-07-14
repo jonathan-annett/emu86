@@ -18,91 +18,32 @@
  * …then update tests/fixtures/README.md (provenance) and the unit
  * test's expected tree if the population script changed.
  *
- * Boot/shell machinery copied from virtual-drive-persistence.test.ts
- * (the Phase 15 M2 acceptance test) — deliberately not extracted into
- * a shared helper; hard rule 3 says surface the duplication, not
- * refactor around it. Third copy = time to extract.
+ * Boot/shell machinery: guest-drive-harness.ts — extracted there on
+ * its third copy (this file was the second; the Phase 15 persistence
+ * test keeps its own original on purpose).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { WorkerHost } from '../../src/browser/worker-host.js';
-import type { DiskSlotSpec, WorkerToMainMessage } from '../../src/browser/protocol.js';
 import { openMinixImage } from '../../src/disk/minix-fs.js';
+import {
+  bootGuest,
+  guestShell,
+  takeSecondarySnapshot,
+  DRIVE_8086_GEOMETRY,
+  HD32_PATH,
+} from './guest-drive-harness.js';
 
-const HD32_PATH = resolve('reference/elks-images-hd', 'hd32-minix.img');
 const FIXTURE_DIR = resolve('tests/fixtures');
 const FIXTURE_PATH = resolve(FIXTURE_DIR, 'minix-v1-2048.img');
 
 const TEST_TIMEOUT_MS = 15 * 60 * 1000;
-const BOOT_SLICE_INSTRUCTIONS = 10_000_000;
-const BOOT_MAX_SLICES = 8;
-const STEP_INSTRUCTIONS = 2_000_000;
-const STEP_MAX_SLICES = 40;
-const PROMPT_RE = /login: *$|# *$|\$ *$/;
 
-/** Canonical 8086 KB preset (311×4×13) — brief §2's test geometry. */
-const DRIVE_GEOMETRY = { cylinders: 311, heads: 4, sectorsPerTrack: 13 };
-/** …but only the first 2048 blocks are formatted: a 2 MB fixture is
- *  big enough for every case in the tree and small enough to commit. */
+/** Only the first 2048 blocks of the canonical 8086 KB drive are
+ *  formatted: a 2 MB fixture is big enough for every case in the
+ *  tree and small enough to commit. */
 const MKFS_BLOCKS = 2048;
-
-interface Session {
-  host: WorkerHost;
-  posts: WorkerToMainMessage[];
-  txText: () => string;
-}
-
-async function bootSession(secondary: DiskSlotSpec): Promise<Session> {
-  const raw = readFileSync(HD32_PATH);
-  const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  const posts: WorkerToMainMessage[] = [];
-  const host = new WorkerHost({ post: (m) => posts.push(m), autoRun: false });
-  host.handleMessage({ type: 'boot', config: { imageBytes: bytes, secondary } });
-  await host.whenIdle();
-  const txText = (): string => {
-    let s = '';
-    for (const m of posts) {
-      if (m.type === 'tx') s += String.fromCharCode(...m.bytes);
-    }
-    return s;
-  };
-
-  let boot = '';
-  for (let slice = 0; slice < BOOT_MAX_SLICES; slice++) {
-    const r = host.runUntil(BOOT_SLICE_INSTRUCTIONS);
-    expect(r.reason).not.toBe('error');
-    boot = txText();
-    if (PROMPT_RE.test(boot)) break;
-  }
-  expect(boot).toMatch(PROMPT_RE);
-  if (/login: *$/.test(boot)) {
-    host.handleMessage({
-      type: 'rx',
-      bytes: new Uint8Array([...'root\n'].map((c) => c.charCodeAt(0))),
-    });
-    const r = host.runUntil(STEP_INSTRUCTIONS * 2);
-    expect(r.reason).not.toBe('error');
-    expect(txText()).toMatch(/# *$/);
-  }
-  return { host, posts, txText };
-}
-
-function shell(s: Session, line: string, maxSlices = STEP_MAX_SLICES): string {
-  const before = s.txText().length;
-  s.host.handleMessage({
-    type: 'rx',
-    bytes: new Uint8Array([...`${line}\n`].map((c) => c.charCodeAt(0))),
-  });
-  for (let slice = 0; slice < maxSlices; slice++) {
-    const r = s.host.runUntil(STEP_INSTRUCTIONS);
-    expect(r.reason).not.toBe('error');
-    const out = s.txText().slice(before);
-    if (/# *$/.test(out) && out.includes('\n')) return out;
-  }
-  throw new Error(`shell: no prompt after "${line}":\n${s.txText().slice(before)}`);
-}
 
 describe('MINIX v1 fixture generator (env-gated probe, not CI)', () => {
   it(
@@ -119,19 +60,22 @@ describe('MINIX v1 fixture generator (env-gated probe, not CI)', () => {
         throw new Error(`${HD32_PATH} not found — npm run build:elks-hd-image -- hd32-minix`);
       }
 
-      const s = await bootSession({
+      const s = await bootGuest({
         imageBytes: new Uint8Array(0), // blank, zero-filled to geometry
-        geometry: DRIVE_GEOMETRY,
+        geometry: DRIVE_8086_GEOMETRY,
       });
 
       const log: string[] = [];
       const run = (line: string, maxSlices?: number): string => {
-        const out = shell(s, line, maxSlices);
+        const out = guestShell(s, line, maxSlices);
         log.push(`$ ${line}\n${out}`);
         return out;
       };
 
-      expect(run(`mkfs /dev/hdb ${MKFS_BLOCKS}`)).not.toMatch(/error|not found|No such/i);
+      const mkfsOut = run(`mkfs /dev/hdb ${MKFS_BLOCKS}`);
+      if (/error|not found|No such/i.test(mkfsOut)) {
+        throw new Error(`mkfs failed:\n${mkfsOut}`);
+      }
       run('mount /dev/hdb /mnt');
 
       // The known tree — tests/unit/minix-fs.test.ts asserts EXACTLY
@@ -186,15 +130,7 @@ describe('MINIX v1 fixture generator (env-gated probe, not CI)', () => {
       log.push(run('fsck /dev/hdb || echo NO-FSCK'));
 
       // Snapshot — exactly what the Save button takes.
-      const before = s.posts.filter((m) => m.type === 'secondary-snapshot').length;
-      s.host.handleMessage({ type: 'snapshot-secondary' });
-      const snaps = s.posts.filter(
-        (m): m is WorkerToMainMessage & { type: 'secondary-snapshot' } =>
-          m.type === 'secondary-snapshot',
-      );
-      const snap = snaps[before];
-      expect(snap?.bytes).toBeDefined();
-      const full = snap?.bytes ?? new Uint8Array(0);
+      const full = takeSecondarySnapshot(s);
       const fixture = full.slice(0, MKFS_BLOCKS * 1024);
 
       // Sanity before committing: our own parser must at least open it

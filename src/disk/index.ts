@@ -8,6 +8,7 @@ export type {
 export {
   MinixFileSystem,
   MINIX_BLOCK_SIZE,
+  MINIX_MAX_WRITE_BYTES,
   MINIX_ROOT_INODE,
   openMinixImage,
 } from './minix-fs.js';
@@ -20,4 +21,6 @@ export type {
   MinixResult,
   MinixStat,
   MinixSuperblock,
+  MinixWriteErrorKind,
+  MinixWriteResult,
 } from './minix-fs.js';
