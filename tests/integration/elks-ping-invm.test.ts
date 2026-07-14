@@ -91,6 +91,13 @@ describe('Phase 15 M3 — in-VM-compiled ping pings the LAN', () => {
       expect(result.guestArpReplies).toBe(2);
       expect(result.guestArpReplyIp).toBe('10.0.2.42');
 
+      // ---- self-ping (rev 6): loopback, no ARP, no wire — the probe
+      // stamps LOCALIP=10.0.2.42 and pings it. Before rev 6 this hung
+      // on a self-ARP nothing may answer (field: "pinging mouse from
+      // mouse fails"). rc=0 asserted by the all-stages loop above. ----
+      expect(result.sections['pingself']).toContain('loopback');
+      expect(result.sections['pingself']).toContain('2 packets transmitted, 2 received');
+
       // ---- off-LAN ping: unreachable, not a hang, exit code 1 ----
       expect(result.farUnreachable).toBe(true);
       expect(result.gatewayUnreachables).toBe(1);

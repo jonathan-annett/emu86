@@ -102,6 +102,7 @@ export const PING_STAGES: readonly string[] = [
   'ld',
   'pinggw',
   'pingfar',
+  'pingself',
   'md5',
   'export',
   'unmount',
@@ -131,6 +132,11 @@ export const PING_BUILD_SCRIPT = [
   'echo rc=$?',
   'echo @@pingfar@@',
   './ping 8.8.8.8 1',
+  'echo rc=$?',
+  // Self-ping (rev 6): loopback, no wire — the one ping that must
+  // work regardless of the network. 10.0.2.42 is the stamped LOCALIP.
+  'echo @@pingself@@',
+  './ping 10.0.2.42 2',
   'echo rc=$?',
   'echo @@md5@@',
   'md5sum /tmp/ping',

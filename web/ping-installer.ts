@@ -85,8 +85,13 @@ export const MAX_GUEST_LINE = 110;
  *          (hardcoded .15 claimed an address no tab owns) + answer
  *          ARP who-has while running (nothing else speaks for a
  *          ktcp-stopped machine); plus the marker mechanism itself.
+ *   rev 6: self-ping loopback — `ping mouse` FROM mouse used to ARP
+ *          its own address, which nothing may answer (the switch
+ *          never echoes to the sender's port; the proxy skips your
+ *          own octet). Loopback needs no NIC, so it works with ktcp
+ *          up. Field, 2026-07-15.
  */
-export const PING_REV = 5;
+export const PING_REV = 6;
 
 /**
  * Build the boot script. `@turbo` for the fetch and the compile (a c86

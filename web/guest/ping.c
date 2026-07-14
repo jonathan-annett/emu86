@@ -25,6 +25,11 @@
  * and a peer that cannot resolve us cannot reply. Hardcoding .15 and
  * answering nothing was the tab-pings-tab bug (field, 2026-07-14).
  *
+ * Self-ping (rev 6): a target that IS this machine short-circuits to
+ * loopback - no ARP, no wire, no NIC, so it works with ktcp running.
+ * On the wire it could never work: the switch does not echo to the
+ * sending port, and nothing else may answer for our address.
+ *
  * Usage: ping ADDR [count]     (default count 4)
  */
 
@@ -460,6 +465,45 @@ static void send_echo(unsigned int seq)
     write(ethfd, (char *)txf, FRAME_LEN);
 }
 
+/* Plain sleep for the loopback path - no NIC to listen on. */
+static void sleep_ms(long ms)
+{
+    struct timeval tv;
+    tv.tv_sec = ms / 1000L;
+    tv.tv_usec = (ms % 1000L) * 1000L;
+    select(0, (unsigned long *)0, (unsigned long *)0, (unsigned long *)0, &tv);
+}
+
+/*
+ * Loopback: the target IS this machine. A self-ping never touches the
+ * wire on a real stack, and on this LAN it CANNOT work by wire: the
+ * switch never echoes a frame to the port that sent it, the TAN's
+ * proxy-ARP deliberately never answers for the asking tab's own
+ * octet, and ktcp sits behind the same NIC and never sees our
+ * outbound frames. Nothing can answer a self-ARP (field, 2026-07-15:
+ * "pinging mouse from mouse fails"). Answer locally with honest
+ * elapsed times; no NIC means this also works with ktcp running.
+ */
+static int self_ping(int count)
+{
+    char abuf[16];
+    struct timeval t0;
+    unsigned int seq;
+    printf("PING %s: %d data bytes (this machine -- loopback, no wire)\n",
+           fmt_ip(abuf, my_ip), DATA_LEN);
+    fflush(stdout);
+    for (seq = 1; seq <= (unsigned int)count; seq++) {
+        gettimeofday(&t0, (char *)0);
+        printf("%d bytes from %s: seq=%u time=%ld ms\n",
+               ECHO_LEN, fmt_ip(abuf, my_ip), seq, ms_since(&t0));
+        fflush(stdout);
+        if (seq < (unsigned int)count) sleep_ms(GAP_MS);
+    }
+    printf("--- %s ping statistics ---\n", fmt_ip(abuf, my_ip));
+    printf("%d packets transmitted, %d received\n", count, count);
+    return 0;
+}
+
 /* Between pings: sleep `ms`, but keep answering ARP - a peer's stack
  * may (re)resolve us at any moment, and nothing else will speak for
  * this address while we hold the NIC. */
@@ -533,6 +577,20 @@ int main(int argc, char **argv)
     count = argc > 2 ? parse_count(argv[2]) : 4;
     if (count < 1) count = 1;
 
+    /* Who are we? $LOCALIP is the bootopts stamp every TAN tab boots
+     * with (10.0.2.<its octet>); solo boots keep the .15 default. The
+     * hardcoded .15 was half of the tab-pings-tab bug: every echo went
+     * out claiming an address no tab owns. (Deliberately NOT the MAC's
+     * last byte - on the TAN it matches the octet, but solo the MAC is
+     * a fixed default while the IP is .15.) Parse into scratch first:
+     * parse_ip writes as it goes, and a malformed value must not
+     * half-overwrite the default. */
+    env = getenv("LOCALIP");
+    if (env != (char *)0 && parse_ip(env, lip)) bcopy4(my_ip, lip);
+
+    /* Pinging ourselves? Loopback - before the NIC is even opened. */
+    if (eq4(dst_ip, my_ip)) return self_ping(count);
+
     /* /dev/ne0 on current images (ktcp.c:47); /dev/eth on older ones. */
     ethfd = open("/dev/ne0", O_RDWR);
     if (ethfd < 0) ethfd = open("/dev/eth", O_RDWR);
@@ -545,17 +603,6 @@ int main(int argc, char **argv)
         close(ethfd);
         return 1;
     }
-
-    /* Who are we? $LOCALIP is the bootopts stamp every TAN tab boots
-     * with (10.0.2.<its octet>); solo boots keep the .15 default. The
-     * hardcoded .15 was half of the tab-pings-tab bug: every echo went
-     * out claiming an address no tab owns. (Deliberately NOT the MAC's
-     * last byte - on the TAN it matches the octet, but solo the MAC is
-     * a fixed default while the IP is .15.) Parse into scratch first:
-     * parse_ip writes as it goes, and a malformed value must not
-     * half-overwrite the default. */
-    env = getenv("LOCALIP");
-    if (env != (char *)0 && parse_ip(env, lip)) bcopy4(my_ip, lip);
 
     /* /24 routing: on-subnet direct, everything else via the gateway. */
     hop = (dst_ip[0] == my_ip[0] && dst_ip[1] == my_ip[1] && dst_ip[2] == my_ip[2])
