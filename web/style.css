@@ -676,3 +676,24 @@ header code {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Boot-script @directive cheat sheet (collapsed by default) */
+.emu86-cheatsheet {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.emu86-cheatsheet summary {
+  cursor: pointer;
+  color: #a0c8a0;
+}
+
+.emu86-cheatsheet pre {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.7rem;
+  background: #0c140c;
+  border: 1px solid #2a4a2a;
+  border-radius: 4px;
+  overflow-x: auto;
+  line-height: 1.5;
+}

@@ -1020,7 +1020,28 @@ function renderBootScriptPane(opts: BootScriptPaneOpts): HTMLDivElement {
   textArea.rows = 6;
   textArea.spellcheck = false;
   textArea.setAttribute('aria-label', 'Boot script contents');
-  editor.append(nameRow, textArea);
+
+  // @directive cheat sheet (field request) — collapsed by default,
+  // content mirrors parseScript() in web/autoexec.ts. If a directive
+  // changes there, change it here.
+  const cheat = document.createElement('details');
+  cheat.className = 'emu86-cheatsheet';
+  const cheatSummary = document.createElement('summary');
+  cheatSummary.textContent = '@directive cheat sheet';
+  const cheatBody = document.createElement('pre');
+  cheatBody.textContent = [
+    'plain line      sent after the next prompt (login: / Password: / # / $ / > )',
+    '@expect TEXT    next line waits for TEXT in output instead of a prompt',
+    '@type           lines below are typed key-by-key, with key clicks',
+    '@instant        lines below are sent whole (default)',
+    '@here … @end    verbatim block: every line incl. blanks, no prompt waits',
+    '                (use for heredocs — the shell continuation prompt is "> ")',
+    '@turbo          uncap CPU speed from here on (this session only)',
+    '@authentic      back to 4.77 MHz pacing (this session only)',
+  ].join('\n');
+  cheat.append(cheatSummary, cheatBody);
+
+  editor.append(nameRow, textArea, cheat);
 
   root.append(pickerRow, editor);
 
