@@ -33,8 +33,36 @@ describe('session-store', () => {
     const first = loadSession();
     expect(first.sessionId.length).toBeGreaterThan(0);
     expect(first.tanHostOctet).toBeNull();
+    expect(first.driveForkId).toBeNull();
+    expect(first.pendingBlankKb).toBeNull();
     const second = loadSession();
     expect(second.sessionId).toBe(first.sessionId);
+  });
+
+  it('drive fork fields round-trip and patch independently', () => {
+    const { sessionId } = loadSession();
+    saveSession({ driveForkId: 'row-1' });
+    saveSession({ pendingBlankKb: 32256 });
+    const s = loadSession();
+    expect(s.sessionId).toBe(sessionId);
+    expect(s.driveForkId).toBe('row-1');
+    expect(s.pendingBlankKb).toBe(32256);
+    // Clearing one leaves the other.
+    saveSession({ pendingBlankKb: null });
+    expect(loadSession().driveForkId).toBe('row-1');
+    expect(loadSession().pendingBlankKb).toBeNull();
+  });
+
+  it('a pre-M0 stored session (no drive fields) loads with nulls', () => {
+    sessionStorage.setItem(
+      'emu86.session.v1',
+      JSON.stringify({ sessionId: 'old', tanHostOctet: 7 }),
+    );
+    const s = loadSession();
+    expect(s.sessionId).toBe('old');
+    expect(s.tanHostOctet).toBe(7);
+    expect(s.driveForkId).toBeNull();
+    expect(s.pendingBlankKb).toBeNull();
   });
 
   it('saveSession patches one field and preserves the rest', () => {

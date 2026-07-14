@@ -22,6 +22,16 @@
  *     consumer: tab duplication copies the id, so hibernation must
  *     add its own liveness/collision handling (the octet-lease pattern
  *     is the precedent) rather than trusting the id to be unique.
+ *   - `driveForkId` — Phase 16 M0: the image-library row id of THIS
+ *     tab's /dev/hdb working copy (source tag 'fork'). Duplication
+ *     copies it, exactly as the caveat above predicted; the
+ *     drive-session module detects the collision via a Web Lock named
+ *     for the id and forks a fresh copy (the octet-lease pattern).
+ *   - `pendingBlankKb` — Phase 16 M0: a queued `?mkdrive` swap. Set by
+ *     the control endpoint; consumed (and cleared) at the tab's next
+ *     boot, which replaces the fork with a fresh blank of this size.
+ *     Session-scoped on purpose: it must only ever swap THIS tab's
+ *     drive, never the shared base image.
  *
  * Fail-open like settings.ts: no sessionStorage (sandboxed iframe,
  * exotic privacy mode) degrades to fresh ephemeral values per load.
@@ -32,6 +42,10 @@ export interface SessionState {
   sessionId: string;
   /** Settled TAN host octet from this session's last boot, or null. */
   tanHostOctet: number | null;
+  /** This tab's /dev/hdb fork — image-library row id, or null before first boot. */
+  driveForkId: string | null;
+  /** Queued `?mkdrive` swap (KB), consumed at next boot; null when none. */
+  pendingBlankKb: number | null;
 }
 
 const STORAGE_KEY = 'emu86.session.v1';
@@ -43,6 +57,8 @@ function freshState(): SessionState {
         ? crypto.randomUUID()
         : `s-${Math.random().toString(36).slice(2)}`,
     tanHostOctet: null,
+    driveForkId: null,
+    pendingBlankKb: null,
   };
 }
 
@@ -63,13 +79,26 @@ export function loadSession(): SessionState {
     try {
       const parsed: unknown = JSON.parse(raw);
       if (parsed !== null && typeof parsed === 'object') {
-        const obj = parsed as { sessionId?: unknown; tanHostOctet?: unknown };
+        const obj = parsed as {
+          sessionId?: unknown;
+          tanHostOctet?: unknown;
+          driveForkId?: unknown;
+          pendingBlankKb?: unknown;
+        };
         if (typeof obj.sessionId === 'string' && obj.sessionId.length > 0) {
           state = {
             sessionId: obj.sessionId,
             tanHostOctet:
               typeof obj.tanHostOctet === 'number' && Number.isInteger(obj.tanHostOctet)
                 ? obj.tanHostOctet
+                : null,
+            driveForkId:
+              typeof obj.driveForkId === 'string' && obj.driveForkId.length > 0
+                ? obj.driveForkId
+                : null,
+            pendingBlankKb:
+              typeof obj.pendingBlankKb === 'number' && Number.isInteger(obj.pendingBlankKb)
+                ? obj.pendingBlankKb
                 : null,
           };
         }

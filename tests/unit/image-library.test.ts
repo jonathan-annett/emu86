@@ -65,6 +65,21 @@ describe('ImageLibrary', () => {
     lib.close();
   });
 
+  it("addImage carries the 'fork' tag and explicit geometry (Phase 16 M0)", async () => {
+    const lib = new ImageLibrary('test-images-fork');
+    const geometry = { cylinders: 3, heads: 2, sectorsPerTrack: 4 };
+    const id = await lib.addImage('tab drive', sampleBytes(16, 7), 'fork', undefined, geometry);
+
+    const entry = await lib.getImageEntry(id);
+    expect(entry.source).toBe('fork');
+    expect(entry.geometry).toEqual(geometry);
+    expect(entry.bytes).toEqual(sampleBytes(16, 7));
+
+    const meta = (await lib.listImages()).find((m) => m.id === id);
+    expect(meta).toMatchObject({ source: 'fork', geometry });
+    lib.close();
+  });
+
   it('removeImage drops the entry; remove of missing id is a no-op', async () => {
     const lib = new ImageLibrary('test-images-4');
     const id = await lib.addImage('a', sampleBytes(2, 1));

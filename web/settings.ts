@@ -74,13 +74,20 @@ export interface Settings {
   themeName: ThemePresetName;
   imageSource: ImageSource;
   /**
-   * Optional secondary-disk source (Phase 11 — multi-disk substrate).
-   * `null` ⇒ single-disk operation, no behavioral change vs Phase 10.
-   * Typically resolves to /dev/hdb or /dev/fd1 in ELKS depending on
-   * geometry; the worker host infers the class from the image bytes.
+   * The BASE drive image (Phase 16 M0 — meaning changed; the field and
+   * its storage shape did not). This is the TEMPLATE every newly opened
+   * tab forks its private /dev/hdb from; it is NOT what any tab mounts
+   * directly. `null` no longer means "no drive" — it means new tabs get
+   * a fresh blank 8086 KB fork. Written by the modal's picker and by
+   * the main page's "Save as default" promote; running tabs' forks live
+   * in sessionStorage + the image library ('fork' rows), not here.
+   *
+   * (History: Phase 11 introduced this as the directly-mounted
+   * secondary; that origin-global attach is what made `?mkdrive` refuse
+   * brand-new tabs — SUBSTRATE_API_REPORT.md §4, field 2026-07-15.)
    *
    * Cannot reference 'bundled' — the bundled image is the boot image,
-   * not a secondary. Stored as `null` (no secondary) or
+   * not a data-drive template. Stored as `null` or
    * `{ kind: 'library', id }`.
    */
   secondaryImageSource: { kind: 'library'; id: string } | null;

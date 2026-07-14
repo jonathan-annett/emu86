@@ -40,8 +40,14 @@ const DATABASE_NAME = 'emu86-images';
 const STORE_NAME = 'images';
 const SCHEMA_VERSION = 1;
 
-/** Source discriminator. `'blank'` = created-in-browser virtual drive (Phase 15 M2). */
-export type ImageSourceTag = 'upload' | 'github' | 'blank';
+/**
+ * Source discriminator. `'blank'` = created-in-browser virtual drive
+ * (Phase 15 M2). `'fork'` = a tab's private /dev/hdb working copy
+ * (Phase 16 M0) — machine-managed: hidden from the settings-modal
+ * pickers, auto-persisted by the running tab, garbage-collected by
+ * drive-session.ts when its tab is gone.
+ */
+export type ImageSourceTag = 'upload' | 'github' | 'blank' | 'fork';
 
 /**
  * CHS geometry stored on a library entry (Phase 15 M2). Structurally
@@ -193,12 +199,17 @@ export class ImageLibrary {
    * `viability` is optional and only meaningful for `'github'` sources —
    * the GitHub browser passes it through so the library row can show the
    * tag without re-running the heuristic. Omitted for `'upload'`.
+   *
+   * `geometry` is optional and carried by `'fork'` rows (Phase 16 M0),
+   * which copy it from the image they forked so the entry boots via the
+   * explicit-geometry path — same reasoning as createBlankImage.
    */
   async addImage(
     name: string,
     bytes: Uint8Array,
     source: ImageSourceTag = 'upload',
     viability?: StoredViabilityTag,
+    geometry?: StoredDiskGeometry,
   ): Promise<string> {
     const id = generateId();
     const entry: StoredImage = {
@@ -209,6 +220,7 @@ export class ImageLibrary {
       sizeBytes: bytes.byteLength,
       source,
       ...(viability !== undefined ? { viability } : {}),
+      ...(geometry !== undefined ? { geometry } : {}),
     };
     const db = await this.ready();
     const tx = db.transaction(STORE_NAME, 'readwrite');

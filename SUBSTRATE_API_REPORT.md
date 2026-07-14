@@ -50,6 +50,10 @@ Two capabilities, both driven by tools the guest already has:
 - **Preset sizes only** (`8086, 16128, 32256` KB): arbitrary KB needs
   CHS-exact factoring and invites geometry bugs; the modal's presets
   are field-proven shapes. A wrong size answers with the valid list.
+  [CORRECTION 2026-07-15, found by the Phase 16 M0 tests: the 32 MB
+  preset is actually **31752 KB** (63×16×63 CHS) — "32256" was wrong
+  here and in the usage text (now fixed); the dynamic error list was
+  always right.]
 - **`?save` and `?file` deliberately absent** — recorded in the brief
   (F.3, E): Save has Web-Lock interplay and a working button; file
   interchange is the editor seam (E: the drive IS the file interface).

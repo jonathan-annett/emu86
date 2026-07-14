@@ -5,7 +5,8 @@
  *
  *   urlget http://10.0.2.2/?whoami        → name + address
  *   urlget http://10.0.2.2/?peers        → live TAN members
- *   urlget http://10.0.2.2/?mkdrive=8086  → create + attach a drive
+ *   urlget http://10.0.2.2/?mkdrive=8086  → queue a fresh blank drive
+ *                                           for THIS tab's next reload
  *
  * A tiny HTTP/1.0 responder on the gateway's OWN address — TCP dialed
  * at 10.0.2.2 used to be silently dropped ({@link LanGateway} handled
@@ -40,9 +41,10 @@ export interface ControlActions {
   /** The live TAN directory, one member per line. */
   peers(): string;
   /**
-   * Create a blank drive of (about) `kb` KB in the image library and
-   * select it as the secondary. Resolves to the text shown in the
-   * guest terminal (success or an honest refusal).
+   * Queue a fresh blank drive of `kb` KB to replace THIS tab's fork at
+   * its next reload (Phase 16 M0 — per-tab; the shared base image is
+   * never touched, so there is no "already attached" refusal anymore).
+   * Resolves to the text shown in the guest terminal.
    */
   mkdrive(kb: number): Promise<string>;
 }
@@ -52,7 +54,11 @@ const USAGE = [
   'actions (urlget http://10.0.2.2/?ACTION):',
   '  ?whoami         who am I (name + address)',
   '  ?peers          who is on the Tab Area Network right now',
-  '  ?mkdrive=KB     create + attach a blank drive (8086, 16128, 32256)',
+  // Sizes are presetKb() of DRIVE_PRESETS. The old text said "32256"
+  // for the 32 MB preset — wrong since Phase 15 (63×16×63 CHS is
+  // 31752 KB); the dynamic error list was always right. Found by the
+  // M0 drive-session tests, 2026-07-15.
+  '  ?mkdrive=KB     fresh blank drive for this tab, next reload (8086, 16128, 31752)',
   '',
 ].join('\n');
 

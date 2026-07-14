@@ -66,12 +66,6 @@ export interface SettingsModalDeps {
   /** Source the running emulator booted from (so we can flag pending reloads). */
   bootedFrom: ImageSource;
   /**
-   * Secondary disk source the running emulator booted with (Phase 11).
-   * `null` ⇒ no secondary was attached. Used to flag pending reloads when
-   * the user changes the secondary selection.
-   */
-  bootedSecondary: { kind: 'library'; id: string } | null;
-  /**
    * CPU-speed live toggle (pacing milestone): called on change so
    * main.ts can post a set-speed message to the running worker —
    * unlike image sources, speed applies without a reload.
@@ -318,19 +312,18 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     // no behavioural change vs Phase 10. The secondary is a *data disk*,
     // not a boot disk, so we don't surface viability tagging prominently.
     // Class is inferred from image bytes by the worker host's size table.
-    const secondarySection = section('Secondary disk (optional)');
+    // Phase 16 M0: this picks the BASE image — the template every newly
+    // opened tab forks its private /dev/hdb from. It never touches a
+    // running tab's fork; those persist on their own.
+    const secondarySection = section('Base drive image (new tabs fork this)');
     const secondaryHelp = document.createElement('div');
     secondaryHelp.className = 'emu86-hint';
     secondaryHelp.textContent =
-      'Mounts as /dev/hdb (HD-class image) or /dev/fd1 (floppy-class image). ' +
-      'Primary still boots; mount via the kernel after boot.';
+      'Every tab gets its own private copy of this image as /dev/hdb ' +
+      '(or /dev/fd1 for floppy-class images) when it first opens. ' +
+      'Tabs already open keep the copy they have. The "Save as default" ' +
+      'button on the main page replaces this base with a tab\'s current drive.';
     secondarySection.body.appendChild(secondaryHelp);
-
-    const secondaryReloadDiv = document.createElement('div');
-    secondaryReloadDiv.className = 'emu86-reload-notice';
-    secondaryReloadDiv.setAttribute('aria-live', 'polite');
-    secondaryReloadDiv.hidden = true;
-    secondarySection.body.appendChild(secondaryReloadDiv);
 
     const secondaryList = document.createElement('div');
     secondaryList.className = 'emu86-image-list';
@@ -338,8 +331,9 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
     /* Create blank drive (Phase 15 M2 — virtual drives) ----------- */
     // An all-zero image with explicit CHS geometry, stored in the
-    // library like any other entry. Guest formats it (mkfs) and the
-    // explicit Save button on the main page persists guest writes back.
+    // library like any other entry and selected as the base template.
+    // Guest formats its fork of it (mkfs) after the next reload... of a
+    // NEW tab — existing tabs keep their forks (M0 semantics).
     const createRow = document.createElement('div');
     createRow.className = 'emu86-upload-row';
     const sizeSelect = document.createElement('select');
@@ -375,8 +369,8 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
             `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
             geometry,
           );
-          // Select it as the secondary right away — creating a drive
-          // and not attaching it is never what the user meant.
+          // Select it as the base right away — creating a template and
+          // not selecting it is never what the user meant.
           deps.onChange({
             ...deps.getSettings(),
             secondaryImageSource: { kind: 'library', id },
@@ -384,9 +378,9 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
           const blocks =
             (preset.cylinders * preset.heads * preset.sectorsPerTrack * 512) / 1024;
           createStatus.textContent =
-            `Created. After reload: mkfs /dev/hdb ${blocks} && mount /dev/hdb /mnt ` +
-            '— then use Save (bottom banner) to persist guest writes.';
-          await refreshSecondaryList(secondaryList, secondaryReloadDiv);
+            `Created and set as the base. New tabs fork it; in the guest: ` +
+            `mkfs /dev/hdb ${blocks} && mount /dev/hdb /mnt.`;
+          await refreshSecondaryList(secondaryList);
           await refreshList(list);
         } catch (err) {
           createStatus.textContent = `Create failed: ${describeError(err)}`;
@@ -396,7 +390,7 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
     host.appendChild(secondarySection.el);
 
-    void refreshSecondaryList(secondaryList, secondaryReloadDiv);
+    void refreshSecondaryList(secondaryList);
 
     /* Boot script (Phase 14 — autoexec) ---------------------------- */
     // Named keystroke scripts typed into the console at boot by the
@@ -464,6 +458,7 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
     const cur = deps.getSettings();
     for (const entry of entries) {
+      if (entry.source === 'fork') continue; // machine-managed tab drives (Phase 16 M0)
       const isSelected = cur.imageSource.kind === 'library'
         && cur.imageSource.id === entry.id;
       // Subtitle includes source tag (upload | github) so the user can
@@ -529,43 +524,28 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
   }
 
   /**
-   * Render the secondary-disk picker. Mirrors `refreshList` but omits the
-   * bundled entry (the bundled image is a boot image, not a data disk) and
-   * leads with a "None" entry that turns the secondary off. Library entries
-   * follow without rename/delete actions — those live on the primary picker
-   * to avoid duplicating side-effects across two views.
+   * Render the base-image picker (Phase 16 M0: what NEW tabs fork —
+   * changing it never touches a running tab, so the old "reload to
+   * apply" notice is gone; there is nothing to reload for). Mirrors
+   * `refreshList` but omits the bundled entry (a boot image, not a
+   * data disk) and machine-managed 'fork' rows, and leads with a
+   * "None" entry — which no longer means "no drive": every tab always
+   * gets one; None just makes it a fresh blank 8086 KB.
    */
-  async function refreshSecondaryList(
-    host: HTMLDivElement,
-    reloadEl: HTMLDivElement,
-  ): Promise<void> {
+  async function refreshSecondaryList(host: HTMLDivElement): Promise<void> {
     host.innerHTML = '';
 
-    const updateSecondaryReload = (): void => {
-      const cur = deps.getSettings().secondaryImageSource;
-      const a = cur?.id ?? null;
-      const b = deps.bootedSecondary?.id ?? null;
-      const pending = a !== b;
-      reloadEl.hidden = !pending;
-      reloadEl.textContent = pending
-        ? 'Secondary-disk change takes effect on next reload.'
-        : '';
-    };
-
-    // "None" — explicitly off. Always present so the user can turn the
-    // secondary off without rummaging through the library list.
     host.appendChild(
       renderRow({
-        title: 'None',
-        subtitle: 'Single-disk boot — no /dev/hdb or /dev/fd1 attached.',
+        title: 'None (blank default)',
+        subtitle: 'New tabs start with a fresh blank 8086 KB drive.',
         isBundled: true,
         isSelected: deps.getSettings().secondaryImageSource === null,
         onSelect: () => {
           const cur = deps.getSettings();
           if (cur.secondaryImageSource === null) return;
           deps.onChange({ ...cur, secondaryImageSource: null });
-          updateSecondaryReload();
-          void refreshSecondaryList(host, reloadEl);
+          void refreshSecondaryList(host);
         },
       }),
     );
@@ -583,13 +563,14 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
     const cur = deps.getSettings();
     for (const entry of entries) {
+      if (entry.source === 'fork') continue; // tabs' private copies — not templates
       const isSelected = cur.secondaryImageSource !== null
         && cur.secondaryImageSource.id === entry.id;
       const tagBits: string[] = [
         formatBytes(entry.sizeBytes),
         `${entry.source} · ${formatDate(entry.uploadedAt)}`,
       ];
-      // No viability tag here — secondary is a data disk, not a boot disk.
+      // No viability tag here — the base is a data disk, not a boot disk.
       host.appendChild(
         renderRow({
           title: entry.name,
@@ -601,14 +582,11 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
               ...deps.getSettings(),
               secondaryImageSource: { kind: 'library', id: entry.id },
             });
-            updateSecondaryReload();
-            void refreshSecondaryList(host, reloadEl);
+            void refreshSecondaryList(host);
           },
         }),
       );
     }
-
-    updateSecondaryReload();
   }
 
   async function refreshStorage(host: HTMLDivElement): Promise<void> {

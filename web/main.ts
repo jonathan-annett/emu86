@@ -50,6 +50,12 @@ import {
 } from './settings.js';
 import { THEMES } from './themes.js';
 import { DRIVE_PRESETS, ImageLibrary, presetKb } from './image-library.js';
+import {
+  createWebForkLocks,
+  gcOrphanForks,
+  resolveDriveSession,
+  type DriveSession,
+} from './drive-session.js';
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
@@ -126,13 +132,34 @@ async function init(): Promise<void> {
     saveSettings(settings);
   }
 
+  // Per-tab drive fork (Phase 16 M0 — brief Addendum A): settle which
+  // /dev/hdb this tab owns BEFORE the banner so the provenance line is
+  // true. Every tab gets a drive; failure (no usable IDB) degrades to a
+  // solo boot rather than a dead page. Orphan forks from long-gone tabs
+  // are swept in the background — never awaited on the boot path.
+  const forkLocks = createWebForkLocks();
+  let drive: DriveSession | null = null;
+  try {
+    drive = await resolveDriveSession({
+      library,
+      locks: forkLocks,
+      loadSession,
+      saveSession,
+      base: settings.secondaryImageSource,
+    });
+  } catch (err) {
+    console.warn('[emu86] drive fork unavailable, booting solo:', err);
+  }
+  void gcOrphanForks(library, forkLocks).then((n) => {
+    if (n > 0) console.debug(`[emu86] swept ${n} orphaned tab drive${n === 1 ? '' : 's'}`);
+  }).catch(() => { /* sweep is best-effort */ });
+
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
   term.writeln(`emu86 — ELKS in the browser [${buildLabel}]`);
   term.writeln(`Image: ${sourceLabel}`);
-  if (settings.secondaryImageSource !== null) {
-    const secondaryLabel = await describeImageSource(library, settings.secondaryImageSource);
-    term.writeln(`Secondary: ${secondaryLabel}`);
+  if (drive !== null) {
+    term.writeln(`Secondary: ${describeDrive(drive)}`);
   }
   const activeScript = settings.bootScripts.find(
     (s) => s.id === settings.activeBootScriptId,
@@ -192,18 +219,100 @@ async function init(): Promise<void> {
       })
     : null;
 
-  // Virtual drives (Phase 15 M2): the save banner appears while the
-  // booted secondary has unsaved guest writes. Save is explicit — the
-  // worker snapshots, we persist to the library, nothing is automatic.
-  // The Web Locks guard below downgrades the banner to a warning when
-  // another tab already holds this drive (per-origin IDB is shared).
-  const bootedSecondaryId = settings.secondaryImageSource?.id ?? null;
-  const driveBanner = ensureDriveBanner(() => {
-    driveBanner.saving();
-    const msg: MainToWorkerMessage = { type: 'snapshot-secondary' };
-    worker.postMessage(msg);
+  // Per-tab drive persistence (Phase 16 M0). Two consumers share the
+  // worker's snapshot-secondary round trip via a FIFO of waiting
+  // resolvers (postMessage ordering means the worker answers strictly
+  // in request order):
+  //   - auto-persist: while the guest writes, snapshot + write THIS
+  //     tab's fork row, at most one write per AUTO_PERSIST_MS. This is
+  //     what makes a reload (soft reboot) keep the drive. Honest
+  //     limit, recorded in the brief: a reload can lose the last
+  //     ≤5 s of guest writes — the floppy-yank class of loss.
+  //   - promote: the banner's button publishes the tab's current drive
+  //     as the shared base image — the thing NEW tabs fork. Tabs
+  //     already open keep their forks (floppy-passing, not sync).
+  const driveBanner = ensureDriveBanner(() => { void promoteToBase(); });
+  const snapshotSinks: Array<(bytes: Uint8Array | null) => void> = [];
+  function requestSnapshot(): Promise<Uint8Array | null> {
+    return new Promise((resolve) => {
+      snapshotSinks.push(resolve);
+      const msg: MainToWorkerMessage = { type: 'snapshot-secondary' };
+      worker.postMessage(msg);
+    });
+  }
+
+  const AUTO_PERSIST_MS = 5_000;
+  let persistInFlight = false;
+  let lastPersistAt = 0;
+  let latestDirtySectors = 0;
+  function maybeAutoPersist(force = false): void {
+    if (drive === null || persistInFlight) return;
+    if (!force && Date.now() - lastPersistAt < AUTO_PERSIST_MS) return;
+    persistInFlight = true;
+    const target = drive;
+    void requestSnapshot()
+      .then(async (bytes) => {
+        if (bytes === null) return; // no secondary mounted in the worker
+        await library.updateImageBytes(target.imageId, bytes);
+        driveBanner.autoSaved();
+      })
+      .catch((err: unknown) => driveBanner.error(String(err)))
+      .finally(() => {
+        persistInFlight = false;
+        lastPersistAt = Date.now();
+      });
+  }
+  // Tab going to the background is the best predictor we get of a
+  // close/reload — flush regardless of the throttle window.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && latestDirtySectors > 0) {
+      maybeAutoPersist(true);
+    }
   });
-  let driveLockHeld = true;
+
+  async function promoteToBase(): Promise<void> {
+    if (drive === null) return;
+    driveBanner.promoting();
+    try {
+      const bytes = await requestSnapshot();
+      if (bytes === null) {
+        driveBanner.error('no drive mounted');
+        return;
+      }
+      // The fork row rides along so this tab's own persistence is
+      // exactly as current as the base it just published.
+      await library.updateImageBytes(drive.imageId, bytes);
+      const baseId = settings.secondaryImageSource?.id ?? null;
+      let updatedExisting = false;
+      if (baseId !== null) {
+        const meta = (await library.listImages()).find((m) => m.id === baseId);
+        if (meta !== undefined && meta.sizeBytes === bytes.byteLength) {
+          await library.updateImageBytes(baseId, bytes);
+          updatedExisting = true;
+        }
+      }
+      if (!updatedExisting) {
+        // No base yet — or the drive changed size (?mkdrive swap). A
+        // base image's geometry is its identity, so publish a NEW
+        // entry and repoint; an old base stays in the library, user-
+        // owned and user-deletable.
+        const preset = DRIVE_PRESETS.find((p) => presetKb(p) * 1024 === bytes.byteLength);
+        const label = preset?.label ?? `${Math.round(bytes.byteLength / 1024)} KB`;
+        const id = await library.addImage(
+          `default drive (${label})`,
+          bytes,
+          'blank',
+          undefined,
+          drive.geometry,
+        );
+        settings = { ...settings, secondaryImageSource: { kind: 'library', id } };
+        saveSettings(settings);
+      }
+      driveBanner.promoted();
+    } catch (err) {
+      driveBanner.error(String(err));
+    }
+  }
 
   worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
     const msg = event.data;
@@ -221,45 +330,31 @@ async function init(): Promise<void> {
       return;
     }
     if (msg.type === 'secondary-snapshot') {
-      if (msg.bytes === null || bootedSecondaryId === null) {
-        driveBanner.error('no secondary drive mounted');
-        return;
-      }
-      void library
-        .updateImageBytes(bootedSecondaryId, msg.bytes)
-        .then(() => driveBanner.saved())
-        .catch((err: unknown) => driveBanner.error(String(err)));
+      // Hand the bytes to whichever requester is next in line (auto-
+      // persist or promote) — see the FIFO note above requestSnapshot.
+      const sink = snapshotSinks.shift();
+      if (sink !== undefined) sink(msg.bytes);
       return;
     }
     if (msg.type === 'control-request') {
-      // Substrate API v1: the guest ran `urlget http://10.0.2.2/?...`
-      // and the action needs main-thread state (library + settings).
-      // Whatever text we answer with lands in the guest's terminal.
+      // Substrate API v1: the guest ran `urlget http://10.0.2.2/?...`.
+      // Phase 16 M0 semantics: mkdrive queues a swap of THIS TAB's fork
+      // (consumed at the tab's next boot) and never touches the shared
+      // base image — so the old "already attached" refusal is gone.
+      // Field, 2026-07-15: it fired even on brand-new tabs, because the
+      // attach it guarded was origin-global. Whatever text we answer
+      // with lands in the guest's terminal.
       void (async (): Promise<string> => {
-        if (settings.secondaryImageSource !== null) {
-          return 'mkdrive: a drive is already attached -- detach it in settings first';
-        }
         const preset = DRIVE_PRESETS.find((p) => presetKb(p) === msg.kb);
         if (preset === undefined) {
           const sizes = DRIVE_PRESETS.map((p) => presetKb(p)).join(', ');
           return `mkdrive: size must be one of: ${sizes} (KB)`;
         }
-        const id = await library.createBlankImage(
-          `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
-          {
-            cylinders: preset.cylinders,
-            heads: preset.heads,
-            sectorsPerTrack: preset.sectorsPerTrack,
-          },
-        );
-        // Select it as the secondary right away — same reasoning as the
-        // modal: creating a drive and not attaching it is never meant.
-        settings = { ...settings, secondaryImageSource: { kind: 'library', id } };
-        saveSettings(settings);
+        saveSession({ pendingBlankKb: msg.kb });
         return [
-          `created a ${preset.label} drive and attached it as the secondary.`,
-          `reload this browser tab to boot with /dev/hdb, then: mkfs /dev/hdb ${msg.kb}`,
-          'guest writes persist only when you press Save (bottom banner).',
+          `queued: a fresh blank ${preset.label} drive will replace this tab's /dev/hdb.`,
+          `reload this browser tab to boot with it, then: mkfs /dev/hdb ${msg.kb}`,
+          'only this tab is affected; the shared base image is untouched.',
         ].join('\n');
       })().then(
         (text) => {
@@ -299,12 +394,14 @@ async function init(): Promise<void> {
       // Pacing telemetry (~1/sec). Console-only by design — the numbers
       // are for the pacing report and the dev /agent/stats endpoint.
       latestStats = msg;
-      // Unsaved-drive indicator rides the same heartbeat.
-      if (typeof msg.secondaryDirtySectors === 'number' && driveLockHeld) {
+      // Fork auto-persist rides the same heartbeat: dirty sectors mean
+      // guest writes since the last snapshot; the throttle inside
+      // maybeAutoPersist keeps IDB writes to one per AUTO_PERSIST_MS.
+      if (typeof msg.secondaryDirtySectors === 'number') {
+        latestDirtySectors = msg.secondaryDirtySectors;
         if (msg.secondaryDirtySectors > 0) {
           driveBanner.dirty(msg.secondaryDirtySectors);
-        } else {
-          driveBanner.clean();
+          maybeAutoPersist();
         }
       }
       console.debug(
@@ -368,7 +465,7 @@ async function init(): Promise<void> {
   const boot = await buildBootMessage(
     library,
     settings.imageSource,
-    settings.secondaryImageSource,
+    drive === null ? null : { kind: 'library', id: drive.imageId },
   );
   // Sticky IP: offer last session's TAN octet as the lease's first
   // pick (defend/repick still applies — a duplicated tab repicks).
@@ -380,29 +477,14 @@ async function init(): Promise<void> {
   boot.config.cpuSpeed = settings.cpuSpeed;
   worker.postMessage(boot);
 
-  // Single-writer guard (Phase 15 M2): per-origin IDB is shared across
-  // tabs (the TAN makes multi-tab normal), and two tabs writing one
-  // drive is silent corruption. Advisory v1: the first tab holds a Web
-  // Lock for the page's lifetime; later tabs still boot the drive but
-  // their banner warns that Save is disabled there.
-  if (bootedSecondaryId !== null && 'locks' in navigator) {
-    void navigator.locks.request(
-      `emu86-drive-${bootedSecondaryId}`,
-      { ifAvailable: true },
-      (lock) => {
-        if (lock === null) {
-          driveLockHeld = false;
-          driveBanner.lockWarning();
-          return Promise.resolve();
-        }
-        return new Promise<never>(() => { /* held until tab close */ });
-      },
-    );
-  }
+  // (The Phase 15 M2 single-writer Web Lock that used to live here is
+  // retired: it guarded a shared mutable attach that no longer exists.
+  // Every tab now writes only its own fork; the per-fork lock inside
+  // drive-session.ts covers the one collision left — tab duplication.)
 
-  // Mount the settings UI. `bootedFrom` and `bootedSecondary` capture the
-  // sources that are actually running, so the modal can render
-  // "Reload to apply" notices when the user picks different ones.
+  // Mount the settings UI. `bootedFrom` captures the source that is
+  // actually running, so the modal can render a "Reload to apply"
+  // notice when the user picks a different one.
   mountSettingsModal({
     library,
     getSettings: () => settings,
@@ -411,7 +493,6 @@ async function init(): Promise<void> {
       saveSettings(next);
     },
     bootedFrom: settings.imageSource,
-    bootedSecondary: settings.secondaryImageSource,
     // Speed applies live: forward the toggle to the running worker.
     onCpuSpeedChange: (mode) => {
       const msg: MainToWorkerMessage = { type: 'set-speed', mode };
@@ -554,19 +635,21 @@ async function buildBootMessage(
 }
 
 /**
- * The virtual-drive save banner (bottom-left; the showcase banner owns
- * bottom-center). One element, five states: hidden, dirty (Save
- * enabled), saving, saved-flash, and the cross-tab lock warning.
- * `dirty`/`clean` ride the worker's 1 Hz stats heartbeat and never
- * clobber an in-flight save.
+ * The per-tab drive pill (bottom-left; the showcase banner owns
+ * bottom-center). Hidden until the guest first writes /dev/hdb, then
+ * stays for the session — dirty count alternating with the auto-saved
+ * tick — plus the ONE deliberate action left on it (Phase 16 M0):
+ * publish this tab's drive as the base image new tabs fork. The old
+ * nag semantics are gone because persistence is automatic now; the
+ * cross-tab lockWarning state is gone with the shared attach it warned
+ * about.
  */
-function ensureDriveBanner(onSave: () => void): {
+function ensureDriveBanner(onPromote: () => void): {
   dirty: (sectors: number) => void;
-  clean: () => void;
-  saving: () => void;
-  saved: () => void;
+  autoSaved: () => void;
+  promoting: () => void;
+  promoted: () => void;
   error: (message: string) => void;
-  lockWarning: () => void;
 } {
   const el = document.createElement('div');
   el.id = 'drive-banner';
@@ -575,8 +658,8 @@ function ensureDriveBanner(onSave: () => void): {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'drive-save';
-  btn.textContent = 'Save';
-  btn.addEventListener('click', () => onSave());
+  btn.textContent = 'Save as default';
+  btn.addEventListener('click', () => onPromote());
   el.append(text, btn);
   document.body.appendChild(el);
 
@@ -615,8 +698,8 @@ function ensureDriveBanner(onSave: () => void): {
   el.addEventListener('pointerup', endDrag);
   el.addEventListener('pointercancel', endDrag);
 
-  let state: 'idle' | 'saving' | 'saved' | 'locked' = 'idle';
-  let savedTimer: number | null = null;
+  let state: 'idle' | 'promoting' | 'promoted' = 'idle';
+  let promotedTimer: number | null = null;
 
   const show = (message: string, withButton: boolean, warning = false): void => {
     el.hidden = false;
@@ -630,39 +713,53 @@ function ensureDriveBanner(onSave: () => void): {
       if (state !== 'idle') return;
       btn.disabled = false;
       show(
-        `/dev/hdb: ${sectors} sector${sectors === 1 ? '' : 's'} unsaved — ` +
-          'umount (or sync) in the guest, then',
+        `/dev/hdb: ${sectors} sector${sectors === 1 ? '' : 's'} pending auto-save —`,
         true,
       );
     },
-    clean(): void {
+    autoSaved(): void {
       if (state !== 'idle') return;
-      el.hidden = true;
+      btn.disabled = false;
+      show('/dev/hdb auto-saved (this tab only) —', true);
     },
-    saving(): void {
-      state = 'saving';
+    promoting(): void {
+      state = 'promoting';
       btn.disabled = true;
-      show('Saving /dev/hdb…', true);
+      show('Publishing this drive as the default…', true);
     },
-    saved(): void {
-      state = 'saved';
-      show('/dev/hdb saved ✓', false);
-      if (savedTimer !== null) window.clearTimeout(savedTimer);
-      savedTimer = window.setTimeout(() => {
+    promoted(): void {
+      state = 'promoted';
+      show('Saved as default — new tabs will start from this drive ✓', false);
+      if (promotedTimer !== null) window.clearTimeout(promotedTimer);
+      promotedTimer = window.setTimeout(() => {
         state = 'idle';
-        el.hidden = true;
-      }, 2500);
+        btn.disabled = false;
+        show('/dev/hdb auto-saved (this tab only) —', true);
+      }, 4000);
     },
     error(message: string): void {
       state = 'idle';
       btn.disabled = false;
-      show(`Save failed: ${message} — retry?`, true, true);
-    },
-    lockWarning(): void {
-      state = 'locked';
-      show('This drive is open in another tab — changes here will NOT be saved.', false, true);
+      show(`drive: ${message} —`, true, true);
     },
   };
+}
+
+/** The boot banner's provenance line for this tab's drive fork. */
+function describeDrive(d: DriveSession): string {
+  const blocks = Math.round(d.sizeBytes / 1024);
+  switch (d.origin) {
+    case 'fresh-blank':
+      return `${d.name} — this tab's own drive, blank (mkfs /dev/hdb ${blocks} to format)`;
+    case 'fork-of-base':
+      return `${d.name} — this tab's own copy`;
+    case 'reload':
+      return `${d.name} — this tab's drive, restored`;
+    case 'duplicate':
+      return `${d.name} — forked from the duplicated tab`;
+    case 'swap':
+      return `${d.name} — fresh blank via ?mkdrive (mkfs /dev/hdb ${blocks} to format)`;
+  }
 }
 
 async function describeImageSource(

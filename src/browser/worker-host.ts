@@ -749,7 +749,8 @@ export class WorkerHost {
     // Substrate API v1 (post-close addendum F): the machine talks to
     // its own substrate with the tool it already has — urlget against
     // the gateway's own address. whoami/peers answer here from TAN
-    // state; mkdrive round-trips to the main thread (library+settings).
+    // state; mkdrive round-trips to the main thread (Phase 16 M0: it
+    // queues a swap of THIS tab's drive fork in the session store).
     const control = new ControlHost({
       whoami: () => this.#whoamiText(),
       peers: () => this.#peersText(),

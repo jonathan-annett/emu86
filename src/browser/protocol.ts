@@ -228,7 +228,8 @@ export interface SecondarySnapshotMessage {
 
 /**
  * Substrate API v1 (the guest ran `urlget http://10.0.2.2/?mkdrive=…`):
- * the action needs main-thread state (image library + settings), so
+ * the action needs main-thread state (Phase 16 M0: the per-tab session
+ * store — mkdrive queues a swap of the tab's own drive fork), so
  * the worker asks and the answer returns as
  * {@link ControlResponseMessage} with the same id. Queue-and-complete;
  * the machine keeps running meanwhile (two postMessages, not a fetch —
