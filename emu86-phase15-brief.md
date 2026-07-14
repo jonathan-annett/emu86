@@ -150,6 +150,13 @@ what's needed is *promiscuous passive open* plus a real close story:
 
 ## M2 — Virtual drives v1: `/dev/hdb` persistence
 
+**STATUS: LANDED 2026-07-14** (commit `e4015b1`;
+`VIRTUAL_DRIVES_REPORT.md` is the record — including two recorded
+deviations: full-bytes write-back instead of the D4 sector-diff, and
+presets-only sizes; plus the answered flush question — ELKS `sync`
+DOES flush MINIX-fs, unlike FAT). Field verification on the dev tier
+pending (report §6).
+
 Per the wish (`HUMANS_WISH_LIST.md`) as digested in
 `emu86-phase14-brief.md:499-513`: no kernel driver, no new device —
 the secondary disk slot (Phase 11, `MULTI_DISK_REPORT.md`) already

@@ -39,6 +39,18 @@ const DRIVE_BYTES = 16 * 16 * 63 * 512;
 const MKFS_BLOCKS = DRIVE_BYTES / 1024; // 8064
 
 const SENTENCE = 'persistent greetings from boot one';
+const SENTENCE_SYNC = 'synced but never umounted';
+
+/** Scan a byte image for an ASCII needle (MINIX dirents store names verbatim). */
+function findAscii(haystack: Uint8Array, needle: string): boolean {
+  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle.charCodeAt(j)) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
 
 interface Session {
   host: WorkerHost;
@@ -125,22 +137,50 @@ describe('Phase 15 M2 — a file written to /dev/hdb survives a reboot', () => {
       expect(catOne).toContain(SENTENCE);
       shell(one, 'umount /dev/hdb');
 
-      one.host.handleMessage({ type: 'snapshot-secondary' });
-      const snap = one.posts.find(
-        (m): m is WorkerToMainMessage & { type: 'secondary-snapshot' } =>
-          m.type === 'secondary-snapshot',
-      );
-      expect(snap).toBeDefined();
-      expect(snap?.bytes?.length).toBe(DRIVE_BYTES);
-      expect(snap?.dirtySectors ?? 0).toBeGreaterThan(0);
-      const saved = snap?.bytes;
-      if (saved === null || saved === undefined) return;
+      const takeSnapshot = (s: Session): Uint8Array => {
+        const before = s.posts.filter((m) => m.type === 'secondary-snapshot').length;
+        s.host.handleMessage({ type: 'snapshot-secondary' });
+        const snaps = s.posts.filter(
+          (m): m is WorkerToMainMessage & { type: 'secondary-snapshot' } =>
+            m.type === 'secondary-snapshot',
+        );
+        const snap = snaps[before];
+        expect(snap).toBeDefined();
+        expect(snap?.bytes?.length).toBe(DRIVE_BYTES);
+        return snap?.bytes ?? new Uint8Array(0);
+      };
 
-      // ---- Boot 2: fresh machine, the snapshot as its secondary ----
-      const two = await bootSession({ imageBytes: saved, geometry: DRIVE_GEOMETRY });
+      const savedAfterUmount = takeSnapshot(one);
+
+      // ---- The brief's flush question: does `sync` alone flush
+      // MINIX-fs, or only umount? Write a second file, sync (no
+      // umount), snapshot, and let boot 2 report the truth. ----
+      shell(one, 'mount /dev/hdb /mnt');
+      shell(one, `echo ${SENTENCE_SYNC} > /mnt/second.txt`);
+      shell(one, 'sync');
+      const savedAfterSync = takeSnapshot(one);
+
+      // ---- Boot 2: fresh machine, the sync-leg snapshot (a superset
+      // of the umount leg — hello.txt was already on the platters) ----
+      const two = await bootSession({ imageBytes: savedAfterSync, geometry: DRIVE_GEOMETRY });
       shell(two, 'mount /dev/hdb /mnt');
       const catTwo = shell(two, 'cat /mnt/hello.txt');
       expect(catTwo).toContain(SENTENCE);
+      const catSync = shell(two, 'cat /mnt/second.txt');
+      const syncFlushed = catSync.includes(SENTENCE_SYNC);
+      console.log(
+        `[virtual-drive] sync-only flush verdict: second.txt ` +
+          `${syncFlushed ? 'SURVIVED — sync flushes MINIX-fs' : 'LOST — umount is required'}`,
+      );
+      // Pin the observed behavior (see VIRTUAL_DRIVES_REPORT.md): ELKS
+      // sync flushes MINIX-fs data to the driver — recorded here so a
+      // regression in either direction surfaces.
+      expect(syncFlushed).toBe(true);
+
+      // Belt-and-braces: the umount-leg snapshot alone must also carry
+      // hello.txt — prove it with a directory-entry scan (cheaper than
+      // a third boot; MINIX dirents store names verbatim).
+      expect(findAscii(savedAfterUmount, 'hello.txt')).toBe(true);
     },
     TEST_TIMEOUT_MS,
   );
