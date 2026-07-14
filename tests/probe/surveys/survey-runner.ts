@@ -158,7 +158,7 @@ export type SurveyVerdict =
  *
  * Throws if the resulting text is too long for the 1024-byte region.
  */
-export function buildBootoptsWithScript(script: string): Buffer {
+export function buildBootoptsWithScript(script: string, extraLines: readonly string[] = []): Buffer {
   // The script must not contain `"` since we wrap it in `"…"` for the
   // bootopts tokenizer. Survey scripts only use single-quotes, so this
   // is a guardrail rather than an active concern.
@@ -169,9 +169,13 @@ export function buildBootoptsWithScript(script: string): Buffer {
   // as an env var (`hma=kernel\0` = 11 bytes), which is enough to push
   // `argv_slen` past the 160-byte limit and trigger an init panic.
   // The default kernel placement is fine for survey purposes.
+  // `extraLines` land before `init=` — device option lines like the
+  // Phase 15 ping probe's `ne0=` (kernel options, not init argv, so
+  // they don't count against the argv_slen ceiling).
   const text = [
     '## /bootopts emu86 toolchain survey',
     'console=ttyS0,9600',
+    ...extraLines,
     'init=/bin/sh',
     '-c',
     `"${script};exec /bin/sh"`,

@@ -219,6 +219,20 @@ HDs are a supported shape. What's missing is creation + persistence:
 
 ## M3 — ktcp-ping: compile a real ping in-VM
 
+**SCOPE AMENDMENT (2026-07-14, discovered at implementation time —
+flagged for Jonathan's review):** stage 1 as written below contains a
+hidden dependency on stage 2: the NS_PING server side lives *inside*
+ktcp, so shipping it means recompiling the entire ~4k-line daemon
+with c86 — exactly the risk this brief deferred to the stage-2
+flagship. Amended stage 1 is the scout's option C: a **standalone
+raw-frame `ping.c`** (~300 lines, one file) that opens the ethernet
+device directly and does its own ARP + ICMP echo — the purest c86
+dogfood, zero changes to the load-bearing daemon. Cost: it cannot run
+while ktcp holds the NIC (`net stop` first, or ping before `net
+start`), which is acceptable for a diagnostic tool. The NS_PING
+netconf patch moves to stage 2 alongside the full-ktcp compile it
+always required. D6 (gateway dest-unreachable) is unchanged.
+
 Flagged in `ARP_ICMP_REPORT.md:7,51` and `emu86-phase14-brief.md:488-492`
 ("alongside ktcp-ping, THE flagship dogfooding target"). Verified
 facts: ktcp's `icmp.c:43-84` is reply-only; ELKS ships no ping; but

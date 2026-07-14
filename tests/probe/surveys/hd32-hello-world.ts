@@ -354,8 +354,11 @@ export function parseGuestMd5(md5Section: string): string | null {
  * missing section or missing `rc=` line yields `rc: null` (stage never
  * ran — e.g. budget exhausted mid-pipeline).
  */
-export function classifyStages(sections: SectionMap): readonly StageStatus[] {
-  return HELLO_STAGES.map((name) => {
+export function classifyStages(
+  sections: SectionMap,
+  stages: readonly string[] = HELLO_STAGES,
+): readonly StageStatus[] {
+  return stages.map((name) => {
     const body = sections[name];
     if (body === undefined) return { name, rc: null, output: '' };
     const lines = body.split('\n');

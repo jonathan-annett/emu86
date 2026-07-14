@@ -32,6 +32,7 @@ import {
   ARP_OP_REQUEST,
   ETHERTYPE_ARP,
   ETHERTYPE_IPV4,
+  ICMP_CODE_HOST_UNREACH,
   ICMP_ECHO_REPLY,
   ICMP_ECHO_REQUEST,
   IPPROTO_ICMP,
@@ -39,6 +40,7 @@ import {
   MAC_BROADCAST,
   buildArp,
   buildEthernetFrame,
+  buildIcmpDestUnreachable,
   buildIcmpEcho,
   buildIpv4,
   formatIp,
@@ -106,6 +108,7 @@ export class LanGateway {
   echoRepliesSent = 0;
   echoRepliesReceived = 0;
   tcpForwarded = 0;
+  unreachablesSent = 0;
 
   constructor(opts: LanGatewayOptions = {}) {
     this.ip = opts.ip ?? GATEWAY_IP;
@@ -239,10 +242,25 @@ export class LanGateway {
     if (ip === null) return;
     if (!ipEquals(Uint8Array.from(ip.dstIp), 0, this.ip)) {
       // Routed traffic — the guest's ktcp sends anything off-subnet to
-      // the gateway MAC. TCP is terminated (M3d); the rest still drops.
+      // the gateway MAC. TCP is terminated (M3d). ICMP echo gets an
+      // honest host-unreachable (Phase 15 M3, decision D6): a browser
+      // cannot send real ICMP, and a synthetic reply with a fetch-shaped
+      // RTT would be a lie — unreachable is what this router truthfully
+      // knows. Everything else still drops.
       if (ip.protocol === IPPROTO_TCP && this.#tcpTerminator !== null) {
         this.tcpForwarded++;
         this.#tcpTerminator(ip.srcIp, ip.dstIp, ip.payload);
+        return;
+      }
+      if (ip.protocol === IPPROTO_ICMP) {
+        const echo = parseIcmpEcho(ip.payload);
+        if (echo === null || echo.type !== ICMP_ECHO_REQUEST) return;
+        const mac = this.#arpTable.get(formatIp(ip.srcIp));
+        if (mac === undefined) return; // no route back without ARP knowledge
+        this.unreachablesSent++;
+        const icmp = buildIcmpDestUnreachable(ICMP_CODE_HOST_UNREACH, payload);
+        const packet = buildIpv4(IPPROTO_ICMP, this.ip, ip.srcIp, icmp, this.#ipId++);
+        this.#transmit(buildEthernetFrame(mac, this.mac, ETHERTYPE_IPV4, packet));
       }
       return;
     }

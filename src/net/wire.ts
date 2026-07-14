@@ -192,6 +192,30 @@ export function buildIcmpEcho(type: number, id: number, seq: number, payload: Ui
   return p;
 }
 
+export const ICMP_DEST_UNREACHABLE = 3;
+export const ICMP_CODE_HOST_UNREACH = 1;
+
+/**
+ * Build an ICMP destination-unreachable (RFC 792): type 3, `code`,
+ * 4 unused bytes, then the original IP header + first 8 payload bytes
+ * (what the sender needs to match the failure to its socket — ktcp's
+ * `icmp.c` reads exactly that much on ICMP_TYPE_DST_UNRCH).
+ * `original` is the offending IPv4 packet from its first header byte.
+ */
+export function buildIcmpDestUnreachable(code: number, original: Uint8Array): Uint8Array {
+  const headerLen = ((original[0] ?? 0) & 0x0f) * 4;
+  const quote = original.subarray(0, Math.min(original.length, headerLen + 8));
+  const p = new Uint8Array(8 + quote.length);
+  p[0] = ICMP_DEST_UNREACHABLE;
+  p[1] = code & 0xff;
+  // bytes 4-7 unused (zero)
+  p.set(quote, 8);
+  const cks = internetChecksum(p, 0, p.length);
+  p[2] = (cks >> 8) & 0xff;
+  p[3] = cks & 0xff;
+  return p;
+}
+
 /** Parse an ICMP echo request/reply. Null for other ICMP types/truncation. */
 export function parseIcmpEcho(payload: Uint8Array): IcmpEcho | null {
   if (payload.length < 8) return null;

@@ -199,3 +199,61 @@ describe('LanGateway', () => {
     expect(l.gateway.echoRepliesSent).toBe(0);
   });
 });
+
+describe('LanGateway — off-LAN echo gets host-unreachable (Phase 15 M3, D6)', () => {
+  const FAR_IP = [8, 8, 8, 8] as const;
+
+  it('answers a routed echo request with ICMP type 3 code 1 quoting the original', () => {
+    const l = makeLan();
+    gratuitousArp(l);
+    const original = buildIpv4(
+      IPPROTO_ICMP,
+      GUEST_IP,
+      Array.from(FAR_IP),
+      buildIcmpEcho(ICMP_ECHO_REQUEST, 0x1234, 7, Uint8Array.from([1, 2, 3, 4])),
+      0x42,
+    );
+    l.guest.transmit(
+      buildEthernetFrame(Array.from(GATEWAY_MAC), GUEST_MAC, ETHERTYPE_IPV4, original),
+    );
+
+    expect(l.gateway.unreachablesSent).toBe(1);
+    expect(l.guestRx).toHaveLength(1);
+    const ip = parseIpv4(l.guestRx[0]!.subarray(14));
+    expect(ip?.protocol).toBe(IPPROTO_ICMP);
+    expect(ip?.srcIp).toEqual(Array.from(GATEWAY_IP)); // the router speaks as itself
+    const icmp = ip?.payload ?? new Uint8Array(0);
+    expect(icmp[0]).toBe(3); // dest-unreachable
+    expect(icmp[1]).toBe(1); // host-unreachable
+    // RFC 792 quote: original IP header + first 8 payload bytes.
+    expect(icmp[8]).toBe(0x45); // quoted header starts at v4/IHL5
+    expect(Array.from(icmp.subarray(8 + 16, 8 + 20))).toEqual(Array.from(FAR_IP));
+    expect(icmp.length).toBe(8 + 20 + 8);
+  });
+
+  it('stays silent for echo replies and for senders it cannot route back to', () => {
+    const l = makeLan();
+    // No gratuitous ARP: sender unknown — nothing goes out.
+    l.guest.transmit(
+      buildEthernetFrame(
+        Array.from(GATEWAY_MAC),
+        GUEST_MAC,
+        ETHERTYPE_IPV4,
+        buildIpv4(IPPROTO_ICMP, GUEST_IP, Array.from(FAR_IP), buildIcmpEcho(ICMP_ECHO_REQUEST, 1, 1, new Uint8Array(0))),
+      ),
+    );
+    expect(l.gateway.unreachablesSent).toBe(0);
+    expect(l.guestRx).toHaveLength(0);
+    // Echo REPLY to an off-LAN target: not answered either.
+    gratuitousArp(l);
+    l.guest.transmit(
+      buildEthernetFrame(
+        Array.from(GATEWAY_MAC),
+        GUEST_MAC,
+        ETHERTYPE_IPV4,
+        buildIpv4(IPPROTO_ICMP, GUEST_IP, Array.from(FAR_IP), buildIcmpEcho(ICMP_ECHO_REPLY, 1, 1, new Uint8Array(0))),
+      ),
+    );
+    expect(l.gateway.unreachablesSent).toBe(0);
+  });
+});

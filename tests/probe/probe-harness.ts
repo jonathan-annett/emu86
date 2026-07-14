@@ -166,6 +166,17 @@ export interface ProbeRequest {
   readonly bootInstructionBudget?: number;
   /** Default {@link DEFAULT_MAX_OUTPUT_BYTES}. */
   readonly maxOutputBytes?: number;
+  /**
+   * Optional LAN attachment (Phase 15 M3). Called once during machine
+   * construction with an `inject` that feeds frames INTO the guest NIC;
+   * must return the handler for frames the guest transmits. Wire the
+   * switch/gateway pseudo-hosts inside the callback — everything stays
+   * synchronous with respect to traceRun batches (a frame the guest
+   * writes can be answered before its `write()` returns).
+   */
+  readonly createNetwork?: (
+    inject: (frame: Uint8Array) => void,
+  ) => (frame: Uint8Array) => void;
 }
 
 /**
@@ -242,6 +253,12 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
     contents: probeDisk.bytes,
   });
 
+  // Phase 15 M3: optional LAN. The inject side closes over a mutable
+  // ref because the NIC handler is a constructor option (same shape as
+  // the elks-dns integration test's wiring).
+  let machineRef: IBMPCMachine | null = null;
+  const nicTransmit = req.createNetwork?.((frame) => machineRef?.nic.injectFrame(frame));
+
   const m = new IBMPCMachine({
     disk: primaryDisk,
     secondaryDisk: probeInMemDisk,
@@ -256,7 +273,9 @@ export async function runProbe(req: ProbeRequest): Promise<ProbeResult> {
       }
       txBytes.push(byte);
     },
+    ...(nicTransmit !== undefined ? { nicTransmit } : {}),
   });
+  machineRef = m;
   m.reset();
 
   const tracer = new Tracer({ capacity: 50_000, kinds: ['intService', 'trap'] });
