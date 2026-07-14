@@ -250,3 +250,13 @@ every boot. No network, no compile. Recorded limitation: the fast copy
 cannot rev-check (a static seed can't know the current rev); a stale
 drive keeps its old ping until the installer script is re-run, which
 purges by marker. With no drive attached both probe lines fail quietly.
+
+### 8e. Decided: no rev 7 (deterministic-MAC fallback) — ping stays as is
+
+Field, 2026-07-15, after `ping elk` lost the frame race to a running
+ktcp (one ARP reply per ask vs ping-cat's two — the proxy doubles
+tab-to-tab's odds): a derived-MAC fallback was sketched and REJECTED.
+Jonathan: "ping is really a vanity 'we are unix' toy in this context."
+`net stop` remains the documented reliable mode; the tool's own error
+text teaches it. Consolidation principle applied — polish budget goes
+to the editor handover, not the toy.
