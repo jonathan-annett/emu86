@@ -204,6 +204,17 @@ can revisit both together; they are one `if` clause.
 - **Guest-originated off-LAN ICMP**: still drops silently at the
   gateway; M3 (ktcp-ping) owns the dest-unreachable answer.
 
+## 8a. Field verification — FIRST CONTACT CONFIRMED (2026-07-14)
+
+Jonathan, dev tier, real browser (#olfr): `urlget
+http://captive.apple.com` printed Apple's captive-portal success page
+inside ELKS. Root-caused host-side same session: captive.apple.com
+serves `Access-Control-Allow-Origin: *`, so the whole designed chain
+executed — Host-header URL reconstruction, the mixed-content upgrade
+to https, a CORS-approved fetch, HTTP/1.0 framing back — and the body
+the guest printed is byte-identical to what curl gets from Apple. The
+guest fetched the real internet. Remaining §8 items still open.
+
 ## 8. Field verification needed (dev tier only, per the standing constraint)
 
 Deploy `npm run deploy:dev`, then from a tab on the dev URL:
