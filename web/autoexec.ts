@@ -46,8 +46,13 @@
  * randomized cadence.
  */
 
-/** Prompts that release the next plain line: getty, login, sh. */
-const DEFAULT_PROMPT = /(login: ?|Password: ?|[#$] )$/;
+/**
+ * Prompts that release the next plain line: getty, login, sh — and
+ * sh's `> ` continuation prompt, so a script line ending in `\` flows
+ * naturally into its continuation line (field find, 2026-07-15: the
+ * shell supported it all along; the matcher didn't know the prompt).
+ */
+const DEFAULT_PROMPT = /(login: ?|Password: ?|[#$>] )$/;
 
 /** Output retained since the last send — plenty for any boot chatter. */
 const BUFFER_CAP = 65_536;

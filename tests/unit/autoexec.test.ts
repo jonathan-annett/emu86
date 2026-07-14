@@ -228,3 +228,17 @@ describe('AutoexecRunner — the lost-prompt race (found by the demo probe)', ()
     expect(sent.join('')).toBe('echo hi\necho bye\n');
   });
 });
+
+describe('AutoexecRunner — shell continuation (field lockup, 2026-07-15)', () => {
+  it('a backslash-continued command flows through the `> ` prompt', () => {
+    const { runner, sent } = makeRunner('c86 -O \\\n    hello.i hello.as\nas hello.as\n');
+    runner.feed('# ');
+    expect(sent).toEqual(['c86 -O \\\n']);
+    // The shell answers a trailing backslash with its continuation
+    // prompt — this used to match nothing and lock the script up.
+    runner.feed('> ');
+    expect(sent).toEqual(['c86 -O \\\n', '    hello.i hello.as\n']);
+    runner.feed('# ');
+    expect(sent).toHaveLength(3);
+  });
+});

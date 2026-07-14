@@ -125,7 +125,12 @@ export const SEED_DEMO_SCRIPT: BootScript = {
     'EOF',
     '@end',
     'cpp -0 -I/usr/include -I/usr/include/c86 hello.c -o hello.i',
-    'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no hello.i hello.as',
+    // The c86 line types as shell-continuation multi-line — prettier
+    // than scroll-wrapping 130 columns into 80 (and it exercises the
+    // `> ` continuation prompt the runner now understands).
+    'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 \\',
+    '    -align=yes -stackopt=minimum -peep=all \\',
+    '    -stackcheck=no hello.i hello.as',
     'as -0 -j hello.as -o hello.o',
     'ld -0 -i -L/usr/lib -o hello hello.o -lc86',
     '@authentic',
