@@ -30,12 +30,19 @@
  * BroadcastChannel, Node's BroadcastChannel, and synchronous test
  * stubs all fit without DOM types leaking into the substrate.
  *
- * Known quirk, documented not fixed: every tab also hosts its own
- * LanGateway at 10.0.2.2 with the same MAC. On a bridged TAN they act
- * as one anycast-ish gateway (identical ARP answers keep CAMs stable);
- * a remote gateway's welcome ping may get answered toward the local
- * one. Harmless for M3-tabs; a lease-elected single gateway is a
- * later nicety.
+ * Reserved residents stay tab-local (field bug, 2026-07-15 — this was
+ * the "anycast quirk, harmless" note until it wasn't): every tab hosts
+ * its own gateway (10.0.2.2) and DNS host (10.0.2.3) with IDENTICAL
+ * fixed MACs. If their frames cross the trunk, the remote copy's ARP
+ * reply arrives after the local one and wins the neighbour's CAM, and
+ * from then on that guest's DNS and gateway traffic is served by the
+ * WRONG TAB — where the worker's DNS/fetch stall cannot pause the
+ * asking machine (in_resolv's 2-second alarm runs against a cold DoH
+ * in a throttled background tab: the pre-stall first-resolve flake of
+ * 5c0aa63, resurfaced), and where the DoH answer cache feeding the
+ * HTTP gateway's reverse map belongs to the other tab. So the trunk
+ * filters resident-sourced frames in both directions; each tab always
+ * talks to its own residents, which are identical services anyway.
  */
 
 import type { EthernetSwitch, SwitchPort } from './switch.js';
@@ -45,10 +52,24 @@ import {
   ETHERTYPE_ARP,
   buildArp,
   buildEthernetFrame,
+  macEquals,
   parseArp,
   type Ipv4,
   type Mac,
 } from './wire.js';
+import { GATEWAY_MAC } from './gateway.js';
+import { DNS_MAC } from './dns.js';
+
+/**
+ * Pseudo-hosts every tab runs at the same fixed MAC. Frames they
+ * source never cross the trunk — see the header. (Guest traffic is
+ * untouched: guest MACs are per-octet unique.)
+ */
+const RESERVED_RESIDENT_MACS: readonly Mac[] = [GATEWAY_MAC, DNS_MAC];
+
+function isResidentSourced(frame: Uint8Array): boolean {
+  return RESERVED_RESIDENT_MACS.some((mac) => macEquals(frame, 6, mac));
+}
 
 /**
  * Structural subset of BroadcastChannel that browser workers, Node,
@@ -157,6 +178,8 @@ export class TabAreaNetwork {
   framesIn = 0;
   /** Proxy-ARP answers served for known TAN members — diagnostics. */
   proxyArpReplies = 0;
+  /** Resident-sourced frames kept off the trunk (both directions). */
+  residentFramesKept = 0;
 
   /**
    * Every octet ever claimed on this channel (including our own). The
@@ -231,6 +254,14 @@ export class TabAreaNetwork {
     this.#trunk = lan.attach({
       name: 'tan-trunk',
       onFrame: (frame) => {
+        // Resident-sourced frames never leave the tab: the neighbour
+        // has an identical resident of its own, and this copy's ARP
+        // reply would win its CAM and hijack its guest's DNS/gateway
+        // traffic to a tab whose stall can't protect it (see header).
+        if (isResidentSourced(frame)) {
+          this.residentFramesKept++;
+          return;
+        }
         // Local frame flooded/routed to the trunk → other tabs.
         this.framesOut++;
         this.#channel.postMessage({ tan: 'frame', bytes: frame });
@@ -294,6 +325,12 @@ export class TabAreaNetwork {
     if (data.tan === 'frame') {
       if (this.#trunk === null) return;
       const bytes = data.bytes instanceof Uint8Array ? data.bytes : Uint8Array.from(data.bytes);
+      // Defence in depth: a tab running an older build may still trunk
+      // its residents' frames — drop them at ingress too.
+      if (isResidentSourced(bytes)) {
+        this.residentFramesKept++;
+        return;
+      }
       this.framesIn++;
       // Enters the local switch as trunk-port traffic; the switch never
       // echoes to the ingress port, so nothing re-posts to the channel.
