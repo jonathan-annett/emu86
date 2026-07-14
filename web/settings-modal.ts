@@ -342,17 +342,23 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     const createRow = document.createElement('div');
     createRow.className = 'emu86-upload-row';
     const sizeSelect = document.createElement('select');
-    // 16 heads × 63 spt × 512 B = 516,096 B per cylinder; presets pick
-    // cylinder counts, so every size is CHS-exact. The 32 MB shape is
-    // the same 63×16×63 the hd32 images use.
-    const PRESETS: Array<{ label: string; cylinders: number }> = [
-      { label: '8 MB', cylinders: 16 },
-      { label: '16 MB', cylinders: 32 },
-      { label: '32 MB', cylinders: 63 },
+    // Every preset is CHS-exact. 16/32 MB use the hd32 images' 16×63
+    // shape. The first is 8086 KiB — 311×4×13 — so the obvious command
+    // on an 8086 works: `mkfs /dev/hdb 8086`. (Field grumble,
+    // 2026-07-14: the old 8 MB preset was 8064K and rejected it.)
+    const PRESETS: Array<{
+      label: string;
+      cylinders: number;
+      heads: number;
+      sectorsPerTrack: number;
+    }> = [
+      { label: '8086 KB', cylinders: 311, heads: 4, sectorsPerTrack: 13 },
+      { label: '16 MB', cylinders: 32, heads: 16, sectorsPerTrack: 63 },
+      { label: '32 MB', cylinders: 63, heads: 16, sectorsPerTrack: 63 },
     ];
-    for (const p of PRESETS) {
+    for (const [i, p] of PRESETS.entries()) {
       const opt = document.createElement('option');
-      opt.value = String(p.cylinders);
+      opt.value = String(i);
       opt.textContent = p.label;
       sizeSelect.appendChild(opt);
     }
@@ -367,10 +373,13 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     secondarySection.body.appendChild(createStatus);
     createBtn.addEventListener('click', () => {
       void (async () => {
-        const cylinders = Number.parseInt(sizeSelect.value, 10);
-        const preset = PRESETS.find((p) => p.cylinders === cylinders);
+        const preset = PRESETS[Number.parseInt(sizeSelect.value, 10)];
         if (preset === undefined) return;
-        const geometry = { cylinders, heads: 16, sectorsPerTrack: 63 };
+        const geometry = {
+          cylinders: preset.cylinders,
+          heads: preset.heads,
+          sectorsPerTrack: preset.sectorsPerTrack,
+        };
         try {
           const id = await deps.library.createBlankImage(
             `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
@@ -382,7 +391,8 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
             ...deps.getSettings(),
             secondaryImageSource: { kind: 'library', id },
           });
-          const blocks = (cylinders * 16 * 63 * 512) / 1024;
+          const blocks =
+            (preset.cylinders * preset.heads * preset.sectorsPerTrack * 512) / 1024;
           createStatus.textContent =
             `Created. After reload: mkfs /dev/hdb ${blocks} && mount /dev/hdb /mnt ` +
             '— then use Save (bottom banner) to persist guest writes.';
