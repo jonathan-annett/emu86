@@ -21,6 +21,10 @@
 2. **`@authentic` fired on send, not on completion.** Action steps chained immediately after a send, so the speed flip to authentic happened the instant the build command was *typed*, not when it *finished* — the compile would have run at authentic speed, defeating the turbo. Fix: after a send, chain onward only into a heredoc-body line; a following waited-command or speed-change waits for the command's prompt. So turbo genuinely covers `cpp`/`c86`/`as`/`ld` and authentic returns for the `./hello` reveal.
 3. **ELKS `sh` supports both heredocs and backslash continuation** (probed live). Heredocs are the demo's source-injection device; backslash continuation is available if a future edit wants the long `c86` line typed as pretty multi-line instead of scroll-wrapping in 80 columns (left as-is for now — the wrap is momentary and the compile output scrolls past it).
 
+## Field acceptance
+
+✅ **Field-verified** (Jonathan, 2026-07-15, dev tier — on a phone): full two-act run from cleared site data through the typed-compile-and-greet, "even looks great there." The continuation-prompt lockup he hit while editing the script (`\` line-joins waited forever for `# ` while the shell showed `> `) was diagnosed, fixed, regression-pinned, and redeployed within the same session (`b008379`).
+
 ## Timing
 
 Full show ~23 s wall in Node against hd32-minix (turbo compile). The browser will differ with real pacing; the script flips to turbo for the build precisely so the compile doesn't drag at an authentic 4.77 MHz. Cadence and exact timing are the one thing best tuned live in a browser (the agent bridge can drive it) rather than asserted in a headless test.
