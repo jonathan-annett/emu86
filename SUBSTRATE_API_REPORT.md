@@ -75,6 +75,11 @@ Two capabilities, both driven by tools the guest already has:
   `mouse# ` prompts and held — the prompt-suffix matching survived the
   one regression risk this change carried.
 
+**Field:** the HOSTNAME half is confirmed — Jonathan, dev tier,
+2026-07-15, minutes after the deploy: "mouse#  i love it!". That one
+prompt proves the whole chain: lease → bootopts stamp → init env →
+login → /etc/profile → PS1.
+
 **Not verified here, honestly:** no integration test yet drives a real
 guest's `urlget` against the control endpoint end-to-end (that needs a
 booted ELKS + ktcp, ~90 s of suite time — worth adding if the field
