@@ -215,6 +215,15 @@ to https, a CORS-approved fetch, HTTP/1.0 framing back — and the body
 the guest printed is byte-identical to what curl gets from Apple. The
 guest fetched the real internet. Remaining §8 items still open.
 
+Second #olfr, same session: `urlget http://ipinfo.io/json` returned
+live geolocation JSON (ipinfo.io also serves ACAO:* — verified). Two
+findings ride along: (1) JSON bodies frame cleanly through the
+HTTP/1.0 path, and (2) an architecture fact now field-proven — the
+gateway's egress identity is the *user's own connection* (the guest
+saw Jonathan's Vodafone AU address), because fetch runs client-side
+in the tab, never through the CF worker. Every user's VM browses as
+themselves; the worker only ever serves the page.
+
 ## 8. Field verification needed (dev tier only, per the standing constraint)
 
 Deploy `npm run deploy:dev`, then from a tab on the dev URL:
