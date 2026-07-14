@@ -65,18 +65,25 @@ export type GatewayFetch = (req: GatewayFetchRequest) => Promise<FetchedResponse
 
 /**
  * Wrap the platform fetch(). Redirects are followed silently (the
- * guest sees the final body). Port-80 URLs are upgraded to https by
- * default: the deployed page is itself served over HTTPS, and browsers
- * block plain-http fetches from secure pages as mixed content — the
+ * guest sees the final body).
+ *
+ * **Every** http URL is upgraded to https by default (not just the
+ * port-less ones — field find, 2026-07-14: a guest dialing :81
+ * produced `http://host:81/`, which the browser hard-blocked as mixed
+ * content before the fetch even left the tab). The deployed page is
+ * HTTPS, so a plain-http fetch from it is *always* blocked: leaving
+ * the scheme alone guarantees failure, while upgrading at least
+ * succeeds against any TLS-capable origin. An http-only origin is
+ * unreachable from a secure page either way — nothing is lost. The
  * guest still speaks HTTP/1.0 on the LAN wire; only the host-side hop
- * travels TLS. Explicit non-80 ports are left alone (TLS on a random
- * port would be a different service).
+ * travels TLS. Explicit ports are preserved (TLS is attempted on the
+ * port the guest named).
  */
 export function realGatewayFetch(opts: { upgradeToHttps?: boolean } = {}): GatewayFetch {
   const upgrade = opts.upgradeToHttps ?? true;
   return async (req: GatewayFetchRequest): Promise<FetchedResponse> => {
     const url =
-      upgrade && /^http:\/\/[^/:]+(\/|$)/.test(req.url) ? `https://${req.url.slice(7)}` : req.url;
+      upgrade && req.url.startsWith('http://') ? `https://${req.url.slice(7)}` : req.url;
     const response = await fetch(url, {
       method: req.method,
       headers: req.headers,

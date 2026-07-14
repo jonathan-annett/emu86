@@ -414,7 +414,7 @@ describe('HttpGatewayHost — :53 DNS-over-TCP (OpenDNS default path)', () => {
 });
 
 describe('realGatewayFetch — mixed-content upgrade', () => {
-  it('upgrades port-80 URLs to https, leaves explicit ports alone', async () => {
+  it('upgrades EVERY http URL to https, ports included, unless opted out', async () => {
     const { realGatewayFetch } = await import('../../src/net/http.js');
     const seen: string[] = [];
     const stub = (input: string | URL | Request): Promise<Response> => {
@@ -426,7 +426,12 @@ describe('realGatewayFetch — mixed-content upgrade', () => {
     try {
       const gw = realGatewayFetch();
       await gw({ url: 'http://example.com/a', method: 'GET', headers: [], body: null });
+      // Ported URLs upgrade too: a plain-http fetch from an https page
+      // is hard-blocked as mixed content, so leaving it alone
+      // guaranteed failure (field find — the :81 block).
       await gw({ url: 'http://1.2.3.4:8080/b', method: 'GET', headers: [], body: null });
+      // Already-https (the :443 bridge's output) passes through.
+      await gw({ url: 'https://example.com/d', method: 'GET', headers: [], body: null });
       const plain = realGatewayFetch({ upgradeToHttps: false });
       await plain({ url: 'http://example.com/c', method: 'GET', headers: [], body: null });
     } finally {
@@ -434,7 +439,8 @@ describe('realGatewayFetch — mixed-content upgrade', () => {
     }
     expect(seen).toEqual([
       'https://example.com/a',
-      'http://1.2.3.4:8080/b',
+      'https://1.2.3.4:8080/b',
+      'https://example.com/d',
       'http://example.com/c',
     ]);
   });

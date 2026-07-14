@@ -224,6 +224,31 @@ saw Jonathan's Vodafone AU address), because fetch runs client-side
 in the tab, never through the CF worker. Every user's VM browses as
 themselves; the worker only ever serves the page.
 
+## 8b. The CORS wall, seen in the field (2026-07-14)
+
+`urlget http://google.com/` fails — and the browser console names the
+cause exactly: *"blocked by CORS policy: No 'Access-Control-Allow-Origin'
+header"*. Confirmed host-side: google.com serves no ACAO header at all.
+apple/ipinfo worked only because they send `ACAO: *`. **The gateway is
+not at fault and cannot fix this**: the fetch is blocked inside the tab
+before it reaches the network. Most of the web is on the far side of
+this wall; the CORS-permissive minority is what pure-fetch M3d can ever
+reach. This is the strongest argument yet for the deferred D1 relay
+(a CF Worker WS↔TCP hop fetches server-side, where CORS does not
+apply) — the decision the brief said to make once M3d landed. It has
+landed; the choice is now Jonathan's, with the abuse-surface cost
+recorded in §7 unchanged.
+
+Second finding from the same console dump — **fixed**: a guest dialing
+a non-standard port (`captive.apple.com:81`) produced a plain-`http://`
+fetch, which the browser *hard-blocks* as mixed content (worse than a
+CORS 502 — the request never leaves the tab). The upgrade rule only
+covered port-less URLs. Since the page is HTTPS, **every** plain-http
+fetch is doomed, so `realGatewayFetch` now upgrades all of them,
+explicit ports included; an http-only origin was unreachable from a
+secure page either way, so nothing is lost and TLS-capable origins on
+odd ports now work.
+
 ## 8. Field verification needed (dev tier only, per the standing constraint)
 
 Deploy `npm run deploy:dev`, then from a tab on the dev URL:
