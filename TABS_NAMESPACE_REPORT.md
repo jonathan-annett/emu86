@@ -84,11 +84,48 @@ than `nslookup cat.tabs` says it should, and **nothing else would catch
 it**. The C table also compiles in-VM with c86 (184 names and all,
 verified by `elks-ping-invm`).
 
-## 5. Not done
+## 5. KNOWN BUG: tab-pings-tab does not work (field, 2026-07-14)
 
-- **Tab-pings-tab in the browser is unverified.** The Node tests cover
-  ping→gateway; two real tabs pinging each other by name (`ping cat` from
-  `mouse`) is the demo this was built for and it has not been run.
+Jonathan tried it. `ping cat` from another tab fails. Ping→**gateway**
+works (that is what every test covers); ping→**tab** does not.
+
+Diagnosis from the source — **two bugs in `web/guest/ping.c` that
+compound**. Not yet confirmed by a run, but both are plain in the code:
+
+1. **`ping.c` hardcodes its own address** (`ping.c:64`):
+   ```c
+   static unsigned char my_ip[4] = { 10, 0, 2, 15 };
+   ```
+   On the TAN every tab has its own octet (`mouse` = .16, `cat` = .17,
+   …), stamped into the guest as `LOCALIP=10.0.2.<octet>` by the bootopts
+   patch. So ping sends ARP and ICMP claiming to be **10.0.2.15** — an
+   address that belongs to no tab.
+
+   Why the gateway still answers: the gateway *learns* 10.0.2.15 → ping's
+   MAC from ping's own ARP request, so it can route the reply back. It is
+   working by accident.
+
+2. **`ping.c` never answers an ARP request** (it only sends them —
+   grep for a reply path: there is none). When the target tab's ktcp tries
+   to reply, it must resolve 10.0.2.15 to a MAC. Nobody answers: the TAN's
+   proxy-ARP only covers known member octets (16..199), and 15 isn't one.
+   So the echo reply is never sent, and ping times out.
+
+**The fix (next session):**
+- Take the real address from the environment: `getenv("LOCALIP")`, which
+  ELKS exposes from the bootopts stamp (`/etc/net.cfg` already reads
+  `$LOCALIP`). Fall back to 10.0.2.15 when unset (the solo, non-TAN case).
+  - *Not* via the MAC's last byte: that equals the octet on the TAN
+    (02:65:6d:75:38:**6c** ↔ 10.0.2.**108**) but NOT solo, where the MAC
+    is a fixed default (…38:36 = 54) while the IP is .15.
+- Answer ARP who-has for `my_ip` while waiting for the echo reply, so the
+  far tab's ktcp can route its reply back.
+
+Both are modest changes to a file that now lives in the public tools repo,
+so shipping the fix needs no emu86 release — but bump `PING_REV` and the
+seed rev so drives and profiles pick it up.
+
+## 6. Not done
 - Names are per-lease, so a tab that closes frees its name for the next
   one. No attempt is made to keep a name "reserved" beyond the sticky-IP
   session store.
