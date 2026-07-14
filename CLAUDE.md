@@ -55,7 +55,7 @@ arbitrary destinations + HTTP gateway, growing from `src/net/tcp.ts`).
 ```
 npm install
 npm run build      # tsc --noEmit (typecheck; `npm run typecheck` covers all configs)
-npx vitest run     # → 1,101 passed, 97 files, 1 skipped (as of 2026-07-14)
+npx vitest run     # → 1,251 passed, 114 files, 1 skipped (as of 2026-07-15, Phase 16 M1)
 ```
 
 The one **skipped** file is `tests/sst/corpus.test.ts`: it needs the
@@ -132,7 +132,13 @@ built against it.)
 4. **Strict TypeScript stays strict.** No `any`, no `as unknown as` to silence the
    compiler. `noUncheckedIndexedAccess` is intentional — work with it.
 5. **No custom CPU opcodes.** Locked.
-6. **Don't break green tests.** Run the suite after every meaningful change.
+6. **Don't break green tests.** Test cadence (Jonathan's ruling,
+   2026-07-15): the FULL suite gates every deploy, no exceptions;
+   between deploys use judgment — targeted tests + typecheck while
+   developing, full run for shared-surface changes (worker, protocol,
+   net, web mains) and milestone-closing commits whose reports quote
+   the baseline; a leaf module + its own tests doesn't need the whole
+   ~15 min ritual.
 
 ## 6. Repo gotchas that will waste your time
 
