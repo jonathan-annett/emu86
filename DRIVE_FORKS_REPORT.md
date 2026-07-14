@@ -141,6 +141,19 @@ refused to swap.
   (should fork the saved base), duplicate it (should fork the fork),
   `?mkdrive=8086` in any tab + reload (fresh blank, base untouched).
 
+## 5b. Field acceptance (2026-07-15, ~02:30, dev tier 916e18ac)
+
+Jonathan, minutes after deploying: fresh drive; `ls > /mnt/test`;
+duplicated the tab WITHOUT sync — fork present but empty ("as
+expected": the file was still in the guest's buffer cache, so the
+persisted image predated it); closed the dup, ran `sync` (no umount),
+re-duplicated, mounted — file list there; then wrote a new file +
+`sync` in the first tab and confirmed it did NOT appear in the dup
+even after umount/mount. His verdict: "proving it was indeed a fork,
+and not the same image. so looks good to me." That one sequence
+exercises fork-at-duplicate, auto-persist-after-sync, and fork
+independence — the three behaviors M0 exists to provide. ACCEPTED.
+
 ## 6. Deliberately NOT done
 
 Live cross-tab sync, fork lineage/merge, per-tab primary image,
