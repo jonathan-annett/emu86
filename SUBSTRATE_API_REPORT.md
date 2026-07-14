@@ -95,3 +95,35 @@ tests — they match prompt suffixes, and the full suite is the proof.
 - F (this): built.
 - G (system-level editor, CodeJar vendored under MIT — Jonathan's
   rule-2 authorization, "MIT all the way"): scoped, next.
+
+## 4. Field addendum (2026-07-15, Jonathan's overnight #olfr)
+
+Driven from the `cat` tab and a freshly opened `bear` tab, dev tier:
+
+- **`?peers` — CONFIRMED.** `mouse 10.0.2.16` / `cat 10.0.2.17  <- you`
+  (the `<- you` marker included). Closes the §2 pending item.
+- **`?whoami` — confirmed again** (`cat 10.0.2.17`).
+- **`?mkdrive=8086` — guard exercised, happy path still unverified.**
+  Both tabs — including the brand-new one — answered "a drive is
+  already attached -- detach it in settings first".
+
+The brand-new-tab surprise is not an mkdrive bug, and there is no
+auto-attach code path (the library seeds nothing; only the modal and
+`?mkdrive` itself ever set a secondary). `secondaryImageSource` lives
+in `emu86.settings.v1` in **localStorage, which is origin-global**:
+every tab, new or old, boots whatever drive the profile has attached —
+the workshop drive from the ping-installer field work, in this case.
+Only the TAN octet is per-tab (sessionStorage). Consequences, honest:
+
+- While any drive is attached, `?mkdrive` cannot succeed in ANY tab of
+  that browser profile, and a detach applies to all tabs.
+- Cross-tab coherence is reload-grained: a running tab's guard reads
+  its in-memory settings (updated by its own modal via the
+  settings-changed event, but there is no `storage` listener), so a
+  detach in tab A does not unblock an already-running tab B until B
+  reloads. Two solo tabs racing `?mkdrive` would last-write-win.
+
+Whether drive-attach should stay origin-global (one browser = one
+drive, Web Lock arbitrates persistence — the Phase 15 shape) or move
+per-tab (the TAN reads as one-machine-per-tab) is a design question
+put to Jonathan, deliberately not settled here.
