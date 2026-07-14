@@ -40,6 +40,18 @@ const SH_EOF = 'EOF_GETPING_SH';
 const C_EOF = 'EOF_PING_C';
 
 /**
+ * Revision of `guest/ping.c`. **Bump it whenever that file changes**, or
+ * a drive holding an older binary will keep restoring it forever — the
+ * installer stops asking questions the moment /bin/ping exists.
+ *
+ * rev 3: /etc/hosts name lookup, and an honest ARP-failure message
+ *        (a running ktcp eats the replies — the old text blamed the
+ *        open(), which actually succeeds).
+ */
+export const PING_REV = 3;
+const REV_MARKER = `pingrev${PING_REV}`;
+
+/**
  * The installer proper — a normal shell script, idempotent by design:
  *
  *   /bin/ping exists        → nothing to do
@@ -66,12 +78,21 @@ const INSTALLER_SH: readonly string[] = [
   'then',
   'drive=yes',
   'fi',
-  'if test -f /mnt/ping',
+  // The rev marker is how a saved drive learns its binary is stale. The
+  // filename carries the revision (`pingrev3`), so the check is a plain
+  // `test -f` — ELKS sh has no `$(...)`, and this needs no grep either.
+  // Without it, a drive holding an old ping would keep serving it
+  // forever: the installer sees /bin/ping appear and stops asking.
+  `if test -f /mnt/${REV_MARKER}`,
   'then',
   'echo "ping: restoring from /dev/hdb"',
   'cp /mnt/ping /bin/ping',
   'umount /mnt',
   'exit 0',
+  'fi',
+  'if test -f /mnt/ping',
+  'then',
+  'echo "ping: the copy on /dev/hdb is out of date -- rebuilding"',
   'fi',
   'echo "ping: building it with the in-VM c86 toolchain, please wait..."',
   'cd /tmp',
@@ -86,6 +107,7 @@ const INSTALLER_SH: readonly string[] = [
   'if test "$drive" = yes',
   'then',
   'cp /tmp/ping /mnt/ping',
+  `echo ${PING_REV} > /mnt/${REV_MARKER}`,
   'sync',
   'echo "ping: copied to /dev/hdb -- press Save to keep it for good"',
   'fi',

@@ -44,6 +44,7 @@ extern int ioctl();
 extern int select();
 extern int gettimeofday();
 extern int fflush();
+/* stdio.h supplies FILE, fopen, fgets, fclose (used for /etc/hosts). */
 
 /* ---- constants ---- */
 
@@ -132,6 +133,73 @@ static int parse_count(char *s)
     v = 0;
     for (; *s >= '0' && *s <= '9'; s++) v = v * 10 + (*s - '0');
     return v;
+}
+
+static int streq(char *a, char *b)
+{
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+/*
+ * Resolve NAME from /etc/hosts. Deliberately NOT DNS: the resolver
+ * speaks DNS-over-TCP through ktcp (ELKS has no UDP), and ktcp is the
+ * one thing that must NOT be running while ping owns the NIC. A file
+ * read needs no network at all -- and the stock image already lists
+ * `gateway` and the elks15/16/17 LAN hosts, which is exactly the
+ * neighbourhood worth pinging.
+ *
+ * Format: "<addr> <name> [alias...]", '#' comments. Any name on the
+ * line matches.
+ */
+static int hosts_lookup(char *name, unsigned char *out)
+{
+    FILE *fp;
+    char line[128];
+    char *p;
+    char *tok;
+    unsigned char addr[4];
+    int matched;
+
+    fp = fopen("/etc/hosts", "r");
+    if (fp == (FILE *)0) return 0;
+
+    matched = 0;
+    while (!matched && fgets(line, sizeof(line), fp) != (char *)0) {
+        p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\0') continue;
+
+        /* first field: the address */
+        tok = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+        if (*p) *p++ = '\0';
+        if (!parse_ip(tok, addr)) continue;
+
+        /* remaining fields: canonical name, then aliases */
+        while (*p && !matched) {
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == '\0' || *p == '\n' || *p == '#') break;
+            tok = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+            if (*p) *p++ = '\0';
+            if (streq(tok, name)) matched = 1;
+        }
+    }
+    fclose(fp);
+    if (matched) bcopy4(out, addr);
+    return matched;
+}
+
+/** Dotted quad, else a name from /etc/hosts. */
+static int resolve_target(char *s, unsigned char *out)
+{
+    if (parse_ip(s, out)) return 1;
+    return hosts_lookup(s, out);
 }
 
 /* RFC 1071 checksum over big-endian 16-bit words. */
@@ -297,9 +365,12 @@ int main(int argc, char **argv)
     unsigned int seq;
     long rtt;
 
-    if (argc < 2 || !parse_ip(argv[1], dst_ip)) {
-        printf("usage: ping ADDR [count]\n");
-        printf("note: needs the raw eth device - run before net start (or net stop first)\n");
+    if (argc < 2 || !resolve_target(argv[1], dst_ip)) {
+        printf("usage: ping ADDR|NAME [count]\n");
+        printf("  ADDR is dotted IPv4; NAME must be listed in /etc/hosts\n");
+        printf("  (DNS needs ktcp, and ping needs the NIC to itself - see below)\n");
+        printf("note: ping drives the NIC directly, so ktcp must not be running:\n");
+        printf("      run it before 'net start', or 'net stop' first.\n");
         return 1;
     }
     count = argc > 2 ? parse_count(argv[2]) : 4;
@@ -329,7 +400,13 @@ int main(int argc, char **argv)
     fflush(stdout);
 
     if (!arp_resolve(hop)) {
+        /* Almost always ktcp: it holds /dev/ne0 and drains every
+         * inbound frame, so our ARP reply is consumed before we see it.
+         * The open() above still SUCCEEDS in that case, which is what
+         * made this failure so confusing in the field (2026-07-14). */
         printf("ping: no ARP reply from %s\n", fmt_ip(abuf, hop));
+        printf("ping: if the network is up, ktcp owns the NIC and is eating\n");
+        printf("      the replies. Run 'net stop', ping, then 'net start'.\n");
         close(ethfd);
         return 1;
     }

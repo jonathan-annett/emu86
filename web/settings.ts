@@ -177,10 +177,12 @@ export const SEED_PING_SCRIPT: BootScript = {
   id: 'seed-ping-installer',
   name: 'ping installer (builds it in-VM if missing)',
   text: buildPingInstallerScript(pingSource),
-  // rev 2: chunked heredocs + `exec sh` (rev 1 nested the source and
-  // died on the shell's heredoc heap). BUMP THIS whenever the script
-  // changes, or existing profiles keep running the copy they stored.
-  seedRev: 2,
+  // BUMP THIS whenever the script text changes (including ping.c), or
+  // existing profiles keep running the copy they stored.
+  //   rev 1: nested heredocs — died on the shell's heredoc heap
+  //   rev 2: chunked source + `exec sh` to drop the fattened shell
+  //   rev 3: ping.c gains /etc/hosts lookup + an honest ktcp diagnostic
+  seedRev: 3,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
