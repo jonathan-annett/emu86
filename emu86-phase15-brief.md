@@ -302,6 +302,17 @@ what does urlget actually send? M2 — what does MINIX-fs need for a
 clean flush? M3 — ktcp v0.9.0-vs-submodule skew, and c86's verdict
 on the patch sources.
 
+## PHASE CLOSE (2026-07-14)
+
+All three milestones landed same-session, in order, with reports:
+`HTTP_GATEWAY_REPORT.md`, `VIRTUAL_DRIVES_REPORT.md`,
+`KTCP_PING_REPORT.md`. **Final full suite: 1,169 passed, 106 files +
+1 skipped (SST corpus), typecheck clean on all three configs.**
+Session-start baseline was 1,128/100 — the +41 tests are this phase.
+Field verification of all three milestones is pending on the dev
+tier only (each report's last section is the checklist); nothing has
+been deployed anywhere by the agent.
+
 ## Still open from Phase 14 (not this phase's scope, don't lose them)
 
 - Promote dev→stable when Jonathan accepts the dev tier.
