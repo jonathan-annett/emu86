@@ -108,12 +108,30 @@ export const FONT_SIZE_MAX = 32;
  * Seeded example script (editable/deletable like any other): logs in
  * and joins the LAN — the testing-loop boilerplate the feature exists
  * to eliminate. Not active by default.
+ *
+ * The drive probe (Jonathan's design, field 2026-07-15): if /dev/hdb
+ * is attached it mounts OVER /tmp — so /tmp itself persists, and the
+ * workshop the ping installer keeps there survives reboots — and a
+ * ping binary found on it goes straight to /bin. No network, no
+ * compile, every boot. Deliberate limitation, recorded: the fast copy
+ * cannot check the rev markers (a static seed can't know the current
+ * rev), so a stale drive keeps its old ping until the installer
+ * script is re-run — that one purges by marker and re-fetches.
+ * Without a drive both lines fail quietly and the script is the old
+ * two-liner.
  */
 export const SEED_BOOT_SCRIPT: BootScript = {
   id: 'seed-network',
   name: 'network (root + net start ne0)',
-  text: 'root\nnet start ne0\n',
-  seedRev: 1,
+  text: [
+    'root',
+    'mount /dev/hdb /tmp 2>/dev/null',
+    'test -f /tmp/ping && cp /tmp/ping /bin/ping',
+    'net start ne0',
+    '',
+  ].join('\n'),
+  // rev 2: probe /dev/hdb as a persistent /tmp; restore ping from it
+  seedRev: 2,
 };
 
 /**
