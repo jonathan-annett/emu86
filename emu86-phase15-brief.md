@@ -60,6 +60,12 @@ them.
 
 ## M1 — M3d: arbitrary-destination TCP termination + HTTP gateway
 
+**STATUS: LANDED 2026-07-14** (commits `6cb3304`, `00665bc` + the
+mixed-content follow-up; `HTTP_GATEWAY_REPORT.md` is the record —
+including one recorded deviation: FIN-after-transmit rather than
+FIN-after-ACK, unobservable on a lossless wire). Field verification
+on the dev tier pending (report §8).
+
 Per `emu86-networking-plan.md:72-76,140-166`: recognise guest SYNs to
 off-LAN destinations at the gateway, terminate the TCP, parse the HTTP
 request, `fetch()` the real internet, pipe the response back as

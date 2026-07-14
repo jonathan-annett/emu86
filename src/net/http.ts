@@ -58,10 +58,21 @@ export interface GatewayFetchRequest {
 /** Injected fetch — tests use fixtures; the browser uses {@link realGatewayFetch}. */
 export type GatewayFetch = (req: GatewayFetchRequest) => Promise<FetchedResponse>;
 
-/** Wrap the platform fetch(). Redirects are followed silently (the guest sees the final body). */
-export function realGatewayFetch(): GatewayFetch {
+/**
+ * Wrap the platform fetch(). Redirects are followed silently (the
+ * guest sees the final body). Port-80 URLs are upgraded to https by
+ * default: the deployed page is itself served over HTTPS, and browsers
+ * block plain-http fetches from secure pages as mixed content — the
+ * guest still speaks HTTP/1.0 on the LAN wire; only the host-side hop
+ * travels TLS. Explicit non-80 ports are left alone (TLS on a random
+ * port would be a different service).
+ */
+export function realGatewayFetch(opts: { upgradeToHttps?: boolean } = {}): GatewayFetch {
+  const upgrade = opts.upgradeToHttps ?? true;
   return async (req: GatewayFetchRequest): Promise<FetchedResponse> => {
-    const response = await fetch(req.url, {
+    const url =
+      upgrade && /^http:\/\/[^/:]+(\/|$)/.test(req.url) ? `https://${req.url.slice(7)}` : req.url;
+    const response = await fetch(url, {
       method: req.method,
       headers: req.headers,
       redirect: 'follow',

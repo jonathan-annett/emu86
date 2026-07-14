@@ -376,6 +376,33 @@ describe('HttpGatewayHost — :53 DNS-over-TCP (OpenDNS default path)', () => {
   });
 });
 
+describe('realGatewayFetch — mixed-content upgrade', () => {
+  it('upgrades port-80 URLs to https, leaves explicit ports alone', async () => {
+    const { realGatewayFetch } = await import('../../src/net/http.js');
+    const seen: string[] = [];
+    const stub = (input: string | URL | Request): Promise<Response> => {
+      seen.push(String(input));
+      return Promise.resolve(new Response(new Uint8Array(0), { status: 200 }));
+    };
+    const original = globalThis.fetch;
+    globalThis.fetch = stub as typeof fetch;
+    try {
+      const gw = realGatewayFetch();
+      await gw({ url: 'http://example.com/a', method: 'GET', headers: [], body: null });
+      await gw({ url: 'http://1.2.3.4:8080/b', method: 'GET', headers: [], body: null });
+      const plain = realGatewayFetch({ upgradeToHttps: false });
+      await plain({ url: 'http://example.com/c', method: 'GET', headers: [], body: null });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(seen).toEqual([
+      'https://example.com/a',
+      'http://1.2.3.4:8080/b',
+      'http://example.com/c',
+    ]);
+  });
+});
+
 describe('HTTP request parsing', () => {
   it('waits for complete headers, then a complete body', () => {
     expect(tryParseRequest(latin1Bytes('GET / HT'))).toBe('incomplete');
