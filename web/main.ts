@@ -54,7 +54,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
-import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT } from './settings.js';
+import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, SEED_PING_SCRIPT } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
@@ -114,14 +114,17 @@ async function init(): Promise<void> {
     (id) => library.hasImage(id),
   );
 
-  // Landing showcase: profiles stored before the demo script was
-  // seeded gain it here (id-keyed; absent-only, so user edits win).
-  if (!settings.bootScripts.some((s) => s.id === SEED_DEMO_SCRIPT.id)) {
-    settings = {
-      ...settings,
-      bootScripts: [...settings.bootScripts, SEED_DEMO_SCRIPT],
-    };
-    saveSettings(settings);
+  // Seeded scripts: profiles stored before a seed existed gain it here
+  // (id-keyed; absent-only, so user edits and deletions-then-reseeds
+  // are the worst case, never silent overwrites).
+  for (const seed of [SEED_DEMO_SCRIPT, SEED_PING_SCRIPT]) {
+    if (!settings.bootScripts.some((s) => s.id === seed.id)) {
+      settings = {
+        ...settings,
+        bootScripts: [...settings.bootScripts, seed],
+      };
+      saveSettings(settings);
+    }
   }
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);

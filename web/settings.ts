@@ -24,11 +24,16 @@
  * take effect on next reload (don't try to hot-swap the running disk).
  */
 
+// `?raw` import types for the ping installer's embedded C source.
+// File-local so every tsconfig that sweeps this file up sees them.
+/// <reference types="vite/client" />
+
 import {
   THEME_PRESET_NAMES,
   isThemePresetName,
   type ThemePresetName,
 } from './themes.js';
+import pingSource from './guest/ping.c?raw';
 
 /**
  * Discriminated union so adding new sources later (e.g. github in 9.3) is
@@ -139,12 +144,72 @@ export const SEED_DEMO_SCRIPT: BootScript = {
   ].join('\n'),
 };
 
+/**
+ * The ping installer (Phase 15 M3 follow-on, Jonathan's design): the
+ * autoexec layer only pastes a shell script and runs it — ALL the
+ * logic lives in the guest, where the shell can actually branch. The
+ * pasted `getping.sh` is idempotent: found on /bin → done; found on
+ * an attached /dev/hdb → copy in; else heredoc-inject `ping.c` (the
+ * same source the Node harness compiles — web/guest/ping.c) and
+ * build it with the on-disk c86 toolchain, keeping a copy on the
+ * drive when one is attached. Runs BEFORE `net start` because the
+ * raw-frame ping needs the NIC to itself; the script ends by joining
+ * the LAN as usual. Sits in the picker, not active — for discovery.
+ */
+export const SEED_PING_SCRIPT: BootScript = {
+  id: 'seed-ping-installer',
+  name: 'ping installer (builds it in-VM if missing)',
+  text: [
+    'root',
+    "cat > /tmp/getping.sh << 'EOS'",
+    '@here',
+    '# emu86 ping installer -- idempotent, safe to run every boot.',
+    '# ping talks to the NIC directly: use before net start, or net stop first.',
+    'if test -f /bin/ping',
+    'then',
+    'echo ping already installed',
+    'exit 0',
+    'fi',
+    'mount /dev/hdb /mnt 2>/dev/null',
+    'if test -f /mnt/ping',
+    'then',
+    'echo found ping on /dev/hdb',
+    'cp /mnt/ping /bin/ping',
+    'umount /mnt 2>/dev/null',
+    'exit 0',
+    'fi',
+    'echo building ping with the in-VM c86 toolchain...',
+    "cat > /tmp/ping.c << 'EOF'",
+    ...pingSource.replace(/\n$/, '').split('\n'),
+    'EOF',
+    'cd /tmp',
+    'cpp -0 -I/usr/include -I/usr/include/c86 ping.c -o ping.i',
+    'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no ping.i ping.as',
+    'as -0 -j ping.as -o ping.o',
+    'ld -0 -i -L/usr/lib -o ping ping.o -lc86',
+    'cp /tmp/ping /bin/ping',
+    'cp /tmp/ping /mnt/ping 2>/dev/null',
+    'sync',
+    'umount /mnt 2>/dev/null',
+    'echo installed /bin/ping for this session',
+    'echo if a drive was attached it is also on /dev/hdb -- Save to keep it',
+    'EOS',
+    '@end',
+    '@turbo',
+    'sh /tmp/getping.sh',
+    '@authentic',
+    'ping 10.0.2.2 3',
+    'net start ne0',
+    '',
+  ].join('\n'),
+};
+
 export const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   themeName: 'default-dark',
   imageSource: { kind: 'bundled' },
   secondaryImageSource: null,
-  bootScripts: [SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT],
+  bootScripts: [SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, SEED_PING_SCRIPT],
   activeBootScriptId: null,
   cpuSpeed: 'authentic',
 };

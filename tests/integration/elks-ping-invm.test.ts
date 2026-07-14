@@ -2,8 +2,9 @@
  * In-VM-compiled ping against the live LAN (Phase 15 M3 acceptance).
  *
  * The dogfooding milestone: `ping.c` (raw-frame, standalone — see
- * `tests/probe/surveys/guest/ping.c`) is compiled INSIDE the emulated
- * machine by the on-disk C86 toolchain, then run in the same boot:
+ * `web/guest/ping.c`, shared with the browser's seeded installer
+ * script) is compiled INSIDE the emulated machine by the on-disk C86
+ * toolchain, then run in the same boot:
  *
  *   - `ping 10.0.2.2 3` answers three times from the LanGateway with
  *     honest RTTs (the guest's own ARP resolves the gateway first);

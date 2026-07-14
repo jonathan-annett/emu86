@@ -33,8 +33,12 @@ import {
 import { EthernetSwitch } from '../../../src/net/switch.js';
 import { LanGateway } from '../../../src/net/gateway.js';
 
-/** The guest C source, kept as a real file for editing/review sanity. */
-export const PING_C_PATH = new URL('./guest/ping.c', import.meta.url);
+/**
+ * The guest C source — canonical home is web/guest/ping.c, shared
+ * with the browser's seeded ping-installer boot script (settings.ts
+ * imports it `?raw`). One file, two consumers, zero drift.
+ */
+export const PING_C_PATH = new URL('../../../web/guest/ping.c', import.meta.url);
 
 /** Same kernel NIC config the browser auto-patch and the dns test use. */
 export const PING_BOOTOPTS_EXTRA = ['ne0=5,0x300,,0x80'];
