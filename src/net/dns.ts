@@ -89,6 +89,13 @@ export interface DnsHostOptions {
   onResolveError?: (err: unknown) => void;
   /** Populated from successful answers — the M3d reverse map. */
   cache?: DnsAnswerCache;
+  /**
+   * Local zone (Phase 15 M4 — the `.tabs` namespace). Given a question
+   * name, return an address to answer with, or null to let the query go
+   * to the real resolver. This is what makes `nslookup cat.tabs` work
+   * without touching the internet.
+   */
+  localZone?: (name: string) => Ipv4 | null;
 }
 
 interface PendingQuery {
@@ -104,6 +111,7 @@ export class DnsHost {
   readonly #resolve: DnsResolve;
   readonly #onResolveError: (err: unknown) => void;
   readonly #cache: DnsAnswerCache | null;
+  readonly #localZone: (name: string) => Ipv4 | null;
   readonly #tcp: TcpStack;
   /** IP (dotted string) → MAC, learned from ARP traffic. */
   readonly #arpTable = new Map<string, Mac>();
@@ -114,6 +122,8 @@ export class DnsHost {
   queriesResolved = 0;
   servfailsSent = 0;
   answersDropped = 0;
+  /** Queries answered from the local `.tabs` zone, never leaving the LAN. */
+  localAnswers = 0;
 
   /**
    * Resolves currently in flight. The browser run loop STALLS the
@@ -139,6 +149,7 @@ export class DnsHost {
     this.#resolve = opts.resolve;
     this.#onResolveError = opts.onResolveError ?? (() => { /* unobserved */ });
     this.#cache = opts.cache ?? null;
+    this.#localZone = opts.localZone ?? (() => null);
     this.#tcp = new TcpStack({
       localIp: this.ip,
       transmit: (dstIp, segment) => this.#transmitIp(dstIp, segment),
@@ -192,9 +203,33 @@ export class DnsHost {
     const queryLen = ((buffer[0] ?? 0) << 8) | (buffer[1] ?? 0);
     if (buffer.length < 2 + queryLen) return; // wait for the rest
 
-    const query = buffer.subarray(2, 2 + queryLen);
+    const query = Uint8Array.from(buffer.subarray(2, 2 + queryLen));
     pending.buffer = buffer.subarray(2 + queryLen); // a next query may follow
-    void this.#resolveAndAnswer(conn, Uint8Array.from(query));
+
+    // Local zone first (Phase 15 M4): `cat.tabs` is ours to answer, and
+    // the answer is a pure function of the name — no fetch, no await,
+    // no chance of the guest's 2-second resolver alarm expiring.
+    const local = this.#answerLocally(query);
+    if (local !== null) {
+      this.localAnswers++;
+      this.#send(conn, local);
+      return;
+    }
+    void this.#resolveAndAnswer(conn, query);
+  }
+
+  /**
+   * Answer from the local zone, or null to let the query go upstream.
+   * Only a single A/IN question is handled — anything else (AAAA, MX,
+   * multi-question) belongs to the real resolver.
+   */
+  #answerLocally(query: Uint8Array): Uint8Array | null {
+    const question = parseQuestion(query);
+    if (question === null) return null;
+    if (question.type !== 1 || question.klass !== 1) return null; // A/IN only
+    const ip = this.#localZone(question.name);
+    if (ip === null) return null;
+    return buildLocalAnswer(query, question.end, ip);
   }
 
   async #resolveAndAnswer(conn: TcpConnection, query: Uint8Array): Promise<void> {
@@ -215,6 +250,11 @@ export class DnsHost {
       this.answersDropped++; // guest gave up (its 2s alarm) — nothing to do
       return;
     }
+    this.#send(conn, answer);
+  }
+
+  /** Length-prefix (RFC 1035 §4.2.2) and transmit one answer message. */
+  #send(conn: TcpConnection, answer: Uint8Array): void {
     const framed = new Uint8Array(2 + answer.length);
     framed[0] = (answer.length >> 8) & 0xff;
     framed[1] = answer.length & 0xff;
@@ -301,6 +341,69 @@ export function servfailFor(query: Uint8Array): Uint8Array {
   r[9] = 0;
   r[10] = 0; // arcount
   r[11] = 0;
+  return r;
+}
+
+export interface DnsQuestion {
+  /** Lowercased, dot-joined question name. */
+  name: string;
+  /** QTYPE (1 = A). */
+  type: number;
+  /** QCLASS (1 = IN). */
+  klass: number;
+  /** Offset just past the question — where an answer section would start. */
+  end: number;
+}
+
+/**
+ * Read the single question out of a query (Phase 15 M4). Returns null
+ * for anything that isn't exactly one question — multi-question queries
+ * are vanishingly rare and belong upstream, not in our local zone.
+ */
+export function parseQuestion(query: Uint8Array): DnsQuestion | null {
+  if (query.length < 12) return null;
+  const qdcount = ((query[4] ?? 0) << 8) | (query[5] ?? 0);
+  if (qdcount !== 1) return null;
+  const name = readDnsName(query, 12);
+  if (name === null) return null;
+  const end = name.next + 4; // qtype + qclass
+  if (end > query.length) return null;
+  return {
+    name: name.name,
+    type: ((query[name.next] ?? 0) << 8) | (query[name.next + 1] ?? 0),
+    klass: ((query[name.next + 2] ?? 0) << 8) | (query[name.next + 3] ?? 0),
+    end,
+  };
+}
+
+/**
+ * Synthesize an authoritative A answer for a query we own: echo the
+ * header and question verbatim, then append one A record pointing at
+ * `ip` (name compressed to the question at offset 12, the standard
+ * form). TTL is 60 — the LAN can change under the guest when a tab
+ * closes, and nothing here is worth caching for long.
+ */
+export function buildLocalAnswer(query: Uint8Array, questionEnd: number, ip: Ipv4): Uint8Array {
+  const head = query.subarray(0, questionEnd);
+  const r = new Uint8Array(head.length + 16);
+  r.set(head, 0);
+  // Byte 2: QR | opcode(4) | AA | TC | RD. Keep the query's opcode and
+  // RD (0x79), set QR and AA (0x84 — this zone IS ours), clear TC.
+  // (First cut reused servfailFor's mask, which *clears* AA — it sets
+  // and then unset the very bit that says we're authoritative.)
+  r[2] = ((r[2] ?? 0) & 0x79) | 0x84;
+  r[3] = ((r[3] ?? 0) & 0x70) | 0x80; // RA=1, RCODE=0
+  r[6] = 0; // ancount = 1
+  r[7] = 1;
+  r[8] = 0; r[9] = 0; // nscount
+  r[10] = 0; r[11] = 0; // arcount
+  let o = head.length;
+  r[o++] = 0xc0; r[o++] = 0x0c; // name → the question at offset 12
+  r[o++] = 0x00; r[o++] = 0x01; // type A
+  r[o++] = 0x00; r[o++] = 0x01; // class IN
+  r[o++] = 0x00; r[o++] = 0x00; r[o++] = 0x00; r[o++] = 0x3c; // TTL 60
+  r[o++] = 0x00; r[o++] = 0x04; // rdlength
+  r[o++] = ip[0] ?? 0; r[o++] = ip[1] ?? 0; r[o++] = ip[2] ?? 0; r[o++] = ip[3] ?? 0;
   return r;
 }
 

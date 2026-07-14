@@ -18,8 +18,10 @@ import {
   DnsHost,
   base64url,
   parseAnswerARecords,
+  parseQuestion,
   servfailFor,
 } from '../../src/net/dns.js';
+import { addressForName } from '../../src/net/tan-names.js';
 import {
   ARP_OP_REPLY,
   ARP_OP_REQUEST,
@@ -422,5 +424,99 @@ describe('DNS helpers', () => {
     expect(fail[4]).toBe(query[4]); // qdcount untouched
     expect(fail[6]).toBe(0);
     expect(fail.length).toBe(query.length);
+  });
+});
+
+describe('DnsHost — the local .tabs zone (Phase 15 M4)', () => {
+  it('answers cat.tabs from the local zone without calling the resolver', async () => {
+    const lan = new EthernetSwitch();
+    let upstreamCalls = 0;
+    const dns = new DnsHost({
+      resolve: () => {
+        upstreamCalls++;
+        return Promise.reject(new Error('the internet must not be consulted'));
+      },
+      localZone: (name) => addressForName(name),
+    });
+    dns.attachTo(lan);
+    const peer = new GuestPeer(lan);
+    peer.connect();
+
+    const query = buildQuery(0x4242, 'cat.tabs');
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(query));
+    // No await: a local answer is synchronous, which is the point —
+    // it cannot lose to the guest's 2-second resolver alarm.
+    const segs = peer.takeTcp();
+    const answerSeg = segs.find((s) => s.payload.length > 0);
+    expect(answerSeg).toBeDefined();
+    expect(upstreamCalls).toBe(0);
+    expect(dns.localAnswers).toBe(1);
+
+    const message = (answerSeg?.payload ?? new Uint8Array(0)).subarray(2);
+    expect(message[0]).toBe(0x42); // id echoed
+    expect((message[2] ?? 0) & 0x80).toBe(0x80); // QR: response
+    expect((message[2] ?? 0) & 0x04).toBe(0x04); // AA: authoritative — it's our zone
+    expect((message[3] ?? 0) & 0x0f).toBe(0); // RCODE 0
+    const parsed = parseAnswerARecords(message);
+    expect(parsed?.question).toBe('cat.tabs');
+    expect(parsed?.addresses).toEqual([[10, 0, 2, 17]]); // cat
+  });
+
+  it('answers the bare name and the gateway too', async () => {
+    const lan = new EthernetSwitch();
+    const dns = new DnsHost({
+      resolve: () => Promise.reject(new Error('unused')),
+      localZone: (name) => addressForName(name),
+    });
+    dns.attachTo(lan);
+    const peer = new GuestPeer(lan);
+    peer.connect();
+
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(buildQuery(1, 'mouse')));
+    let seg = peer.takeTcp().find((s) => s.payload.length > 0);
+    expect(parseAnswerARecords(seg?.payload.subarray(2) ?? new Uint8Array(0))?.addresses)
+      .toEqual([[10, 0, 2, 16]]);
+
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(buildQuery(2, 'elk.tabs')));
+    seg = peer.takeTcp().find((s) => s.payload.length > 0);
+    expect(parseAnswerARecords(seg?.payload.subarray(2) ?? new Uint8Array(0))?.addresses)
+      .toEqual([[10, 0, 2, 2]]);
+    expect(dns.localAnswers).toBe(2);
+  });
+
+  it('passes anything outside the zone through to the real resolver', async () => {
+    const lan = new EthernetSwitch();
+    const query = buildQuery(0x99, 'example.com');
+    const seen: Uint8Array[] = [];
+    const dns = new DnsHost({
+      resolve: (q) => {
+        seen.push(q);
+        return Promise.resolve(buildAnswer(q, [93, 184, 216, 34]));
+      },
+      localZone: (name) => addressForName(name),
+    });
+    dns.attachTo(lan);
+    const peer = new GuestPeer(lan);
+    peer.connect();
+
+    peer.sendTcp(TCP_PSH | TCP_ACK, withPrefix(query));
+    await flush();
+    expect(seen).toHaveLength(1); // went upstream, byte-exact
+    expect(dns.localAnswers).toBe(0);
+    expect(dns.queriesResolved).toBe(1);
+  });
+});
+
+describe('parseQuestion', () => {
+  it('reads the name, type and class of a single-question query', () => {
+    const q = parseQuestion(buildQuery(0x1234, 'cat.tabs'));
+    expect(q?.name).toBe('cat.tabs');
+    expect(q?.type).toBe(1); // A
+    expect(q?.klass).toBe(1); // IN
+  });
+
+  it('returns null for garbage', () => {
+    expect(parseQuestion(new Uint8Array(4))).toBeNull();
+    expect(parseQuestion(Uint8Array.from({ length: 40 }, () => 0xc0))).toBeNull();
   });
 });

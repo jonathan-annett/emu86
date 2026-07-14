@@ -173,6 +173,12 @@ export interface ErrorMessage {
 export interface TanIdentityMessage {
   type: 'tan-identity';
   hostOctet: number;
+  /**
+   * The tab's name in the `.tabs` namespace (Phase 15 M4) — `mouse`,
+   * `cat`, `dog`… A pure function of the octet, so the main thread
+   * could derive it, but sending it keeps the mapping in one place.
+   */
+  name?: string;
 }
 
 /**

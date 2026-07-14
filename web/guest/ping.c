@@ -195,10 +195,118 @@ static int hosts_lookup(char *name, unsigned char *out)
     return matched;
 }
 
-/** Dotted quad, else a name from /etc/hosts. */
+/*
+ * ---- the .tabs namespace ----
+ *
+ * Every tab on the Tab Area Network has a deterministic short name:
+ * octet 16 is `mouse`, 17 is `cat`, 18 is `dog`. The gateway is `elk`
+ * (ELK-S) and the DNS host is `owl`. Names may be written bare (`cat`)
+ * or fully qualified (`cat.tabs`).
+ *
+ * The table is compiled in ON PURPOSE. ping cannot use DNS -- the ELKS
+ * resolver speaks DNS-over-TCP through ktcp, and ktcp is precisely the
+ * process that must not be running while ping owns the NIC. But the
+ * name is a pure function of the address, so no daemon is needed: this
+ * is an array lookup, not a network round trip.
+ *
+ * Mirrors src/net/tan-names.ts in the emu86 tree; a test pins the two
+ * lists equal so they cannot drift.
+ */
+
+#define TAB_OCTET_MIN 16
+#define TAB_COUNT     184
+
+static char *tab_names[TAB_COUNT] = {
+    "mouse", "cat", "dog", "fox", "bear", "wolf",
+    "deer", "hare", "crow", "duck", "swan", "frog",
+    "toad", "newt", "lynx", "mole", "vole", "seal",
+    "otter", "stoat", "weasel", "badger", "rabbit", "ferret",
+    "hamster", "gerbil", "shrew", "bat", "hedgehog", "squirrel",
+    "beaver", "marten", "mink", "polecat", "raccoon", "skunk",
+    "possum", "wombat", "koala", "quokka", "wallaby", "kangaroo",
+    "platypus", "echidna", "dingo", "emu", "kiwi", "kea",
+    "robin", "wren", "finch", "sparrow", "starling", "magpie",
+    "jackdaw", "rook", "raven", "jay", "thrush", "blackbird",
+    "swallow", "martin", "swift", "lark", "pipit", "wagtail",
+    "dunnock", "warbler", "chiffchaff", "goldcrest", "nuthatch", "treecreeper",
+    "woodpecker", "kingfisher", "heron", "egret", "stork", "crane",
+    "ibis", "spoonbill", "grebe", "coot", "moorhen", "rail",
+    "snipe", "curlew", "godwit", "plover", "lapwing", "dunlin",
+    "sanderling", "turnstone", "oystercatcher", "avocet", "gull", "tern",
+    "skua", "puffin", "guillemot", "razorbill", "gannet", "cormorant",
+    "shag", "fulmar", "petrel", "albatross", "pelican", "flamingo",
+    "falcon", "kestrel", "merlin", "hobby", "buzzard", "harrier",
+    "osprey", "eagle", "kite", "goshawk", "sparrowhawk", "vulture",
+    "condor", "toucan", "macaw", "parrot", "budgie", "cockatoo",
+    "lorikeet", "rosella", "quail", "grouse", "pheasant", "partridge",
+    "peacock", "turkey", "goose", "gosling", "heifer", "bullock",
+    "donkey", "mule", "pony", "foal", "lamb", "piglet",
+    "gecko", "skink", "iguana", "chameleon", "monitor", "python",
+    "adder", "viper", "cobra", "mamba", "boa", "krait",
+    "turtle", "tortoise", "terrapin", "gharial", "caiman", "axolotl",
+    "salamander", "tadpole", "perch", "roach", "rudd", "tench",
+    "carp", "bream", "barbel", "chub", "dace", "gudgeon",
+    "minnow", "stickleback", "salmon", "trout", "grayling", "pike",
+    "eel", "lamprey", "sturgeon", "burbot"
+};
+
+/* Fixed residents outside the tab range. */
+static int fixed_lookup(char *name, unsigned char *out)
+{
+    if (streq(name, "elk") || streq(name, "gateway")) {
+        out[0] = 10; out[1] = 0; out[2] = 2; out[3] = 2;
+        return 1;
+    }
+    if (streq(name, "owl") || streq(name, "dns")) {
+        out[0] = 10; out[1] = 0; out[2] = 2; out[3] = 3;
+        return 1;
+    }
+    return 0;
+}
+
+/* Strip a trailing ".tabs" into buf; returns the bare name. */
+static char *strip_tabs(char *name, char *buf)
+{
+    int i, n;
+    n = 0;
+    while (name[n] && n < 30) n++;
+    if (n > 5) {
+        i = n - 5;
+        if (name[i] == '.' && name[i+1] == 't' && name[i+2] == 'a'
+         && name[i+3] == 'b' && name[i+4] == 's') {
+            for (i = 0; i < n - 5; i++) buf[i] = name[i];
+            buf[n - 5] = '\0';
+            return buf;
+        }
+    }
+    return name;
+}
+
+static int tabs_lookup(char *name, unsigned char *out)
+{
+    char bare[32];
+    char *host;
+    int i;
+
+    host = strip_tabs(name, bare);
+    if (fixed_lookup(host, out)) return 1;
+    for (i = 0; i < TAB_COUNT; i++) {
+        if (streq(host, tab_names[i])) {
+            out[0] = 10;
+            out[1] = 0;
+            out[2] = 2;
+            out[3] = (unsigned char)(TAB_OCTET_MIN + i);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Dotted quad, else a .tabs name, else /etc/hosts. */
 static int resolve_target(char *s, unsigned char *out)
 {
     if (parse_ip(s, out)) return 1;
+    if (tabs_lookup(s, out)) return 1;
     return hosts_lookup(s, out);
 }
 
@@ -367,7 +475,8 @@ int main(int argc, char **argv)
 
     if (argc < 2 || !resolve_target(argv[1], dst_ip)) {
         printf("usage: ping ADDR|NAME [count]\n");
-        printf("  ADDR is dotted IPv4; NAME must be listed in /etc/hosts\n");
+        printf("  ADDR is dotted IPv4; NAME is a .tabs name (cat, cat.tabs, elk)\n");
+        printf("  or any host in /etc/hosts\n");
         printf("  (DNS needs ktcp, and ping needs the NIC to itself - see below)\n");
         printf("note: ping drives the NIC directly, so ktcp must not be running:\n");
         printf("      run it before 'net start', or 'net stop' first.\n");

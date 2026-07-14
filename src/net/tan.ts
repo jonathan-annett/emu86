@@ -76,7 +76,22 @@ interface TanClaimMsg {
   readonly tan: 'claim';
   readonly octet: number;
 }
-type TanMsg = TanFrameMsg | TanClaimMsg;
+/**
+ * Census reply (Phase 15 M4). A settled tab answers any *other* tab's
+ * claim with `here <my octet>`, so a newcomer learns the WHOLE
+ * membership in one claim-wait and can pick the lowest free octet —
+ * which is what makes the first tab `mouse` and the second `cat`
+ * instead of two random animals.
+ *
+ * It is a distinct message type, and deliberately so: `here` never
+ * triggers a reply. Answering a claim with another *claim* would have
+ * every tab re-announcing at every other tab's announcement, forever.
+ */
+interface TanHereMsg {
+  readonly tan: 'here';
+  readonly octet: number;
+}
+type TanMsg = TanFrameMsg | TanClaimMsg | TanHereMsg;
 
 function isTanMsg(data: unknown): data is TanMsg {
   return typeof data === 'object' && data !== null && 'tan' in data;
@@ -194,7 +209,7 @@ export class TabAreaNetwork {
       const octet =
         attempt === 0 && this.#preferredOctet !== null
           ? this.#preferredOctet
-          : OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
+          : this.#pickOctet();
       this.#conflictSeen = false;
       this.#identity = tanIdentityFor(octet); // provisional
       this.#channel.postMessage({ tan: 'claim', octet });
@@ -285,9 +300,20 @@ export class TabAreaNetwork {
       this.#trunk.transmit(bytes);
       return;
     }
+    if (data.tan === 'here') {
+      // Census reply from a settled member. Pure directory information:
+      // record it, and treat it as a conflict if it lands on the octet
+      // we are provisionally claiming.
+      if (!Number.isInteger(data.octet)) return;
+      this.#knownOctets.add(data.octet);
+      const mine = this.#identity;
+      if (mine !== null && !this.#settled && data.octet === mine.hostOctet) {
+        this.#conflictSeen = true;
+      }
+      return;
+    }
     if (data.tan === 'claim') {
       if (!Number.isInteger(data.octet)) return;
-      const firstSighting = !this.#knownOctets.has(data.octet);
       this.#knownOctets.add(data.octet);
       const mine = this.#identity;
       if (mine !== null && data.octet === mine.hostOctet) {
@@ -299,13 +325,26 @@ export class TabAreaNetwork {
           // simultaneous newcomer) means this octet is contested.
           this.#conflictSeen = true;
         }
-      } else if (firstSighting && this.#settled && mine !== null) {
-        // Directory gossip: a new member just announced — re-announce
-        // ourselves once so it learns the existing membership. Only on
-        // first sighting, so announcements can't storm.
-        this.#channel.postMessage({ tan: 'claim', octet: mine.hostOctet });
+      } else if (this.#settled && mine !== null) {
+        // Census: answer every newcomer's claim with our own octet, so
+        // it learns the entire membership in ONE round and can pick the
+        // lowest free name. `here` draws no reply, so this terminates.
+        this.#channel.postMessage({ tan: 'here', octet: mine.hostOctet });
       }
     }
+  }
+
+  /**
+   * The lowest octet nobody is known to hold — so the first tab is
+   * `mouse`, the second `cat`, the third `dog`. Falls back to a random
+   * pick only if the whole range looks taken (184 tabs, in which case
+   * the collision protocol sorts it out).
+   */
+  #pickOctet(): number {
+    for (let octet = OCTET_MIN; octet <= OCTET_MAX; octet++) {
+      if (!this.#knownOctets.has(octet)) return octet;
+    }
+    return OCTET_MIN + Math.floor(this.#random() * (OCTET_MAX - OCTET_MIN + 1));
   }
 }
 

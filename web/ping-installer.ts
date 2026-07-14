@@ -47,8 +47,10 @@ const C_EOF = 'EOF_PING_C';
  * rev 3: /etc/hosts name lookup, and an honest ARP-failure message
  *        (a running ktcp eats the replies — the old text blamed the
  *        open(), which actually succeeds).
+ * rev 4: the `.tabs` namespace — `ping cat`, `ping cat.tabs`, `ping elk`.
+ *        The table is compiled in because ping cannot use DNS.
  */
-export const PING_REV = 3;
+export const PING_REV = 4;
 const REV_MARKER = `pingrev${PING_REV}`;
 
 /**

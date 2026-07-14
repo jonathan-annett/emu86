@@ -313,6 +313,80 @@ Field verification of all three milestones is pending on the dev
 tier only (each report's last section is the checklist); nothing has
 been deployed anywhere by the agent.
 
+## M4 — The .tabs namespace (Jonathan, 2026-07-14, in-session)
+
+**His design:** every tab gets a deterministic short animal name —
+`mouse.tabs`, `cat.tabs`, `dog.tabs` — and the gateway, invisible
+until now, is **`elk.tabs`** (ELK-S). The fake DNS server resolves
+them, `nslookup cat.tabs` works, `ping cat` works, and each browser
+tab's title *is* its name. The TAN stops being a set of octets you
+have to remember and becomes a neighbourhood.
+
+### The crux: how `ping cat` resolves without DNS
+
+Jonathan flagged this as needing "clever coaxing". It needs none —
+**because the names are deterministic**, which is the whole trick.
+Ping cannot use DNS (the resolver speaks DNS-over-TCP through ktcp,
+and ktcp is exactly what must not be running while ping owns the NIC),
+but it doesn't need to: `name → octet` is a pure function, so ping
+carries the table compiled into it. `ping cat` is an array lookup, not
+a network round trip. The same table drives DNS, the tab title, and
+the guest tool — one list, three consumers, and a test that pins them
+together.
+
+### Naming
+
+- Octets are `10.0.2.[16..199]` (`tan.ts:65`), so 184 names,
+  `name = ANIMALS[octet - 16]`. Names are lowercase, short, and
+  distinct.
+- Reserved: `elk` = 10.0.2.2 (gateway), `owl` = 10.0.2.3 (the DNS
+  host — it looks things up). Both also answer as `gateway` / `dns`.
+- Suffix `.tabs`. Bare names resolve too (`cat` and `cat.tabs` are the
+  same thing).
+
+### Allocation: first tab should be `mouse`, not `narwhal`
+
+Today the TAN picks a **random** free octet, so the first tab would
+land on a random animal — which throws away most of the charm. The
+lease already tracks `#knownOctets`, but a newcomer only ever learns
+about the *one* octet it collided with, so it cannot pick the lowest
+free.
+
+Fix — a one-message census, small and terminating:
+- New `here` message. A settled tab that hears someone *else's*
+  `claim` answers `here <octet>`. `here` never triggers a reply, so
+  there is no echo storm (an unconditional re-`claim` would ping-pong
+  forever — the reason for a distinct type).
+- The newcomer records every `here`, then picks the **lowest free**
+  octet instead of a random one. Worst case it collides once, learns
+  the whole membership from that round, and picks correctly on the
+  second attempt — bounded regardless of how many tabs are open.
+- Sticky IPs are unchanged: a returning tab still prefers its
+  remembered octet, so `cat` stays `cat` across reloads.
+
+### Scope
+
+1. `src/net/tan-names.ts` — the canonical list + `nameForOctet` /
+   `octetForName` / `.tabs` suffix handling. One source of truth.
+2. `src/net/tan.ts` — the `here` census + lowest-free pick.
+3. `src/net/dns.ts` — answer `<name>` and `<name>.tabs` locally
+   (synthesized A records) *before* falling through to DoH. This is
+   the DNS host's first real message parsing on the question side; the
+   answer-side reader (`parseAnswerARecords`) already exists.
+4. `web/guest/ping.c` — the built-in name table, so `ping cat` works
+   with ktcp stopped. Mirrors the TS list; a test pins them equal.
+5. `web/main.ts` — `document.title` becomes the tab's name; the boot
+   banner announces it.
+
+### Acceptance
+
+- `nslookup cat.tabs` from a booted guest returns the right 10.0.2.x.
+- `ping cat` and `ping cat.tabs` reach the neighbouring tab (ktcp
+  stopped), and `ping elk` reaches the gateway.
+- Two tabs opened in order are `mouse` and `cat` — not two random
+  animals — and their titles say so.
+- The C name table and the TS name table cannot drift (pinned test).
+
 ## Still open from Phase 14 (not this phase's scope, don't lose them)
 
 - Promote dev→stable when Jonathan accepts the dev tier.

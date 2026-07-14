@@ -233,9 +233,20 @@ async function init(): Promise<void> {
     }
     if (msg.type === 'tan-identity') {
       // Sticky IP: persist the settled octet so the next reload offers
-      // it back to the lease; tell the user where they live.
+      // it back to the lease; tell the user where they live — and WHO
+      // they are. The tab's name IS its hostname on the .tabs network
+      // (Phase 15 M4), so it titles the browser tab too: a row of open
+      // tabs reads mouse / cat / dog.
       saveSession({ tanHostOctet: msg.hostOctet });
-      term.writeln(`[TAN address: 10.0.2.${msg.hostOctet}]`);
+      if (msg.name !== undefined) {
+        document.title = `${msg.name}.tabs — emu86`;
+        term.writeln(
+          `[you are ${msg.name}.tabs at 10.0.2.${msg.hostOctet} — ` +
+            `the gateway is elk.tabs]`,
+        );
+      } else {
+        term.writeln(`[TAN address: 10.0.2.${msg.hostOctet}]`);
+      }
       return;
     }
     if (msg.type === 'stats') {

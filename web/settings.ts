@@ -182,7 +182,8 @@ export const SEED_PING_SCRIPT: BootScript = {
   //   rev 1: nested heredocs — died on the shell's heredoc heap
   //   rev 2: chunked source + `exec sh` to drop the fattened shell
   //   rev 3: ping.c gains /etc/hosts lookup + an honest ktcp diagnostic
-  seedRev: 3,
+  //   rev 4: ping.c gains the .tabs name table (ping cat / ping elk)
+  seedRev: 4,
 };
 
 export const DEFAULT_SETTINGS: Settings = {

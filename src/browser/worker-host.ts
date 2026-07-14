@@ -61,6 +61,7 @@ import { LanGateway } from '../net/gateway.js';
 import { DnsAnswerCache, DnsHost, dohResolve } from '../net/dns.js';
 import { HttpGatewayHost, realGatewayFetch } from '../net/http.js';
 import { TabAreaNetwork, type FrameChannel } from '../net/tan.js';
+import { addressForName, nameForOctet } from '../net/tan-names.js';
 import {
   AUTHENTIC_CYCLES_PER_MS,
   RealTimePacer,
@@ -608,7 +609,13 @@ export class WorkerHost {
     if (tanIdentity !== null) {
       // Report the settled identity so the main thread can persist it
       // for the next page load (and show the address to the user).
-      this.#post({ type: 'tan-identity', hostOctet: tanIdentity.hostOctet });
+      this.#post({
+        type: 'tan-identity',
+        hostOctet: tanIdentity.hostOctet,
+        ...(nameForOctet(tanIdentity.hostOctet) !== null
+          ? { name: nameForOctet(tanIdentity.hostOctet) as string }
+          : {}),
+      });
     }
 
     const primary = await this.#resolveSlot(
@@ -660,7 +667,13 @@ export class WorkerHost {
     // it without an explicit server argument. The answer cache feeds
     // the HTTP gateway's IP→name reverse map (Phase 15 M1).
     const answerCache = new DnsAnswerCache();
-    const dns = new DnsHost({ resolve: dohResolve(), cache: answerCache });
+    // M4: the `.tabs` zone is answered locally — `cat.tabs`, `elk`,
+    // `owl` never leave the LAN. Anything else falls through to DoH.
+    const dns = new DnsHost({
+      resolve: dohResolve(),
+      cache: answerCache,
+      localZone: (name) => addressForName(name),
+    });
     dns.attachTo(network);
     this.#dns = dns;
     // Phase 15 M1 (M3d): terminate off-subnet TCP at the gateway —
