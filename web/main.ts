@@ -54,7 +54,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
-import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, SEED_PING_SCRIPT } from './settings.js';
+import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, reconcileSeededScripts } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
@@ -114,17 +114,16 @@ async function init(): Promise<void> {
     (id) => library.hasImage(id),
   );
 
-  // Seeded scripts: profiles stored before a seed existed gain it here
-  // (id-keyed; absent-only, so user edits and deletions-then-reseeds
-  // are the worst case, never silent overwrites).
-  for (const seed of [SEED_DEMO_SCRIPT, SEED_PING_SCRIPT]) {
-    if (!settings.bootScripts.some((s) => s.id === seed.id)) {
-      settings = {
-        ...settings,
-        bootScripts: [...settings.bootScripts, seed],
-      };
-      saveSettings(settings);
-    }
+  // Seeded scripts: add ones the profile has never seen, and refresh
+  // pristine copies of seeds we have since fixed. Scripts the user has
+  // edited are never touched (see reconcileSeededScripts). Seeding used
+  // to be absent-only, which meant a stored copy of a seeded script
+  // shadowed every later fix — Jonathan ran a broken installer twice
+  // after I had fixed it, because his browser had the old text.
+  const reconciled = reconcileSeededScripts(settings.bootScripts);
+  if (JSON.stringify(reconciled) !== JSON.stringify(settings.bootScripts)) {
+    settings = { ...settings, bootScripts: reconciled };
+    saveSettings(settings);
   }
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);

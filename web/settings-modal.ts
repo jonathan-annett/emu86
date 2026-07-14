@@ -1107,10 +1107,13 @@ function renderBootScriptPane(opts: BootScriptPaneOpts): HTMLDivElement {
     nameInput.select();
   });
 
+  // Editing a seeded script ADOPTS it: `userEdited` makes it the user's
+  // for good, so no shipped fix ever silently overwrites their work
+  // (see reconcileSeededScripts in settings.ts).
   nameInput.addEventListener('input', () => {
     const active = activeScript();
     if (active === undefined) return;
-    updateScript(active.id, { name: nameInput.value });
+    updateScript(active.id, { name: nameInput.value, userEdited: true });
     // Keep the picker label in sync without a full re-render (which
     // would fight the user's caret).
     for (const opt of Array.from(select.options)) {
@@ -1121,7 +1124,7 @@ function renderBootScriptPane(opts: BootScriptPaneOpts): HTMLDivElement {
   textArea.addEventListener('input', () => {
     const active = activeScript();
     if (active === undefined) return;
-    updateScript(active.id, { text: textArea.value });
+    updateScript(active.id, { text: textArea.value, userEdited: true });
   });
 
   deleteBtn.addEventListener('click', () => {

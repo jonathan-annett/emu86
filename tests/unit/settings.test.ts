@@ -3,10 +3,13 @@ import {
   DEFAULT_SETTINGS,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
+  SEED_PING_SCRIPT,
   SETTINGS_CHANGED_EVENT,
   loadSettings,
+  reconcileSeededScripts,
   saveSettings,
   validateImageSourceAgainstLibrary,
+  type BootScript,
   type Settings,
 } from '../../web/settings.js';
 
@@ -292,5 +295,55 @@ describe('settings', () => {
 
     storage.setItem(STORAGE_KEY, JSON.stringify(null));
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe('reconcileSeededScripts — seeded scripts must be able to receive fixes', () => {
+  it('refreshes a legacy stored copy (no seedRev) of a seed we have since fixed', () => {
+    // Exactly Jonathan's case: a copy of the ping installer saved before
+    // revisions existed, holding text we have already fixed twice. The
+    // old absent-only seeding left it shadowing every fix, and he had to
+    // delete it by hand to see one.
+    const stale: BootScript = {
+      id: SEED_PING_SCRIPT.id,
+      name: SEED_PING_SCRIPT.name,
+      text: 'root\nthe old broken text\n',
+    };
+    const [got] = reconcileSeededScripts([stale]);
+    expect(got?.text).toBe(SEED_PING_SCRIPT.text);
+    expect(got?.seedRev).toBe(SEED_PING_SCRIPT.seedRev);
+  });
+
+  it('refreshes a stored copy at an older rev', () => {
+    const older: BootScript = { ...SEED_PING_SCRIPT, text: 'stale', seedRev: 1 };
+    const [got] = reconcileSeededScripts([older]);
+    expect(got?.text).toBe(SEED_PING_SCRIPT.text);
+  });
+
+  it('NEVER touches a script the user has edited', () => {
+    const mine: BootScript = {
+      id: SEED_PING_SCRIPT.id,
+      name: 'my ping installer',
+      text: 'root\nmy own careful edits\n',
+      userEdited: true,
+    };
+    const [got] = reconcileSeededScripts([mine]);
+    expect(got).toEqual(mine); // byte-for-byte, forever
+  });
+
+  it('leaves a current copy alone and adds seeds the profile has never seen', () => {
+    const current: BootScript = { ...SEED_PING_SCRIPT };
+    const out = reconcileSeededScripts([current]);
+    expect(out.find((s) => s.id === SEED_PING_SCRIPT.id)).toEqual(current);
+    // The other seeds are absent from this profile — they get added.
+    for (const seed of DEFAULT_SETTINGS.bootScripts) {
+      expect(out.some((s) => s.id === seed.id)).toBe(true);
+    }
+  });
+
+  it("does not touch the user's own scripts", () => {
+    const mine: BootScript = { id: 'mine-1', name: 'mine', text: 'root\n' };
+    const out = reconcileSeededScripts([mine]);
+    expect(out.find((s) => s.id === 'mine-1')).toEqual(mine);
   });
 });

@@ -53,6 +53,24 @@ export interface BootScript {
   id: string;
   name: string;
   text: string;
+  /**
+   * Revision of the seed this pristine copy came from. Bumping a seed's
+   * rev in code makes existing profiles pick up the new text on next
+   * load. Absent means the copy was stored before revisions existed
+   * (legacy) — those refresh once and gain a rev.
+   *
+   * Without this, seeding was absent-only: a stored copy shadowed every
+   * later fix to a seeded script, and the user had to know to delete it
+   * by hand. Field-hit twice (2026-07-14), the second time on a script
+   * I had already fixed.
+   */
+  seedRev?: number;
+  /**
+   * The user changed this script. It is theirs now: never refreshed,
+   * never overwritten, whatever we ship. Set by the editor, and the
+   * reason `seedRev: undefined` can safely mean "legacy, refresh me".
+   */
+  userEdited?: boolean;
 }
 
 export interface Settings {
@@ -100,6 +118,7 @@ export const SEED_BOOT_SCRIPT: BootScript = {
   id: 'seed-network',
   name: 'network (root + net start ne0)',
   text: 'root\nnet start ne0\n',
+  seedRev: 1,
 };
 
 /**
@@ -143,6 +162,7 @@ export const SEED_DEMO_SCRIPT: BootScript = {
     './hello',
     '',
   ].join('\n'),
+  seedRev: 1,
 };
 
 /**
@@ -157,6 +177,10 @@ export const SEED_PING_SCRIPT: BootScript = {
   id: 'seed-ping-installer',
   name: 'ping installer (builds it in-VM if missing)',
   text: buildPingInstallerScript(pingSource),
+  // rev 2: chunked heredocs + `exec sh` (rev 1 nested the source and
+  // died on the shell's heredoc heap). BUMP THIS whenever the script
+  // changes, or existing profiles keep running the copy they stored.
+  seedRev: 2,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -206,11 +230,44 @@ function isValidBootScripts(v: unknown): v is BootScript[] {
   if (!Array.isArray(v)) return false;
   return v.every((s) => {
     if (s === null || typeof s !== 'object') return false;
-    const obj = s as { id?: unknown; name?: unknown; text?: unknown };
+    const obj = s as { id?: unknown; name?: unknown; text?: unknown; seedRev?: unknown };
     return typeof obj.id === 'string' && obj.id.length > 0
       && typeof obj.name === 'string'
-      && typeof obj.text === 'string';
+      && typeof obj.text === 'string'
+      && (obj.seedRev === undefined || typeof obj.seedRev === 'number');
   });
+}
+
+/**
+ * Reconcile stored boot scripts against the seeds we ship.
+ *
+ *   user's own script (no seed id)  → untouched
+ *   userEdited                      → untouched, forever. It is theirs.
+ *   seed absent                     → added
+ *   seed present, rev < ours        → name + text refreshed
+ *   seed present, no rev (legacy)   → refreshed once, gains a rev
+ *   seed present, rev current       → untouched (nothing changed)
+ *
+ * The bug this fixes: seeding was absent-only, so a stored copy of a
+ * seeded script shadowed every later fix to it. Jonathan ran a boot
+ * script I had already fixed — twice — and had to know to delete it by
+ * hand to see the fix (2026-07-14).
+ */
+export function reconcileSeededScripts(scripts: readonly BootScript[]): BootScript[] {
+  const seeds = DEFAULT_SETTINGS.bootScripts;
+  const out: BootScript[] = scripts.map((script) => {
+    if (script.userEdited === true) return script; // theirs — hands off
+    const seed = seeds.find((s) => s.id === script.id);
+    if (seed === undefined) return script; // a script of the user's own
+    const storedRev = script.seedRev ?? 0; // absent = legacy = stale
+    const seedRev = seed.seedRev ?? 0;
+    if (storedRev >= seedRev) return script; // already current
+    return { ...script, name: seed.name, text: seed.text, seedRev };
+  });
+  for (const seed of seeds) {
+    if (!out.some((s) => s.id === seed.id)) out.push({ ...seed });
+  }
+  return out;
 }
 
 /**
