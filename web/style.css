@@ -620,6 +620,15 @@ header code {
 /* Virtual-drive save banner (Phase 15 M2)                            */
 /* ------------------------------------------------------------------ */
 
+/* An author `display` beats the UA's `[hidden] { display: none }`,
+   so banners styled display:flex MUST restate the hidden rule — the
+   drive banner shipped without it and rendered as an empty pill with
+   a Save button from page load (field find, 2026-07-14). */
+#drive-banner[hidden],
+#showcase-banner[hidden] {
+  display: none;
+}
+
 #drive-banner {
   position: fixed;
   left: 0.75rem;
