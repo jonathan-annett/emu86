@@ -336,13 +336,50 @@ describe('HttpGatewayHost — request path', () => {
     expect(rig.host.tcp.connectionCount).toBe(0);
   });
 
-  it('refuses :443 with an RST — HTTPS termination is structurally impossible', () => {
+  it(':443 is the https bridge — plain HTTP in, https URL out (the wrapper trick)', async () => {
     const rig = makeRig({});
-    rig.peer.sendTcp(WEB_IP, 443, TCP_SYN);
-    const [rst] = rig.peer.takeTcp(WEB_IP);
+    rig.peer.connect(WEB_IP, 443);
+    rig.peer.sendTcp(
+      WEB_IP,
+      443,
+      TCP_PSH | TCP_ACK,
+      latin1Bytes('GET /secret HTTP/1.0\r\nHost: example.com\r\n\r\n'),
+    );
+    await flush();
+    expect(rig.requests[0]?.url).toBe('https://example.com/secret');
+    const response = latin1(rig.peer.readResponseAndClose(WEB_IP, 443));
+    expect(response).toMatch(/^HTTP\/1\.0 200/);
+  });
+
+  it(':443 strips a :443 suffix from the Host authority (default port of the real scheme)', async () => {
+    const rig = makeRig({});
+    rig.peer.connect(WEB_IP, 443);
+    rig.peer.sendTcp(
+      WEB_IP,
+      443,
+      TCP_PSH | TCP_ACK,
+      latin1Bytes('GET / HTTP/1.0\r\nHost: example.com:443\r\n\r\n'),
+    );
+    await flush();
+    expect(rig.requests[0]?.url).toBe('https://example.com/');
+  });
+
+  it('a custom acceptPort predicate still refuses with an RST', () => {
+    const lan = new EthernetSwitch();
+    const gateway = new LanGateway();
+    gateway.attachTo(lan);
+    const host = new HttpGatewayHost({
+      fetchFn: () => Promise.reject(new Error('unused')),
+      acceptPort: (port) => port === 80,
+    });
+    host.attachTo(gateway);
+    const peer = new GuestPeer(lan);
+    peer.announce();
+    peer.sendTcp(WEB_IP, 25, TCP_SYN);
+    const [rst] = peer.takeTcp(WEB_IP);
     expect(rst).toBeDefined();
     expect((rst?.flags ?? 0) & TCP_RST).toBe(TCP_RST);
-    expect(rig.host.tcp.connectionCount).toBe(0);
+    expect(host.tcp.connectionCount).toBe(0);
   });
 });
 

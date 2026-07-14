@@ -23,10 +23,15 @@
  *     reverse map (dialed IP → the name the guest resolved), then to
  *     the dotted IP itself.
  *
- * Port 443 is refused with an RST (the `acceptPort` default): fetch
- * owns TLS, so raw HTTPS termination is structurally impossible here —
- * an instant connection-refused is the honest answer, not a hang. The
- * `webget`/ttyS1 escape hatch remains the sanctioned HTTPS route.
+ * HTTPS: TLS termination is structurally impossible here (fetch owns
+ * TLS) — but the guest can *name* the https port. Jonathan's wrapper
+ * trick (field, 2026-07-14): dialing **:443 with plain HTTP** tells
+ * the gateway to fetch `https://host/…`. So from the guest's view:
+ * `http://example.com/` is plain http (browsers auto-upgrade port-80
+ * fetches for mixed content anyway), `:80` is explicitly http, and
+ * `:443` is explicitly https — from a client that has never heard of
+ * TLS. A guest that someday speaks real TLS bytes at :443 would 400
+ * or time out against the HTTP parser; no such ELKS client exists.
  *
  * Async pattern is DnsHost's: request bytes are ACKed synchronously by
  * the TcpStack, the fetch settles between run batches, the response
@@ -93,7 +98,7 @@ export interface HttpGatewayHostOptions {
   dnsResolve?: DnsResolve;
   /** Observe fetch/resolve failures (already answered with 502/SERVFAIL). */
   onError?: (err: unknown) => void;
-  /** Ports the terminator accepts; refused ports RST. Default: everything except 443. */
+  /** Ports the terminator accepts; refused ports RST. Default: all (443 = https bridge). */
   acceptPort?: (port: number) => boolean;
 }
 
@@ -174,7 +179,7 @@ export class HttpGatewayHost {
     this.#reverseLookup = opts.reverseLookup ?? (() => undefined);
     this.#dnsResolve = opts.dnsResolve ?? null;
     this.#onError = opts.onError ?? (() => { /* unobserved */ });
-    const acceptPort = opts.acceptPort ?? ((port: number): boolean => port !== 443);
+    const acceptPort = opts.acceptPort ?? ((): boolean => true);
     this.#tcp = new TcpStack({
       localIp: GATEWAY_IP, // nominal; every connection carries its dialed identity
       transmit: (dstIp, segment, srcIp) => {
@@ -301,16 +306,21 @@ export class HttpGatewayHost {
   /**
    * Host-header-first URL reconstruction; absolute-form targets
    * (proxy-style `GET http://host/ HTTP/1.0`) pass through verbatim.
+   * Dialed port 443 selects the https scheme (the wrapper trick): the
+   * guest speaks plain HTTP on the wire, the fetch travels TLS.
    */
   #buildUrl(conn: TcpConnection, req: ParsedRequest): string {
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(req.target)) return req.target;
+    const https = conn.localPort === 443;
     const hostHeader = getHeader(req.headers, 'host');
     let authority = hostHeader ?? this.#reverseLookup(conn.localIp) ?? formatIp(conn.localIp);
-    if (!authority.includes(':') && conn.localPort !== 80) {
+    if (https) {
+      authority = authority.replace(/:443$/, ''); // default port for the real scheme
+    } else if (!authority.includes(':') && conn.localPort !== 80) {
       authority += `:${conn.localPort}`;
     }
     const path = req.target.startsWith('/') ? req.target : `/${req.target}`;
-    return `http://${authority}${path}`;
+    return `${https ? 'https' : 'http'}://${authority}${path}`;
   }
 
   /** Format and send the response, then close (Connection: close semantics). */
