@@ -219,6 +219,14 @@ HDs are a supported shape. What's missing is creation + persistence:
 
 ## M3 — ktcp-ping: compile a real ping in-VM
 
+**STATUS: LANDED 2026-07-14** (commit `cd56498`;
+`KTCP_PING_REPORT.md` is the record). The compile worked FIRST TRY —
+c86 took all ~350 lines of ping.c; `ping 10.0.2.2` gets three honest
+replies from the gateway and `ping 8.8.8.8` gets D6's
+dest-unreachable. Field follow-up: get the binary into a browser VM
+(autoexec compile, or an M2 persistent drive) for the TAN
+tab-pings-tab demo.
+
 **SCOPE AMENDMENT (2026-07-14, discovered at implementation time —
 flagged for Jonathan's review):** stage 1 as written below contains a
 hidden dependency on stage 2: the NS_PING server side lives *inside*
