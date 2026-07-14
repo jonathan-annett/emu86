@@ -54,7 +54,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
-import { SEED_DEMO_SCRIPT } from './settings.js';
+import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
@@ -186,6 +186,15 @@ async function init(): Promise<void> {
       term.write(msg.bytes);
       if (autoexec !== null && autoexec.active) {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
+        // One-night-only act (Jonathan, 2026-07-15): when the landing
+        // show finishes its run, demote the active script to the plain
+        // network one-liner so reloads get a working machine, not a
+        // rerun. Only the demo self-retires — a user-chosen script
+        // keeps replaying, as before.
+        if (!autoexec.active && activeScript?.id === SEED_DEMO_SCRIPT.id) {
+          settings = { ...settings, activeBootScriptId: SEED_BOOT_SCRIPT.id };
+          saveSettings(settings);
+        }
       }
       return;
     }
