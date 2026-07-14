@@ -18,6 +18,13 @@
  * host-unreachable - a browser cannot originate real ICMP, and emu86
  * does not fake RTTs.
  *
+ * Identity: the source address comes from $LOCALIP - the bootopts
+ * stamp every TAN tab boots with (10.0.2.<its octet>) - falling back
+ * to 10.0.2.15, the solo default. And while it runs, ping ANSWERS ARP
+ * who-has for that address: with ktcp stopped it is the only resident,
+ * and a peer that cannot resolve us cannot reply. Hardcoding .15 and
+ * answering nothing was the tab-pings-tab bug (field, 2026-07-14).
+ *
  * Usage: ping ADDR [count]     (default count 4)
  */
 
@@ -44,6 +51,7 @@ extern int ioctl();
 extern int select();
 extern int gettimeofday();
 extern int fflush();
+extern char *getenv();
 /* stdio.h supplies FILE, fopen, fgets, fclose (used for /etc/hosts). */
 
 /* ---- constants ---- */
@@ -61,7 +69,7 @@ extern int fflush();
 /* ---- globals ---- */
 
 static unsigned char my_mac[6];
-static unsigned char my_ip[4]  = { 10, 0, 2, 15 };
+static unsigned char my_ip[4]  = { 10, 0, 2, 15 }; /* solo default; $LOCALIP overrides in main */
 static unsigned char gw_ip[4]  = { 10, 0, 2, 2 };
 static unsigned char dst_ip[4];
 static unsigned char hop_mac[6];
@@ -70,6 +78,7 @@ static unsigned char from_ip[4];    /* sender of the last reply/error */
 static int ethfd = -1;
 static unsigned char txf[MAX_ETH];
 static unsigned char rxf[MAX_ETH];
+static unsigned char arpf[60];      /* ARP replies; txf may hold an echo */
 
 /* ---- small helpers (no libc string deps) ---- */
 
@@ -348,15 +357,36 @@ static int rx_frame(long ms)
     return n > 0 ? n : 0;
 }
 
-static void idle_ms(long ms)
-{
-    struct timeval tv;
-    tv.tv_sec = ms / 1000L;
-    tv.tv_usec = (ms % 1000L) * 1000L;
-    select(0, (unsigned long *)0, (unsigned long *)0, (unsigned long *)0, &tv);
-}
-
 /* ---- ARP ---- */
+
+/*
+ * If the frame in rxf (len bytes) is an ARP who-has for my_ip, answer
+ * it. Ping runs with ktcp stopped, so nothing else speaks for this
+ * address: a peer that cannot resolve us cannot send its echo reply.
+ * Never answering was half of the tab-pings-tab bug (2026-07-14) -
+ * the other half is the hardcoded source address, fixed in main().
+ */
+static void arp_answer(int len)
+{
+    int i;
+    if (len < 42) return;
+    if (rxf[12] != 0x08 || rxf[13] != 0x06) return;    /* not ARP */
+    if (rxf[20] != 0x00 || rxf[21] != 0x01) return;    /* not who-has */
+    if (!eq4(rxf + 38, my_ip)) return;                 /* not our address */
+    bcopy6(arpf, rxf + 22);                            /* back to the asker */
+    bcopy6(arpf + 6, my_mac);
+    arpf[12] = 0x08; arpf[13] = 0x06;
+    arpf[14] = 0x00; arpf[15] = 0x01;                  /* htype: ethernet */
+    arpf[16] = 0x08; arpf[17] = 0x00;                  /* ptype: IPv4 */
+    arpf[18] = 6;    arpf[19] = 4;
+    arpf[20] = 0x00; arpf[21] = 0x02;                  /* op: reply */
+    bcopy6(arpf + 22, my_mac);                         /* my_ip is at ... */
+    bcopy4(arpf + 28, my_ip);
+    bcopy6(arpf + 32, rxf + 22);                       /* ... dear asker */
+    bcopy4(arpf + 38, rxf + 28);
+    for (i = 42; i < 60; i++) arpf[i] = 0;             /* pad to minimum */
+    write(ethfd, (char *)arpf, 60);
+}
 
 /* Resolve `ip` to hop_mac. Returns 1 on success. */
 static int arp_resolve(unsigned char *ip)
@@ -383,6 +413,7 @@ static int arp_resolve(unsigned char *ip)
         gettimeofday(&t0, (char *)0);
         while (ms_since(&t0) < WAIT_ARP_MS) {
             len = rx_frame(WAIT_ARP_MS - ms_since(&t0));
+            arp_answer(len);            /* stay resolvable while resolving */
             if (len < 42) continue;
             if (rxf[12] != 0x08 || rxf[13] != 0x06) continue;  /* not ARP */
             if (rxf[20] != 0x00 || rxf[21] != 0x02) continue;  /* not reply */
@@ -429,6 +460,20 @@ static void send_echo(unsigned int seq)
     write(ethfd, (char *)txf, FRAME_LEN);
 }
 
+/* Between pings: sleep `ms`, but keep answering ARP - a peer's stack
+ * may (re)resolve us at any moment, and nothing else will speak for
+ * this address while we hold the NIC. */
+static void gap_ms(long ms)
+{
+    struct timeval t0;
+    int len;
+    gettimeofday(&t0, (char *)0);
+    while (ms_since(&t0) < ms) {
+        len = rx_frame(ms - ms_since(&t0));
+        arp_answer(len);
+    }
+}
+
 /* Wait for the answer to `seq`: 1 = reply, 2 = unreachable, 0 = timeout. */
 static int wait_answer(unsigned int seq)
 {
@@ -439,6 +484,7 @@ static int wait_answer(unsigned int seq)
     gettimeofday(&t0, (char *)0);
     while (ms_since(&t0) < WAIT_REPLY_MS) {
         len = rx_frame(WAIT_REPLY_MS - ms_since(&t0));
+        arp_answer(len);    /* the peer may need our MAC to reply AT ALL */
         if (len < 14 + 28) continue;
         if (rxf[12] != 0x08 || rxf[13] != 0x00) continue;   /* not IPv4 */
         ip = rxf + 14;
@@ -469,6 +515,8 @@ int main(int argc, char **argv)
     char abuf[16];
     char bbuf[16];
     unsigned char *hop;
+    unsigned char lip[4];
+    char *env;
     int count, sent, got, res;
     unsigned int seq;
     long rtt;
@@ -497,6 +545,17 @@ int main(int argc, char **argv)
         close(ethfd);
         return 1;
     }
+
+    /* Who are we? $LOCALIP is the bootopts stamp every TAN tab boots
+     * with (10.0.2.<its octet>); solo boots keep the .15 default. The
+     * hardcoded .15 was half of the tab-pings-tab bug: every echo went
+     * out claiming an address no tab owns. (Deliberately NOT the MAC's
+     * last byte - on the TAN it matches the octet, but solo the MAC is
+     * a fixed default while the IP is .15.) Parse into scratch first:
+     * parse_ip writes as it goes, and a malformed value must not
+     * half-overwrite the default. */
+    env = getenv("LOCALIP");
+    if (env != (char *)0 && parse_ip(env, lip)) bcopy4(my_ip, lip);
 
     /* /24 routing: on-subnet direct, everything else via the gateway. */
     hop = (dst_ip[0] == my_ip[0] && dst_ip[1] == my_ip[1] && dst_ip[2] == my_ip[2])
@@ -539,7 +598,7 @@ int main(int argc, char **argv)
             printf("Request timed out (seq=%u)\n", seq);
         }
         fflush(stdout);
-        if (seq < (unsigned int)count) idle_ms(GAP_MS);
+        if (seq < (unsigned int)count) gap_ms(GAP_MS);
     }
 
     printf("--- %s ping statistics ---\n", fmt_ip(abuf, dst_ip));

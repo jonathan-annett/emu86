@@ -87,7 +87,10 @@ describe('buildPingInstallerScript', () => {
   });
 
   it('tracks the revision the tools repo ships', () => {
-    expect(PING_REV).toBeGreaterThanOrEqual(4);
+    // 5 = the tab-pings-tab fix (LOCALIP + ARP answering). The strong
+    // pin — PING_REV === the REV= in the tools repo's install-ping.sh —
+    // lives in browser-ping-installer.test.ts, which has the checkout.
+    expect(PING_REV).toBeGreaterThanOrEqual(5);
   });
 
   it('never types a line the ELKS tty would silently truncate', () => {

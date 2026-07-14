@@ -52,7 +52,10 @@ describe('Phase 15 M3 — in-VM-compiled ping pings the LAN', () => {
           `[ping] timeoutPhase=${result.probe?.timeoutPhase} ` +
             `arpReplies=${result.gatewayArpReplies} ` +
             `echoReplies=${result.gatewayEchoReplies} ` +
-            `unreachables=${result.gatewayUnreachables}`,
+            `unreachables=${result.gatewayUnreachables} ` +
+            `proberWhoHas=${result.proberWhoHasSent} ` +
+            `guestArpReplies=${result.guestArpReplies} ` +
+            `guestSays=${result.guestArpReplyIp} ${result.guestArpReplyMac}`,
         );
         console.log('--- transcript tail ---\n' + (result.probe?.fullTranscript ?? '').slice(-800));
       }
@@ -74,6 +77,19 @@ describe('Phase 15 M3 — in-VM-compiled ping pings the LAN', () => {
       expect(result.gatewayReplies).toBe(3);
       expect(result.sections['pinggw']).toContain('3 packets transmitted, 3 received');
       expect(result.gatewayEchoReplies).toBe(3);
+
+      // ---- identity: the source address is $LOCALIP, not the old
+      // hardcoded 10.0.2.15 (half of the tab-pings-tab bug) ----
+      expect(result.sections['pinggw']).toContain('from 10.0.2.42');
+
+      // ---- and ping ANSWERS who-has for that address (the other
+      // half): the prober asked twice — once cued by ping's own ARP,
+      // once cued by the first answer — and only ping can answer, ktcp
+      // being stopped. This is the question a far tab's ktcp must have
+      // answered before it can send its echo reply back. ----
+      expect(result.proberWhoHasSent).toBe(2);
+      expect(result.guestArpReplies).toBe(2);
+      expect(result.guestArpReplyIp).toBe('10.0.2.42');
 
       // ---- off-LAN ping: unreachable, not a hang, exit code 1 ----
       expect(result.farUnreachable).toBe(true);

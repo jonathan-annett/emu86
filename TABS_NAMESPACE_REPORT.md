@@ -86,6 +86,17 @@ verified by `elks-ping-invm`).
 
 ## 5. KNOWN BUG: tab-pings-tab does not work (field, 2026-07-14)
 
+> **FIXED 2026-07-15 — ping rev 5. See `TAB_PINGS_TAB_REPORT.md`.**
+> Both fixes below landed as written, plus a third bug found on the way:
+> the `pingrev` marker mechanism this section's last paragraph relies on
+> ("bump `PING_REV` … so drives and profiles pick it up") was documented
+> but had never been implemented — without it the bump would have
+> reached nobody with a saved drive. One refinement to the diagnosis:
+> on the TAN, fix (1) alone would have sufficed (the far tab's
+> proxy-ARP covers member octets — .15 failed because it isn't one);
+> fix (2) still matters solo and against directory races. Awaiting
+> field confirmation. The section is preserved as written:
+
 Jonathan tried it. `ping cat` from another tab fails. Ping→**gateway**
 works (that is what every test covers); ping→**tab** does not.
 

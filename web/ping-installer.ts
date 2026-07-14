@@ -68,12 +68,25 @@ export const MAX_GUEST_LINE = 110;
 
 /**
  * Revision of the ping the tools repo currently ships. Bump when
- * `ping.c` changes there, so a drive holding an older binary rebuilds
- * instead of restoring it forever (`install-ping.sh` checks for a
- * `pingrev<N>` marker file — the revision is in the *name*, because
- * ELKS sh has no `$(...)` to compare a version with).
+ * `ping.c` changes there — AND bump `REV=` in `install-ping.sh` to
+ * match (the integration test pins the two equal). The installer
+ * writes `pingrev<N>` marker files beside everything it installs —
+ * the revision is in the *name*, because ELKS sh has no `$(...)` to
+ * compare a version with — and treats a missing marker as stale, so a
+ * drive holding an older binary rebuilds instead of restoring it
+ * forever.
+ *
+ * (Confession, 2026-07-14: revs ≤4 DOCUMENTED this mechanism but the
+ * script never implemented it — an old drive really would have
+ * restored its rev-4 ping forever. Found while shipping rev 5.)
+ *
+ *   rev 4: the .tabs name table (ping cat / ping elk)
+ *   rev 5: the tab-pings-tab fix — source address from $LOCALIP
+ *          (hardcoded .15 claimed an address no tab owns) + answer
+ *          ARP who-has while running (nothing else speaks for a
+ *          ktcp-stopped machine); plus the marker mechanism itself.
  */
-export const PING_REV = 4;
+export const PING_REV = 5;
 
 /**
  * Build the boot script. `@turbo` for the fetch and the compile (a c86

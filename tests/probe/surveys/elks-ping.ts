@@ -15,6 +15,19 @@
  *     `Destination Host Unreachable` and exits 1 (recorded as its
  *     own stage rc — the harness asserts the value, not zero).
  *
+ * Since the tab-pings-tab fix (2026-07-14) this survey also proves
+ * ping's two identity duties, because nothing else would:
+ *
+ *   - the boot stamps `LOCALIP=10.0.2.42` — the same bootopts line
+ *     every TAN tab boots with — and the banner must say
+ *     `from 10.0.2.42`, not the old hardcoded .15;
+ *   - an ARP PROBER on the LAN asks `who-has 10.0.2.42` while ping
+ *     runs, and ping itself must answer (with ktcp stopped there is
+ *     nobody else to). The prober asks twice — its second ask is
+ *     triggered by the first answer, landing in a later wait loop.
+ *     A peer that cannot resolve us cannot send its echo reply; this
+ *     is exactly the question a far tab's ktcp asks before replying.
+ *
  * The binary is exported to the probe floppy with an md5 receipt,
  * same fidelity scheme as the hello-world probe.
  */
@@ -30,8 +43,21 @@ import {
   type SectionMap,
   type StageStatus,
 } from './hd32-hello-world.js';
-import { EthernetSwitch } from '../../../src/net/switch.js';
+import { EthernetSwitch, type SwitchPort } from '../../../src/net/switch.js';
 import { LanGateway } from '../../../src/net/gateway.js';
+import {
+  ARP_OP_REPLY,
+  ARP_OP_REQUEST,
+  ETHERTYPE_ARP,
+  MAC_BROADCAST,
+  buildArp,
+  buildEthernetFrame,
+  formatIp,
+  formatMac,
+  parseArp,
+  type Ipv4,
+  type Mac,
+} from '../../../src/net/wire.js';
 
 /**
  * The guest C source — canonical home is web/guest/ping.c, shared
@@ -40,8 +66,19 @@ import { LanGateway } from '../../../src/net/gateway.js';
  */
 export const PING_C_PATH = new URL('../../../web/guest/ping.c', import.meta.url);
 
-/** Same kernel NIC config the browser auto-patch and the dns test use. */
-export const PING_BOOTOPTS_EXTRA = ['ne0=5,0x300,,0x80'];
+/**
+ * The address the boot stamps into the guest's environment — the same
+ * `LOCALIP=10.0.2.<octet>` line every TAN tab boots with. Ping must
+ * take its source address from it (the hardcoded 10.0.2.15 was half of
+ * the tab-pings-tab bug), so the survey deliberately uses an octet
+ * that is NOT the .15 default.
+ */
+export const PING_LOCALIP: Ipv4 = [10, 0, 2, 42];
+
+/** Same kernel NIC config the browser auto-patch and the dns test use,
+ *  plus the TAN-style identity stamp (an env line for init, so it costs
+ *  ~18 bytes of the 160-byte argv_slen budget — fine at this size). */
+export const PING_BOOTOPTS_EXTRA = ['ne0=5,0x300,,0x80', `LOCALIP=${formatIp(PING_LOCALIP)}`];
 
 export const PING_BOOTOPTS_SCRIPT = 'mount /dev/fd0 /mnt;sh /mnt/go.sh';
 
@@ -127,6 +164,15 @@ export interface ElksPingResult {
   readonly gatewayUnreachables: number;
   /** ARP replies the gateway sent — proves guest frames reached the LAN. */
   readonly gatewayArpReplies: number;
+  /** who-has 10.0.2.42 requests the prober put on the wire. */
+  readonly proberWhoHasSent: number;
+  /** ARP replies the GUEST sent back to the prober — the tab-pings-tab
+   *  fix in action: with ktcp stopped, only ping can answer these. */
+  readonly guestArpReplies: number;
+  /** sender IP claimed in the guest's ARP reply (must be the LOCALIP). */
+  readonly guestArpReplyIp: string | null;
+  /** sender MAC in the guest's ARP reply. */
+  readonly guestArpReplyMac: string | null;
 }
 
 export async function runElksPing(imagePath: string): Promise<ElksPingResult> {
@@ -146,6 +192,10 @@ export async function runElksPing(imagePath: string): Promise<ElksPingResult> {
       gatewayEchoReplies: 0,
       gatewayUnreachables: 0,
       gatewayArpReplies: 0,
+      proberWhoHasSent: 0,
+      guestArpReplies: 0,
+      guestArpReplyIp: null,
+      guestArpReplyMac: null,
     };
   }
 
@@ -157,6 +207,34 @@ export async function runElksPing(imagePath: string): Promise<ElksPingResult> {
   const primary = applyBootopts(rawBytes, bootopts);
 
   const gateway = new LanGateway();
+
+  // The ARP prober: a silent LAN resident that plays the role of a far
+  // tab's ktcp — "before I can send you my echo reply, who-has
+  // 10.0.2.42?". The old ping never answered (and claimed .15 anyway),
+  // which is why tab could not ping tab. Cue on the guest's OWN ARP
+  // who-has (the one broadcast frame the prober is guaranteed to see —
+  // by then ping owns the NIC and is in a wait loop), ask again when
+  // the first answer arrives (that one lands in a LATER wait loop), and
+  // record what the guest claims to be.
+  const proberMac: Mac = [0x02, 0xaa, 0xaa, 0xaa, 0xaa, 0x01];
+  const proberIp: Ipv4 = [10, 0, 2, 9];
+  let prober: SwitchPort | null = null;
+  let proberWhoHasSent = 0;
+  let guestArpReplies = 0;
+  let guestArpReplyIp: string | null = null;
+  let guestArpReplyMac: string | null = null;
+  const sendWhoHas = (): void => {
+    proberWhoHasSent++;
+    prober?.transmit(
+      buildEthernetFrame(
+        MAC_BROADCAST,
+        proberMac,
+        ETHERTYPE_ARP,
+        buildArp(ARP_OP_REQUEST, proberMac, proberIp, [0, 0, 0, 0, 0, 0], PING_LOCALIP),
+      ),
+    );
+  };
+
   const probe = await runProbe({
     primaryImage: primary,
     probe: {
@@ -173,6 +251,33 @@ export async function runElksPing(imagePath: string): Promise<ElksPingResult> {
     createNetwork: (inject) => {
       const lan = new EthernetSwitch();
       gateway.attachTo(lan);
+      prober = lan.attach({
+        name: 'arp-prober',
+        onFrame: (frame) => {
+          if ((((frame[12] ?? 0) << 8) | (frame[13] ?? 0)) !== ETHERTYPE_ARP) return;
+          const arp = parseArp(frame.subarray(14));
+          if (arp === null) return;
+          if (
+            arp.op === ARP_OP_REQUEST
+            && formatIp(arp.senderIp) === formatIp(PING_LOCALIP)
+            && proberWhoHasSent === 0
+          ) {
+            // The guest's own who-has: ping is up and waiting. Ask it
+            // who it is, mid-resolve.
+            sendWhoHas();
+            return;
+          }
+          if (arp.op === ARP_OP_REPLY && formatIp(arp.targetIp) === formatIp(proberIp)) {
+            guestArpReplies++;
+            guestArpReplyIp = formatIp(arp.senderIp);
+            guestArpReplyMac = formatMac(arp.senderMac);
+            // Ask once more — this one arrives while ping waits for an
+            // echo reply (or sits in the gap between pings), proving
+            // the responder stays live for the whole run.
+            if (proberWhoHasSent === 1) sendWhoHas();
+          }
+        },
+      });
       const nicPort = lan.attach({ name: 'ne2000', onFrame: inject });
       return (frame) => nicPort.transmit(frame);
     },
@@ -199,5 +304,9 @@ export async function runElksPing(imagePath: string): Promise<ElksPingResult> {
     gatewayEchoReplies: gateway.echoRepliesSent,
     gatewayUnreachables: gateway.unreachablesSent,
     gatewayArpReplies: gateway.arpRepliesSent,
+    proberWhoHasSent,
+    guestArpReplies,
+    guestArpReplyIp,
+    guestArpReplyMac,
   };
 }

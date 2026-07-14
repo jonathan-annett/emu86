@@ -28,7 +28,7 @@ import { homedir } from 'node:os';
 import { WorkerHost } from '../../src/browser/worker-host.js';
 import type { WorkerToMainMessage } from '../../src/browser/protocol.js';
 import { AutoexecRunner } from '../../web/autoexec.js';
-import { buildPingInstallerScript } from '../../web/ping-installer.js';
+import { PING_REV, buildPingInstallerScript } from '../../web/ping-installer.js';
 import { buildLocalAnswer, parseQuestion } from '../../src/net/dns.js';
 import type { Ipv4 } from '../../src/net/wire.js';
 
@@ -112,6 +112,26 @@ function base64urlDecode(s: string): Uint8Array {
 }
 
 describe('Phase 15 — the machine downloads, builds, and runs its own ping', () => {
+  it('tools checkout matches what emu86 believes it ships (rev + mirror)', () => {
+    if (!existsSync(resolve(TOOLS_DIR, 'install-ping.sh'))) {
+      console.warn(`[skip] ${TOOLS_DIR} not checked out — rev/mirror pins not checked.`);
+      return;
+    }
+    // PING_REV is emu86's belief about what the tools repo ships; REV=
+    // in install-ping.sh is what the guest actually acts on (markers,
+    // staleness). If they drift, drives stop picking up fixes — which
+    // is precisely the failure the markers exist to prevent.
+    const installer = readFileSync(resolve(TOOLS_DIR, 'install-ping.sh'), 'ascii');
+    expect(installer).toContain(`\nREV=${PING_REV}\n`);
+    // And the C source is a mirror, not a fork: web/guest/ping.c is the
+    // canonical copy (the in-VM probe compiles it; tan-names pins its
+    // name table), the tools repo is what the guest downloads. Byte-equal
+    // or the machine builds something the tests never saw.
+    const toolsPing = readFileSync(resolve(TOOLS_DIR, 'ping.c'), 'ascii');
+    const guestPing = readFileSync(resolve('web/guest/ping.c'), 'ascii');
+    expect(toolsPing).toBe(guestPing);
+  });
+
   it(
     'urlgets install-ping.sh from GitHub, builds ping.c in-VM, and pings elk by name',
     async () => {
