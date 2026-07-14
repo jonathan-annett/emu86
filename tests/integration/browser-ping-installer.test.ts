@@ -2,45 +2,118 @@
  * The ping installer, driven exactly as the browser drives it
  * (Phase 15 M3 follow-on acceptance).
  *
- * This is the test that was missing when the installer shipped broken.
- * The earlier in-VM ping test fed `ping.c` to the guest on the probe
- * FLOPPY — a path the browser does not have. The browser can only type,
- * and typing 14 KB of C through a shell exposed two walls the floppy
- * never touched (`ping-paste-log.txt`, 2026-07-14):
+ * The machine downloads its own tools. This test proves the whole chain
+ * end to end, offline:
  *
- *   1. the raw tty queue overran (fixed: @here waits on the `> ` prompt);
- *   2. ELKS `sh` blew its heap buffering a nested 14 KB heredoc
- *      (fixed: no nesting + chunked source).
+ *   boot → `net start ne0` → the guest's own `urlget` fetches
+ *   `install-ping.sh` from GitHub *through the M3d HTTP gateway* → the
+ *   script fetches `ping.c` from the same repo → builds it in-VM with
+ *   c86 → installs it → `net stop` → `ping elk` reaches the gateway,
+ *   BY NAME, from a binary the machine compiled itself.
  *
- * So this drives the REAL {@link buildPingInstallerScript} output
- * through the REAL {@link AutoexecRunner} against a REAL boot of
- * hd32-minix under {@link WorkerHost} — the browser's own code path,
- * minus the browser. It asserts the guest built ping in-VM and pinged
- * the WorkerHost's LanGateway, which answers with real ICMP.
+ * `fetch` is stubbed to serve the two files from the local
+ * `8086-tab-tools` checkout, so the test needs no network and cannot
+ * flake on GitHub — but every other link in the chain is real: the
+ * guest's urlget, the TCP terminator, the HTTP gateway, the toolchain,
+ * the raw-frame ping, and the gateway's ICMP.
  *
- * Skips with a pointer when the fixture image is absent.
+ * It replaces a test that drove 722 lines of heredoc paste — which is
+ * exactly the thing this design deleted.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { WorkerHost } from '../../src/browser/worker-host.js';
 import type { WorkerToMainMessage } from '../../src/browser/protocol.js';
 import { AutoexecRunner } from '../../web/autoexec.js';
 import { buildPingInstallerScript } from '../../web/ping-installer.js';
+import { buildLocalAnswer, parseQuestion } from '../../src/net/dns.js';
+import type { Ipv4 } from '../../src/net/wire.js';
 
 const HD32_PATH = resolve('reference/elks-images-hd', 'hd32-minix.img');
-const PING_C_PATH = resolve('web/guest/ping.c');
+/** The public tools repo — the machine's real source of ping. */
+const TOOLS_DIR = resolve(homedir(), 'Projects/8086-tab-tools');
 
-const TEST_TIMEOUT_MS = 20 * 60 * 1000;
-/** Small slices: each script line needs one guest echo + prompt to advance. */
-const SLICE = 250_000;
-const MAX_SLICES = 4000; // ~1e9 instructions of headroom; the loop exits early
+const TEST_TIMEOUT_MS = 30 * 60 * 1000;
+/**
+ * SMALL batches, and this is not a tuning preference — it is the rule
+ * from DNS_DOH_REPORT §4.2. A blocked guest burns virtual time at
+ * halt-spin rate, so a fat slice can run `in_resolv`'s 2-second alarm
+ * out before the host's DoH promise gets a chance to settle between
+ * slices. The guest then "times out" on a resolve that was about to
+ * succeed. (First cut used 250k and simply hung: the paste-based test
+ * got away with it only because it never touched the network.)
+ */
+const SLICE = 20_000;
+const MAX_SLICES = 40_000;
 const VERBOSE = process.env['EMU86_INSTALLER_VERBOSE'] === '1';
 
-describe('Phase 15 M3 — the browser ping installer builds ping and pings the gateway', () => {
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+/** The address the fake DNS hands out for raw.githubusercontent.com. */
+const GITHUB_IP: Ipv4 = [140, 82, 121, 4];
+
+/**
+ * Stub the ONE host-side primitive the whole chain rests on: `fetch`.
+ * Two kinds of request arrive here, and the first one is easy to forget —
+ * the guest has to RESOLVE the name before it can request the file, and
+ * on this machine DNS is itself a fetch (DoH). Answering only the file
+ * request leaves the guest unable to resolve, so nothing is ever fetched
+ * at all (which is exactly how the first version of this test failed).
+ */
+function stubGitHub(served: string[]): void {
+  globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
+    const url = String(input);
+
+    // 1. DNS-over-HTTPS: answer with GITHUB_IP for whatever was asked.
+    if (url.includes('/dns-query?dns=')) {
+      const b64 = url.split('dns=')[1] ?? '';
+      const query = base64urlDecode(b64);
+      const question = parseQuestion(query);
+      if (question === null) {
+        return Promise.resolve(new Response('bad query', { status: 400 }));
+      }
+      const answer = buildLocalAnswer(query, question.end, GITHUB_IP);
+      // Copy into a plain ArrayBuffer — BodyInit won't take a Uint8Array view.
+      const body = new Uint8Array(answer).buffer;
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'application/dns-message' },
+        }),
+      );
+    }
+
+    // 2. The file itself, served from the local tools checkout.
+    const file = url.split('/').pop() ?? '';
+    const path = resolve(TOOLS_DIR, file);
+    if (!url.includes('raw.githubusercontent.com') || !existsSync(path)) {
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }
+    served.push(file);
+    return Promise.resolve(
+      new Response(readFileSync(path), {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    );
+  }) as typeof fetch;
+}
+
+/** RFC 4648 §5, the inverse of dns.ts's base64url. */
+function base64urlDecode(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(Buffer.from(b64, 'base64'));
+}
+
+describe('Phase 15 — the machine downloads, builds, and runs its own ping', () => {
   it(
-    'pastes ping.c through the shell, compiles it in-VM, installs it, pings 10.0.2.2',
+    'urlgets install-ping.sh from GitHub, builds ping.c in-VM, and pings elk by name',
     async () => {
       if (!existsSync(HD32_PATH)) {
         console.warn(
@@ -49,12 +122,20 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
         );
         return;
       }
+      if (!existsSync(resolve(TOOLS_DIR, 'install-ping.sh'))) {
+        console.warn(
+          `[skip] ${TOOLS_DIR} not checked out. ` +
+            `git clone https://github.com/jonathan-annett/8086-tab-tools`,
+        );
+        return;
+      }
+
+      const served: string[] = [];
+      stubGitHub(served);
 
       const raw = readFileSync(HD32_PATH);
       const imageBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-      const script = buildPingInstallerScript(readFileSync(PING_C_PATH, 'ascii'));
 
-      // ---- boot the browser's own host (auto-patch, LAN, gateway) ----
       const pendingTx: Uint8Array[] = [];
       let transcript = '';
       const host = new WorkerHost({
@@ -66,41 +147,26 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
       host.handleMessage({ type: 'boot', config: { imageBytes } });
       await host.whenIdle();
 
-      // ---- the browser's autoexec runner, wired to the same rx path ----
       const encoder = new TextEncoder();
       const decoder = new TextDecoder();
       const runner = new AutoexecRunner({
-        script,
+        script: buildPingInstallerScript(),
         send: (text: string) => {
           host.handleMessage({ type: 'rx', bytes: encoder.encode(text) });
         },
-        // Instant mode throughout (the installer types nothing
-        // clackety), so the scheduler is only a safety net.
         schedule: (_ms: number, fn: () => void) => { fn(); },
         typeDelayMs: () => 0,
       });
 
-      /**
-       * The guest ECHOES every pasted line, so the script's own text —
-       * including strings like "BUILD FAILED" — is in the transcript
-       * long before anything runs. Assertions about what the installer
-       * *did* must therefore look only after the run began. (The first
-       * draft of this test asserted on the whole transcript and
-       * "failed" on the echo of its own error message.)
-       */
+      // The guest's echo puts the script's own text in the transcript, so
+      // assert on what happened AFTER the installer started running.
       const runOutput = (): string => {
-        const at = transcript.lastIndexOf('sh /tmp/getping.sh');
+        const at = transcript.lastIndexOf('sh /tmp/ip.sh');
         return at < 0 ? '' : transcript.slice(at);
       };
-
-      // Run to the END of the script — including `net start ne0`. The
-      // first version of this test stopped at the demo ping and so
-      // never saw the machine run out of RAM bringing the network up
-      // afterwards (field, 2026-07-14). A boot script is only "working"
-      // if its LAST line works.
       const done = (): boolean =>
-        /ktcp: ip |not enough memory|Out of space/.test(runOutput()) ||
-        /BUILD FAILED/.test(runOutput());
+        /\d+ packets transmitted, \d+ received/.test(runOutput()) ||
+        /BUILD FAILED|download failed/.test(runOutput());
 
       for (let i = 0; i < MAX_SLICES && !done(); i++) {
         const r = host.runUntil(SLICE);
@@ -108,7 +174,15 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
         while (pendingTx.length > 0) {
           const chunk = decoder.decode(pendingTx.shift(), { stream: true });
           transcript += chunk;
+          // The fetch settles between run slices — the same batch-boundary
+          // rule every fetch-backed pseudo-host lives by.
           if (runner.active) runner.feed(chunk);
+        }
+        // Let the DoH / gateway promises settle.
+        await new Promise((r2) => setTimeout(r2, 0));
+        if (VERBOSE && i % 4000 === 0 && i > 0) {
+          console.log(`[slice ${i}] served=${JSON.stringify(served)} tail: ` +
+            JSON.stringify(transcript.slice(-90)));
         }
       }
 
@@ -116,32 +190,29 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
         console.log('--- installer transcript tail ---\n' + transcript.slice(-3000));
       }
 
-      // ---- the paste survived: no heap death, no shell soup ----
-      // (These CAN be asserted over the whole transcript: neither
-      // string appears anywhere in the script's own text.)
-      expect(transcript).not.toContain('OUT OF HEAP SPACE');
-      expect(transcript).not.toContain('Syntax error');
-
-      // ---- the guest built and installed ping ITSELF ----
       const output = runOutput();
+
+      // ---- the machine really did go to GitHub, twice, in order ----
+      expect(served).toEqual(['install-ping.sh', 'ping.c']);
+
+      // ---- ...and built the thing it downloaded ----
+      expect(output).not.toContain('download failed');
       expect(output).not.toContain('BUILD FAILED');
-      expect(output).toContain('ping: building it with the in-VM c86 toolchain');
+      expect(output).toContain('ping: fetching ping.c from github');
       expect(output).toContain('ping: installed /bin/ping');
 
-      // ---- and it pinged the gateway, which really answered ----
+      // ---- ...and pinged the gateway BY NAME with it ----
+      // `elk` resolves from the table compiled into ping — no DNS, which
+      // is unavailable anyway with ktcp stopped.
       expect(output).toMatch(/bytes from 10\.0\.2\.2/);
       expect(output).toContain('3 packets transmitted, 3 received');
       expect(host.gateway?.echoRepliesSent).toBeGreaterThanOrEqual(3);
 
-      // ---- the LAST line of the script must work too ----
-      // ktcp comes up, and — the part that broke in the field — the
-      // machine still has RAM to spare afterwards. The paste bloats the
-      // login shell's heap (ELKS sh never shrinks it) and every fork
-      // copies it, so `net start`'s own shell died on SBRK 1028 FAIL
-      // and the daemons never started. `exec sh` drops that image.
-      expect(output).toContain('ktcp: ip 10.0.2.');
-      expect(output).not.toContain('OUT OF HEAP SPACE');
-      expect(output).not.toContain('Out of space');
+      // ---- and the shell never ran out of memory doing it ----
+      // (The paste-based installer fattened the login shell so badly that
+      // `net start`'s own shell couldn't allocate a kilobyte. Nothing
+      // large goes through the tty any more.)
+      expect(transcript).not.toContain('OUT OF HEAP SPACE');
     },
     TEST_TIMEOUT_MS,
   );

@@ -1,115 +1,113 @@
 /**
- * Ping-installer script assembly (Phase 15 M3 follow-on).
+ * The ping-installer boot script (Phase 15 M3 follow-on).
  *
- * These pin the two constraints the field log taught us
- * (`ping-paste-log.txt`, 2026-07-14): ELKS `sh` buffers heredoc bodies
- * in a heap that blew up at ~6 KB, so the installer must NEVER nest
- * heredocs and must chunk the C source. A regression here is a boot
- * script that turns to soup on a real machine — cheap to assert,
- * expensive to discover.
+ * The script's job is to be SMALL. Its predecessor typed 722 lines of
+ * chunked heredoc into the guest and kept losing to the ELKS shell's
+ * heap; this one fetches. So what's worth pinning is exactly that: it
+ * stays tiny, it never pastes source, and the ordering constraints that
+ * make it work at all (network up before the fetch, network down before
+ * the ping) hold.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { CHUNK_LINES, buildPingInstallerScript } from '../../web/ping-installer.js';
-
-const PING_C = readFileSync(resolve('web/guest/ping.c'), 'ascii');
-
-/**
- * Split the script into its heredoc bodies — the lines the SHELL must
- * buffer. `@here`/`@end` are autoexec directives consumed by the
- * runner (web/autoexec.ts), never sent to the guest, so they are not
- * part of any body.
- */
-function heredocBodies(script: string): string[][] {
-  const bodies: string[][] = [];
-  const lines = script.split('\n');
-  let current: string[] | null = null;
-  for (const line of lines) {
-    if (line === '@here' || line === '@end') continue; // runner directives
-    const open = /<< '([A-Z_0-9]+)'$/.exec(line);
-    if (open !== null) {
-      if (current !== null) {
-        throw new Error(`nested heredoc opened while one was still open: ${line}`);
-      }
-      current = [];
-      continue;
-    }
-    if (current === null) continue;
-    if (/^EOF_[A-Z_]+$/.test(line.trim())) {
-      bodies.push(current);
-      current = null;
-      continue;
-    }
-    current.push(line);
-  }
-  expect(current).toBeNull(); // every heredoc closed
-  return bodies;
-}
+import {
+  INSTALL_PING_URL,
+  MAX_GUEST_LINE,
+  PING_REV,
+  TOOLS_REPO_RAW,
+  buildPingInstallerScript,
+} from '../../web/ping-installer.js';
 
 describe('buildPingInstallerScript', () => {
-  const script = buildPingInstallerScript(PING_C);
+  const script = buildPingInstallerScript();
+  const lines = script.split('\n').filter((l) => l.length > 0);
 
-  it('never nests heredocs (the OUT OF HEAP SPACE cascade)', () => {
-    // heredocBodies throws on a nested open — the original installer
-    // wrapped a 14 KB ping.c inside the getping.sh heredoc, and ELKS
-    // sh died trying to buffer the lot: (7)SBRK 8226 FAIL.
-    expect(() => heredocBodies(script)).not.toThrow();
+  it('is a handful of lines and pastes no source at all', () => {
+    // The whole point. If a heredoc ever reappears here, the shell-heap
+    // war is back on.
+    expect(lines.length).toBeLessThan(12);
+    expect(script).not.toContain('<<'); // no heredoc, ever again
+    expect(script).not.toContain('@here');
+    expect(script).not.toContain('#include'); // no C through the tty
+    expect(script.length).toBeLessThan(500); // vs 20,806 bytes before
   });
 
-  it('keeps every heredoc body well under the shell heredoc heap', () => {
-    // Bytes are what the shell buffers, and the observed failure came
-    // ~6 KB in. 2 KB is a 3x margin on a machine that may already be
-    // carrying other work.
-    const bodies = heredocBodies(script);
-    for (const body of bodies) {
-      expect(body.join('\n').length).toBeLessThan(2048);
+  it('fetches the installer from the public tools repo over the :443 bridge', () => {
+    // Assembled from the variable, so match on the pieces, not the whole.
+    expect(script).toContain(TOOLS_REPO_RAW);
+    expect(script).toContain('urlget $U/install-ping.sh');
+    expect(INSTALL_PING_URL.startsWith(TOOLS_REPO_RAW)).toBe(true);
+    // :443 is what tells the gateway to fetch over HTTPS host-side.
+    expect(INSTALL_PING_URL).toContain('raw.githubusercontent.com:443');
+    // raw.githubusercontent.com serves ACAO:*, which is what puts it on
+    // the reachable side of the browser's CORS wall.
+    expect(INSTALL_PING_URL).toContain('/8086-tab-tools/');
+  });
+
+  it('brings the network UP before fetching, and pings only after', () => {
+    // Ordering is load-bearing: urlget needs ktcp running, and ping needs
+    // the NIC to itself (a running ktcp drains every inbound frame, so the
+    // replies never reach it). The installer script drops the network
+    // itself before compiling — it needs that memory.
+    const start = lines.indexOf('net start ne0');
+    const fetch = lines.findIndex((l) => l.startsWith('urlget '));
+    const run = lines.findIndex((l) => l.startsWith('sh /tmp/'));
+    const ping = lines.findIndex((l) => l.startsWith('ping '));
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(start).toBeLessThan(fetch); // network up, then download
+    expect(fetch).toBeLessThan(run); // download, then run
+    expect(run).toBeLessThan(ping); // install, then ping
+    expect(lines.lastIndexOf('net start ne0')).toBeGreaterThan(ping); // back up after
+  });
+
+  it('starts ktcp WITHOUT telnetd/ftpd — the machine cannot afford them', () => {
+    // 640K machine, ~472K free, and c86 wants most of it. With all three
+    // daemons resident the shell could not even fork. Emptying `netstart`
+    // in /etc/net.cfg (which /bin/net sources — last assignment wins)
+    // keeps ktcp and drops the other two.
+    const cfg = lines.findIndex((l) => l.includes('netstart') && l.includes('net.cfg'));
+    const start = lines.indexOf('net start ne0');
+    expect(cfg).toBeGreaterThanOrEqual(0);
+    expect(cfg).toBeLessThan(start); // must land BEFORE the stack comes up
+  });
+
+  it('compiles in turbo and pings at authentic speed', () => {
+    const turbo = lines.indexOf('@turbo');
+    const authentic = lines.indexOf('@authentic');
+    const ping = lines.findIndex((l) => l.startsWith('ping '));
+    expect(turbo).toBeGreaterThanOrEqual(0);
+    expect(turbo).toBeLessThan(authentic);
+    // The demo ping's RTTs should be the machine's real ones, not turbo's.
+    expect(authentic).toBeLessThan(ping);
+  });
+
+  it('pings by name — the .tabs namespace, not a memorised octet', () => {
+    expect(script).toContain('ping elk'); // the gateway, ELK-S
+  });
+
+  it('tracks the revision the tools repo ships', () => {
+    expect(PING_REV).toBeGreaterThanOrEqual(4);
+  });
+
+  it('never types a line the ELKS tty would silently truncate', () => {
+    // THE bug of 2026-07-14. A 129-char `urlget ... > /tmp/install-ping.sh`
+    // lost its last two characters at the tty: the download succeeded, the
+    // file landed as `/tmp/install-ping.` and the next line died with
+    // "Can't open /tmp/install-ping.sh". No error, no warning — the tail
+    // just evaporates. Every line the field proved works is under this
+    // bound; only the 129 failed.
+    for (const line of script.split('\n')) {
+      expect(line.length, `line would be truncated: ${line}`)
+        .toBeLessThanOrEqual(MAX_GUEST_LINE);
     }
-    // The C source chunks additionally honour the line cap (the
-    // installer script itself is one small body, longer in lines but
-    // trivial in bytes).
-    for (const body of bodies.slice(1)) {
-      expect(body.length).toBeLessThanOrEqual(CHUNK_LINES);
-    }
   });
 
-  it('writes the C source exactly once, in order, first > then >>', () => {
-    const opens = script.split('\n').filter((l) => l.includes('/tmp/ping.c <<'));
-    expect(opens.length).toBeGreaterThan(1); // chunked, by construction
-    expect(opens[0]).toContain('cat > /tmp/ping.c');
-    for (const open of opens.slice(1)) {
-      expect(open).toContain('cat >> /tmp/ping.c'); // append, never truncate
-    }
-
-    // The reassembled heredoc bodies for ping.c must equal the source.
-    const bodies = heredocBodies(script);
-    const cBodies = bodies.slice(1); // body 0 is getping.sh
-    const rebuilt = cBodies.flat().join('\n');
-    expect(rebuilt).toBe(PING_C.replace(/\n+$/, ''));
-  });
-
-  it('the installer logic is idempotent and drive-safe', () => {
-    const logic = heredocBodies(script)[0]?.join('\n') ?? '';
-    expect(logic).toContain('if test -f /bin/ping'); // already installed → exit
-    expect(logic).toContain('if test -f /mnt/ping'); // on the drive → copy in
-    // The drive is only written when the mount actually succeeded —
-    // writing to /mnt unmounted silently lands on the root filesystem.
-    expect(logic).toContain('drive=yes');
-    expect(logic).toContain('if test "$drive" = yes');
-  });
-
-  it('runs before net start (ping needs the NIC to itself)', () => {
-    const lines = script.split('\n');
-    const install = lines.indexOf('sh /tmp/getping.sh');
-    const net = lines.indexOf('net start ne0');
-    expect(install).toBeGreaterThan(0);
-    expect(net).toBeGreaterThan(install);
-  });
-
-  it('rejects a source that would collide with a heredoc terminator', () => {
-    expect(() => buildPingInstallerScript('int main(void)\nEOF_PING_C\n')).toThrow(
-      /collides with a heredoc terminator/,
-    );
+  it('puts the long URL in a shell variable rather than inline', () => {
+    // The fix, and the reason the bound above holds: one cheap assignment
+    // removes the cliff entirely.
+    expect(script).toContain(`U=${TOOLS_REPO_RAW}`);
+    expect(script).toContain('urlget $U/install-ping.sh');
+    expect(script).not.toContain(`urlget ${INSTALL_PING_URL}`); // never inline
   });
 });

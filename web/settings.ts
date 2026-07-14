@@ -24,16 +24,11 @@
  * take effect on next reload (don't try to hot-swap the running disk).
  */
 
-// `?raw` import types for the ping installer's embedded C source.
-// File-local so every tsconfig that sweeps this file up sees them.
-/// <reference types="vite/client" />
-
 import {
   THEME_PRESET_NAMES,
   isThemePresetName,
   type ThemePresetName,
 } from './themes.js';
-import pingSource from './guest/ping.c?raw';
 import { buildPingInstallerScript } from './ping-installer.js';
 
 /**
@@ -167,23 +162,27 @@ export const SEED_DEMO_SCRIPT: BootScript = {
 
 /**
  * The ping installer (Phase 15 M3 follow-on, Jonathan's design): the
- * autoexec layer only pastes and runs — ALL the logic lives in the
- * guest shell, which can actually branch. The assembly (and the two
- * ELKS-heap constraints that shape it) lives in `ping-installer.ts`;
- * the C is `guest/ping.c`, the same file the Node harness compiles
- * in-VM. Sits in the picker unactivated — for discovery.
+ * machine downloads its own tools. Three commands — join the LAN,
+ * fetch a shell script from the public 8086-tab-tools repo through the
+ * M3d HTTP gateway, run it — and the script fetches `ping.c` and builds
+ * it with the compiler on the image. Replaced 722 lines of chunked
+ * heredoc paste that kept losing to the ELKS shell's heap; see
+ * `ping-installer.ts` for that whole sorry history. Sits in the picker
+ * unactivated — for discovery.
  */
 export const SEED_PING_SCRIPT: BootScript = {
   id: 'seed-ping-installer',
-  name: 'ping installer (builds it in-VM if missing)',
-  text: buildPingInstallerScript(pingSource),
-  // BUMP THIS whenever the script text changes (including ping.c), or
-  // existing profiles keep running the copy they stored.
+  name: 'ping installer (fetches + builds it in-VM)',
+  text: buildPingInstallerScript(),
+  // BUMP THIS whenever the script text changes, or existing profiles
+  // keep running the copy they stored.
   //   rev 1: nested heredocs — died on the shell's heredoc heap
   //   rev 2: chunked source + `exec sh` to drop the fattened shell
   //   rev 3: ping.c gains /etc/hosts lookup + an honest ktcp diagnostic
   //   rev 4: ping.c gains the .tabs name table (ping cat / ping elk)
-  seedRev: 4,
+  //   rev 5: FETCH the source instead of pasting it — no more tty paste
+  //   rev 6: start ktcp only (telnetd+ftpd starved the compiler of RAM)
+  seedRev: 6,
 };
 
 export const DEFAULT_SETTINGS: Settings = {

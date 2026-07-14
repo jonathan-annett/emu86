@@ -1,184 +1,126 @@
 /**
  * The ping-installer boot script (Phase 15 M3 follow-on).
  *
- * Jonathan's design: the autoexec layer only pastes and runs — ALL the
- * logic lives in the guest shell, which can actually branch. What this
- * module does is assemble the paste, and the assembly is where the
- * real constraints live.
+ * **The machine downloads its own tools.** The whole installer is now
+ * three guest commands: bring the LAN up, fetch a shell script from
+ * GitHub through the M3d HTTP gateway, run it. The script fetches
+ * `ping.c` from the same repo, builds it with the C compiler on the
+ * image, and installs it — a 1986 machine pulling source off the modern
+ * internet and compiling it.
  *
- * # Two hard-won constraints (field, 2026-07-14 — `ping-paste-log.txt`)
+ * # Why this replaced 722 lines of paste (field, 2026-07-14)
  *
- * 1. **Never nest heredocs.** The first version wrapped the whole
- *    installer — including a 14 KB `ping.c` — inside one
- *    `cat > getping.sh << 'EOS'`. ELKS `sh` buffers a heredoc body in
- *    its heap, so it tried to hold the entire thing at once and died:
- *    `(7)SBRK 8226 FAIL, OUT OF HEAP SPACE`. The shell then fell out of
- *    heredoc mode and interpreted the C source as commands.
- * 2. **Chunk the source.** Even un-nested, one 14 KB heredoc would hit
- *    the same wall (the failure came ~6 KB in). The source is written
- *    in {@link CHUNK_LINES}-line appends, each its own small heredoc —
- *    the shell's buffer is freed between them.
+ * The first design typed all of `ping.c` into the guest through the tty
+ * as chunked heredocs, and it was a losing battle against ELKS `sh`:
  *
- * Flow control is the `> ` continuation prompt (see web/autoexec.ts):
- * every heredoc body line waits for it, so the guest tty paces the
- * paste and it cannot outrun the kernel's raw tty queue.
+ *   - heredoc bodies are buffered in the shell's heap, which blew up at
+ *     ~6 KB (`SBRK 8226 FAIL, OUT OF HEAP SPACE`) — so the source had to
+ *     be split across 28 separate heredocs;
+ *   - the shell grows its heap to parse everything typed at it and never
+ *     returns it, so after the paste every `fork` copied a fat data
+ *     segment and `net start` couldn't spare a kilobyte for an `echo`;
+ *   - and each time `ping.c` grew (the `.tabs` name table added 50%),
+ *     the paste crept back toward the wall.
  *
- * The source of truth for the C is `web/guest/ping.c` — the same file
- * the Node probe harness compiles in-VM (tests/probe/surveys/elks-ping.ts).
- * One file, two consumers, no drift.
+ * Jonathan's call: `urlget … | sh`. The paste problem doesn't get
+ * managed, it gets *deleted* — nothing large ever goes through the tty
+ * again, and shipping a fix to ping means pushing to the tools repo,
+ * with no emu86 release at all.
+ *
+ * Requires the network (it is, after all, a network tool). The guest
+ * fetches over plain HTTP/1.0; the `:443` suffix is what tells the
+ * gateway to fetch over HTTPS on the host side — GitHub serves
+ * `access-control-allow-origin: *`, which is what puts it on the
+ * reachable side of the browser's CORS wall.
  */
 
 /**
- * Source lines per heredoc chunk. ~20 lines ≈ 1 KB — comfortably under
- * the ~6 KB at which ELKS sh's heredoc buffer blew up, with room for a
- * machine already loaded with other work.
+ * Public repo the machine installs from —
+ * https://github.com/jonathan-annett/8086-tab-tools
+ *
+ * The short `/main/` form, not `/refs/heads/main/`: both work on
+ * raw.githubusercontent.com, and eleven characters matter here (see
+ * {@link MAX_GUEST_LINE}).
  */
-export const CHUNK_LINES = 20;
+export const TOOLS_REPO_RAW =
+  'http://raw.githubusercontent.com:443/jonathan-annett/8086-tab-tools/main';
 
-/** Heredoc terminators chosen not to collide with any line of C or shell. */
-const SH_EOF = 'EOF_GETPING_SH';
-const C_EOF = 'EOF_PING_C';
+/** The installer script fetched and run in the guest. */
+export const INSTALL_PING_URL = `${TOOLS_REPO_RAW}/install-ping.sh`;
 
 /**
- * Revision of `guest/ping.c`. **Bump it whenever that file changes**, or
- * a drive holding an older binary will keep restoring it forever — the
- * installer stops asking questions the moment /bin/ping exists.
+ * **A typed command line longer than this is silently truncated.**
  *
- * rev 3: /etc/hosts name lookup, and an honest ARP-failure message
- *        (a running ktcp eats the replies — the old text blamed the
- *        open(), which actually succeeds).
- * rev 4: the `.tabs` namespace — `ping cat`, `ping cat.tabs`, `ping elk`.
- *        The table is compiled in because ping cannot use DNS.
+ * ELKS cooks tty input in a fixed buffer, and the tail of an over-long
+ * line simply vanishes — no error, no warning. It cost a full debugging
+ * cycle (2026-07-14): a 129-character `urlget … > /tmp/install-ping.sh`
+ * lost its last two characters, so the download landed in a file called
+ * `/tmp/install-ping.` and the next line failed with "Can't open
+ * /tmp/install-ping.sh". The fetch had worked perfectly.
+ *
+ * Every line the field has *proved* works is under this: Jonathan's
+ * `urlget … | sh` (111), `… | md5sum` (115), the old heredoc's monster
+ * c86 invocation (117). Only the 129 failed. So: keep typed lines
+ * short — put long things in a shell variable, which costs one cheap
+ * line and removes the cliff entirely. A test enforces this.
+ */
+export const MAX_GUEST_LINE = 110;
+
+/**
+ * Revision of the ping the tools repo currently ships. Bump when
+ * `ping.c` changes there, so a drive holding an older binary rebuilds
+ * instead of restoring it forever (`install-ping.sh` checks for a
+ * `pingrev<N>` marker file — the revision is in the *name*, because
+ * ELKS sh has no `$(...)` to compare a version with).
  */
 export const PING_REV = 4;
-const REV_MARKER = `pingrev${PING_REV}`;
 
 /**
- * The installer proper — a normal shell script, idempotent by design:
+ * Build the boot script. `@turbo` for the fetch and the compile (a c86
+ * build at 4.77 MHz is a long minute of nothing), `@authentic` for the
+ * demo ping, so its RTTs are the machine's honest ones.
  *
- *   /bin/ping exists        → nothing to do
- *   ping found on /dev/hdb  → copy it in (a second boot costs no compile)
- *   otherwise               → build /tmp/ping.c with the on-disk c86
- *                             toolchain, install it, and stash a copy on
- *                             the drive when one is mounted
- *
- * The drive is only written when the mount actually succeeded — writing
- * to /mnt with nothing mounted silently lands on the root filesystem
- * (found reading the field log; the first version had that bug).
+ * The `net stop` before pinging is not optional: ping opens the NIC
+ * directly and ktcp drains every inbound frame, so a running stack eats
+ * the replies. It goes back up afterwards.
  */
-const INSTALLER_SH: readonly string[] = [
-  '# emu86 ping installer -- idempotent, safe to run at every boot.',
-  '# ping drives the NIC directly, so it needs the device to itself:',
-  '# run it before "net start", or "net stop" first.',
-  'if test -f /bin/ping',
-  'then',
-  'echo "ping: already installed"',
-  'exit 0',
-  'fi',
-  'drive=no',
-  'if mount /dev/hdb /mnt 2>/dev/null',
-  'then',
-  'drive=yes',
-  'fi',
-  // The rev marker is how a saved drive learns its binary is stale. The
-  // filename carries the revision (`pingrev3`), so the check is a plain
-  // `test -f` — ELKS sh has no `$(...)`, and this needs no grep either.
-  // Without it, a drive holding an old ping would keep serving it
-  // forever: the installer sees /bin/ping appear and stops asking.
-  `if test -f /mnt/${REV_MARKER}`,
-  'then',
-  'echo "ping: restoring from /dev/hdb"',
-  'cp /mnt/ping /bin/ping',
-  'umount /mnt',
-  'exit 0',
-  'fi',
-  'if test -f /mnt/ping',
-  'then',
-  'echo "ping: the copy on /dev/hdb is out of date -- rebuilding"',
-  'fi',
-  'echo "ping: building it with the in-VM c86 toolchain, please wait..."',
-  'cd /tmp',
-  'cpp -0 -I/usr/include -I/usr/include/c86 ping.c -o ping.i',
-  'c86 -g -O -bas86 -separate=yes -warn=4 -lang=c99 -align=yes -stackopt=minimum -peep=all -stackcheck=no ping.i ping.as',
-  'as -0 -j ping.as -o ping.o',
-  'ld -0 -i -L/usr/lib -o ping ping.o -lc86',
-  'if test -f /tmp/ping',
-  'then',
-  'cp /tmp/ping /bin/ping',
-  'echo "ping: installed /bin/ping"',
-  'if test "$drive" = yes',
-  'then',
-  'cp /tmp/ping /mnt/ping',
-  `echo ${PING_REV} > /mnt/${REV_MARKER}`,
-  'sync',
-  'echo "ping: copied to /dev/hdb -- press Save to keep it for good"',
-  'fi',
-  'else',
-  'echo "ping: BUILD FAILED -- transcript above has the reason"',
-  'fi',
-  'if test "$drive" = yes',
-  'then',
-  'umount /mnt',
-  'fi',
-];
-
-/**
- * Assemble the boot script that installs ping. `pingSource` is the
- * contents of `web/guest/ping.c`.
- */
-export function buildPingInstallerScript(pingSource: string): string {
-  const source = pingSource.replace(/\n+$/, '').split('\n');
-  for (const line of source) {
-    if (line === C_EOF || line === SH_EOF) {
-      throw new Error(`ping-installer: source line collides with a heredoc terminator: ${line}`);
-    }
-  }
-
-  const out: string[] = [
+export function buildPingInstallerScript(): string {
+  const lines = [
     'root',
-    // Turbo for the paste AND the build — the paste is hundreds of
-    // prompt round-trips, and at 4.77 MHz that is a slow minute of
-    // nothing much. Back to authentic before the demo ping, so its
-    // RTTs are the machine's honest ones.
+    // Bring up ktcp, and NOTHING else. `/etc/net.cfg` ends with
+    // `netstart="telnetd ftpd"`, and `/bin/net` sources the file — so a
+    // later assignment wins. Those two daemons are pure overhead here
+    // (we only ever need to download), and on a 640K machine with ~472K
+    // free they are the difference between compiling and not: with all
+    // three resident the shell could not even FORK ("net: Cannot fork"),
+    // let alone run c86. Field, 2026-07-14.
+    'echo netstart= >> /etc/net.cfg',
+    'net start ne0',
     '@turbo',
-    'echo "installing ping -- pasting sources, then building in-VM"',
-    // 1. The installer script (small: no nested heredoc, ever).
-    `cat > /tmp/getping.sh << '${SH_EOF}'`,
-    '@here',
-    ...INSTALLER_SH,
-    SH_EOF,
-    '@end',
-  ];
-
-  // 2. The C source, in chunks small enough for the shell's heredoc heap.
-  for (let i = 0; i < source.length; i += CHUNK_LINES) {
-    out.push(
-      `cat ${i === 0 ? '>' : '>>'} /tmp/ping.c << '${C_EOF}'`,
-      '@here',
-      ...source.slice(i, i + CHUNK_LINES),
-      C_EOF,
-      '@end',
-    );
-  }
-
-  // 3. Drop the shell that swallowed the paste.
-  //
-  // ELKS `sh` grows its heap to parse everything typed at it and never
-  // gives it back, so after ~450 lines the login shell's data segment
-  // is fat — and every later fork has to COPY it. Field symptom
-  // (2026-07-14): the build and the ping worked, then `net start`
-  // brought ktcp up but `/bin/net`'s own shell died on `SBRK 1028
-  // FAIL` — it could not spare a kilobyte for an `echo`, and the
-  // telnetd/ftpd daemons never started. `exec sh` replaces the process
-  // image with a clean one; the bloat goes with the old image.
-  out.push(
-    'exec sh',
-    // 4. Run the installer, show it working, then join the LAN.
-    'sh /tmp/getping.sh',
+    'echo "installing ping -- fetching the installer from github"',
+    // The URL goes in a VARIABLE, not inline: typed inline this is a
+    // 129-character line, and ELKS silently truncates the tail (see
+    // MAX_GUEST_LINE — it ate the `sh` off the redirect target and cost
+    // a debugging cycle). Split this way, no line is even close.
+    `U=${TOOLS_REPO_RAW}`,
+    'urlget $U/install-ping.sh > /tmp/ip.sh',
+    // The installer takes the network down itself before compiling (it
+    // needs the memory, and ping needs the NIC to itself anyway).
+    'sh /tmp/ip.sh',
     '@authentic',
-    'ping 10.0.2.2 3',
+    'ping elk 3',
     'net start ne0',
     '',
-  );
-  return out.join('\n');
+  ];
+
+  // Belt and braces: never emit a line the tty would quietly eat.
+  for (const line of lines) {
+    if (line.length > MAX_GUEST_LINE) {
+      throw new Error(
+        `ping-installer: line of ${line.length} chars exceeds the ELKS tty ` +
+          `limit and would be silently truncated: ${line}`,
+      );
+    }
+  }
+  return lines.join('\n');
 }
