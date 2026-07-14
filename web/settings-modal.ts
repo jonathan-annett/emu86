@@ -40,6 +40,7 @@ import {
   type ThemePresetName,
 } from './themes.js';
 import type { ImageLibrary, StoredImageMeta } from './image-library.js';
+import { DRIVE_PRESETS } from './image-library.js';
 import {
   listReleases,
   downloadAsset,
@@ -342,20 +343,9 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     const createRow = document.createElement('div');
     createRow.className = 'emu86-upload-row';
     const sizeSelect = document.createElement('select');
-    // Every preset is CHS-exact. 16/32 MB use the hd32 images' 16×63
-    // shape. The first is 8086 KiB — 311×4×13 — so the obvious command
-    // on an 8086 works: `mkfs /dev/hdb 8086`. (Field grumble,
-    // 2026-07-14: the old 8 MB preset was 8064K and rejected it.)
-    const PRESETS: Array<{
-      label: string;
-      cylinders: number;
-      heads: number;
-      sectorsPerTrack: number;
-    }> = [
-      { label: '8086 KB', cylinders: 311, heads: 4, sectorsPerTrack: 13 },
-      { label: '16 MB', cylinders: 32, heads: 16, sectorsPerTrack: 63 },
-      { label: '32 MB', cylinders: 63, heads: 16, sectorsPerTrack: 63 },
-    ];
+    // The shared table (image-library.ts) — the `?mkdrive` control
+    // endpoint offers exactly these shapes, so the two cannot drift.
+    const PRESETS = DRIVE_PRESETS;
     for (const [i, p] of PRESETS.entries()) {
       const opt = document.createElement('option');
       opt.value = String(i);

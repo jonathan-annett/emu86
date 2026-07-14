@@ -59,6 +59,7 @@ import {
 } from './wire.js';
 import { GATEWAY_MAC } from './gateway.js';
 import { DNS_MAC } from './dns.js';
+import { nameForOctet } from './tan-names.js';
 
 /**
  * Pseudo-hosts every tab runs at the same fixed MAC. Frames they
@@ -122,19 +123,34 @@ export interface TanIdentity {
   readonly hostOctet: number;
   readonly ip: Ipv4;
   readonly mac: Mac;
+  /** The tab's `.tabs` name (mouse/cat/dog) — null outside the range. */
+  readonly name: string | null;
   /** The bootopts line net.cfg reads: `LOCALIP=10.0.2.<octet>`. */
   readonly localipLine: string;
+  /**
+   * Bootopts line that tells the SHELL who it is (field ask,
+   * 2026-07-15: "no way for the shell to know its own hostname").
+   * Stock /etc/profile does `PS1="$HOSTNAME$PS1"`, so this also turns
+   * the prompt into `mouse# ` for free. Null when the octet has no
+   * .tabs name. Recorded caveat: a BARE `ktcp` (no explicit IP arg —
+   * /bin/net always passes one) resolves $HOSTNAME as its local
+   * address instead of falling back to its builtin default.
+   */
+  readonly hostnameLine: string | null;
 }
 
 export function tanIdentityFor(octet: number): TanIdentity {
   if (!Number.isInteger(octet) || octet < 1 || octet > 254) {
     throw new Error(`TAN: host octet must be 1..254 (got ${octet})`);
   }
+  const name = nameForOctet(octet);
   return {
     hostOctet: octet,
     ip: [10, 0, 2, octet],
     mac: [0x02, 0x65, 0x6d, 0x75, 0x38, octet],
+    name,
     localipLine: `LOCALIP=10.0.2.${octet}`,
+    hostnameLine: name !== null ? `HOSTNAME=${name}` : null,
   };
 }
 
@@ -211,6 +227,16 @@ export class TabAreaNetwork {
 
   get identity(): TanIdentity | null {
     return this.#identity;
+  }
+
+  /**
+   * Every octet known live on this channel (leases seen + our own),
+   * ascending — the `?peers` directory. Claims are never expired, so a
+   * closed tab lingers until its octet is re-leased; the census makes
+   * fresh joins accurate.
+   */
+  get memberOctets(): readonly number[] {
+    return [...this.#knownOctets].sort((a, b) => a - b);
   }
 
   /**

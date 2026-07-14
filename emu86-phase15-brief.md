@@ -462,3 +462,59 @@ Field: with the network up, `nslookup` then `ping cat` works. The
 per-frame, and ping can win. Record as racy-but-sometimes-working;
 `net stop` remains the reliable mode; the tcping idea stays the honest
 network-up answer (TAB_PINGS_TAB_REPORT §7).
+
+### E. The editor seam, settled (2026-07-15, in-session design with Jonathan)
+
+**One drive, one truth.** The editor edits the SAME `/dev/hdb` the
+guest builds on (ping.c's drive). No third BIOS slot, no separate
+/editor image, no `?file=` API — all three considered and retired
+tonight. (For the record: ELKS takes its hard-disk count straight from
+our INT 13h AH=08 answer, `HD_DRIVES=4`, so a third slot WAS purely
+emu86-side plumbing — it's retired because it's unnecessary, not
+because it's hard.)
+
+- **Enabling piece: a host-side MINIX-fs utility** (pure TS, no deps:
+  list/read/write files inside a MINIX image — the drive is mkfs'd
+  MINIX by the guest). Our image tooling currently speaks only FAT.
+- **Coherence = floppy-passing semantics, stated plainly:** the guest
+  owns the fs while mounted; the editor edits between sync/remounts;
+  remount refreshes the guest's view. The M2 Web Lock arbitrates
+  tab-vs-tab only; editor-vs-guest is this convention (the editor
+  embeds the emulator, so it can sequence itself).
+- Editor policy: skip binary files (content/extension sniff, its call).
+- Fallback recorded, not the design: file IO through the live guest
+  over ftp — zero new code but needs the network daemons' RAM.
+
+### F. Substrate API v1 (build now)
+
+1. **`HOSTNAME=<tabs-name>` stamped in bootopts** beside LOCALIP.
+   Stock `/etc/profile` does `PS1="$HOSTNAME$PS1"` — the prompt
+   becomes `mouse# ` for free, and `$HOSTNAME` answers the shell's
+   who-am-I with no network. Solo tabs (no TAN name) stay unstamped.
+   Caveats recorded: bare `ktcp` (no explicit IP arg) would resolve
+   $HOSTNAME instead of its builtin default — /bin/net always passes
+   the IP, so unaffected; prompt-suffix matchers must tolerate the
+   prefix (autoexec matches suffixes).
+2. **Control endpoint on the gateway, `http://10.0.2.2/`**, driven by
+   stock `urlget`: `?mkdrive=<KB>` creates a blank drive in the image
+   library + selects it as the secondary + replies with the reboot +
+   mkfs instructions (no-op with honest text if a drive exists);
+   `?whoami` → name + ip; `?peers` → live TAN members from the lease
+   directory (ping's table is static; this is who's actually on).
+   Responses are plain text into the guest's terminal. Reboot stays
+   manual; mkfs stays guest business.
+3. `?save` recorded, NOT built (Web-Lock interplay; the button works).
+
+### G. The system-level editor (scoped; the huxley bootstrap + diagnostic fallback)
+
+Jonathan's pick: **CodeJar** (antonmedv/codejar, MIT, single pure-TS
+file, no deps, highlighting delegated to a callback we simply omit at
+first). Rule-2 authorization: Jonathan, 2026-07-15, in-session;
+vendored into web/ with license header rather than an npm dep. A
+minimal drive-file editor panel in the emu86 web UI: list text files
+on the booted (or library) hdb via the MINIX utility (E), edit,
+write back under the floppy-passing convention. Purpose: proves the
+seam mechanism huxley will use (huxley may upgrade the widget to
+CodeMirror later) and gives the project a diagnostic file editor that
+needs no guest RAM. Build order: MINIX-fs module first (headless,
+unit-tested), UI second.

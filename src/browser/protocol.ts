@@ -134,12 +134,23 @@ export interface SnapshotSecondaryMessage {
   type: 'snapshot-secondary';
 }
 
+/**
+ * Reply to {@link ControlRequestMessage} (substrate API v1). `text` is
+ * shown verbatim in the guest's terminal by the control endpoint.
+ */
+export interface ControlResponseMessage {
+  type: 'control-response';
+  id: number;
+  text: string;
+}
+
 export type MainToWorkerMessage =
   | BootMessage
   | RxMessage
   | ResetMessage
   | SetSpeedMessage
-  | SnapshotSecondaryMessage;
+  | SnapshotSecondaryMessage
+  | ControlResponseMessage;
 
 // ============================================================
 // Worker → Main
@@ -215,6 +226,21 @@ export interface SecondarySnapshotMessage {
   dirtySectors: number;
 }
 
+/**
+ * Substrate API v1 (the guest ran `urlget http://10.0.2.2/?mkdrive=…`):
+ * the action needs main-thread state (image library + settings), so
+ * the worker asks and the answer returns as
+ * {@link ControlResponseMessage} with the same id. Queue-and-complete;
+ * the machine keeps running meanwhile (two postMessages, not a fetch —
+ * no run-loop stall involved).
+ */
+export interface ControlRequestMessage {
+  type: 'control-request';
+  id: number;
+  action: 'mkdrive';
+  kb: number;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -222,4 +248,5 @@ export type WorkerToMainMessage =
   | ErrorMessage
   | TanIdentityMessage
   | StatsMessage
-  | SecondarySnapshotMessage;
+  | SecondarySnapshotMessage
+  | ControlRequestMessage;

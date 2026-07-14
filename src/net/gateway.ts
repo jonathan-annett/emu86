@@ -100,6 +100,8 @@ export class LanGateway {
   readonly #pendingPings: PendingPing[] = [];
   /** Off-subnet TCP handler (Phase 15 M1 — the HTTP gateway terminator). */
   #tcpTerminator: ((srcIp: Ipv4, dstIp: Ipv4, tcpPayload: Uint8Array) => void) | null = null;
+  /** TCP addressed to the gateway ITSELF (substrate API v1 control). */
+  #localTcp: ((srcIp: Ipv4, dstIp: Ipv4, tcpPayload: Uint8Array) => void) | null = null;
   #ipId = 1;
 
   // Counters for tests/diagnostics.
@@ -108,6 +110,7 @@ export class LanGateway {
   echoRepliesSent = 0;
   echoRepliesReceived = 0;
   tcpForwarded = 0;
+  tcpLocalDelivered = 0;
   unreachablesSent = 0;
 
   constructor(opts: LanGatewayOptions = {}) {
@@ -149,6 +152,20 @@ export class LanGateway {
       throw new Error('LanGateway: already has a TCP terminator');
     }
     this.#tcpTerminator = handler;
+  }
+
+  /**
+   * Register the handler for TCP addressed to the gateway ITSELF
+   * (substrate API v1: `urlget http://10.0.2.2/?...`). Distinct from
+   * the off-subnet terminator on purpose — that one fetches the web,
+   * this one is the machine talking to its own substrate. Was
+   * silently dropped before. One handler per gateway.
+   */
+  registerLocalTcp(handler: (srcIp: Ipv4, dstIp: Ipv4, tcpPayload: Uint8Array) => void): void {
+    if (this.#localTcp !== null) {
+      throw new Error('LanGateway: already has a local TCP handler');
+    }
+    this.#localTcp = handler;
   }
 
   /**
@@ -262,6 +279,12 @@ export class LanGateway {
         const packet = buildIpv4(IPPROTO_ICMP, this.ip, ip.srcIp, icmp, this.#ipId++);
         this.#transmit(buildEthernetFrame(mac, this.mac, ETHERTYPE_IPV4, packet));
       }
+      return;
+    }
+    // TCP dialed at the gateway itself — the control endpoint.
+    if (ip.protocol === IPPROTO_TCP && this.#localTcp !== null) {
+      this.tcpLocalDelivered++;
+      this.#localTcp(ip.srcIp, ip.dstIp, ip.payload);
       return;
     }
     if (ip.protocol !== IPPROTO_ICMP) return;

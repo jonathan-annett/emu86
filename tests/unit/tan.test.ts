@@ -50,6 +50,18 @@ describe('tanIdentityFor', () => {
     expect(id.localipLine).toBe('LOCALIP=10.0.2.42');
   });
 
+  it('derives the HOSTNAME line — the shell knows who it is (API v1)', () => {
+    // Stock /etc/profile does PS1="$HOSTNAME$PS1", so this line also
+    // turns the prompt into `mouse# `. Field ask, 2026-07-15.
+    expect(tanIdentityFor(16).name).toBe('mouse');
+    expect(tanIdentityFor(16).hostnameLine).toBe('HOSTNAME=mouse');
+    expect(tanIdentityFor(17).hostnameLine).toBe('HOSTNAME=cat');
+    // Outside the lease range there is no name — and no stamp: a solo
+    // .15 machine keeps its bare `# ` prompt and unset $HOSTNAME.
+    expect(tanIdentityFor(15).name).toBeNull();
+    expect(tanIdentityFor(15).hostnameLine).toBeNull();
+  });
+
   it('rejects out-of-range octets', () => {
     expect(() => tanIdentityFor(0)).toThrow();
     expect(() => tanIdentityFor(255)).toThrow();

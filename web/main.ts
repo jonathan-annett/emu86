@@ -49,7 +49,7 @@ import {
   type Settings,
 } from './settings.js';
 import { THEMES } from './themes.js';
-import { ImageLibrary } from './image-library.js';
+import { DRIVE_PRESETS, ImageLibrary, presetKb } from './image-library.js';
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
@@ -229,6 +229,52 @@ async function init(): Promise<void> {
         .updateImageBytes(bootedSecondaryId, msg.bytes)
         .then(() => driveBanner.saved())
         .catch((err: unknown) => driveBanner.error(String(err)));
+      return;
+    }
+    if (msg.type === 'control-request') {
+      // Substrate API v1: the guest ran `urlget http://10.0.2.2/?...`
+      // and the action needs main-thread state (library + settings).
+      // Whatever text we answer with lands in the guest's terminal.
+      void (async (): Promise<string> => {
+        if (settings.secondaryImageSource !== null) {
+          return 'mkdrive: a drive is already attached -- detach it in settings first';
+        }
+        const preset = DRIVE_PRESETS.find((p) => presetKb(p) === msg.kb);
+        if (preset === undefined) {
+          const sizes = DRIVE_PRESETS.map((p) => presetKb(p)).join(', ');
+          return `mkdrive: size must be one of: ${sizes} (KB)`;
+        }
+        const id = await library.createBlankImage(
+          `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
+          {
+            cylinders: preset.cylinders,
+            heads: preset.heads,
+            sectorsPerTrack: preset.sectorsPerTrack,
+          },
+        );
+        // Select it as the secondary right away — same reasoning as the
+        // modal: creating a drive and not attaching it is never meant.
+        settings = { ...settings, secondaryImageSource: { kind: 'library', id } };
+        saveSettings(settings);
+        return [
+          `created a ${preset.label} drive and attached it as the secondary.`,
+          `reload this browser tab to boot with /dev/hdb, then: mkfs /dev/hdb ${msg.kb}`,
+          'guest writes persist only when you press Save (bottom banner).',
+        ].join('\n');
+      })().then(
+        (text) => {
+          const resp: MainToWorkerMessage = { type: 'control-response', id: msg.id, text };
+          worker.postMessage(resp);
+        },
+        (err: unknown) => {
+          const resp: MainToWorkerMessage = {
+            type: 'control-response',
+            id: msg.id,
+            text: `mkdrive failed: ${String(err)}`,
+          };
+          worker.postMessage(resp);
+        },
+      );
       return;
     }
     if (msg.type === 'tan-identity') {

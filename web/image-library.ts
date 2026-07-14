@@ -66,6 +66,32 @@ export interface StoredDiskGeometry {
  */
 export type StoredViabilityTag = 'likely-works' | 'untested' | 'known-incompatible';
 
+/**
+ * Blank-drive shapes (Phase 15 M2 modal; substrate API `?mkdrive`).
+ * Every one is CHS-exact. 16/32 MB use the hd32 images' 16×63 shape;
+ * the first is 8086 KiB — 311×4×13 — so the obvious command on an
+ * 8086 works: `mkfs /dev/hdb 8086`. (Field grumble, 2026-07-14: the
+ * old 8 MB preset was 8064K and rejected it.) ONE table for both
+ * consumers, so the modal and the control endpoint cannot drift.
+ */
+export interface DrivePreset {
+  readonly label: string;
+  readonly cylinders: number;
+  readonly heads: number;
+  readonly sectorsPerTrack: number;
+}
+
+export const DRIVE_PRESETS: readonly DrivePreset[] = [
+  { label: '8086 KB', cylinders: 311, heads: 4, sectorsPerTrack: 13 },
+  { label: '16 MB', cylinders: 32, heads: 16, sectorsPerTrack: 63 },
+  { label: '32 MB', cylinders: 63, heads: 16, sectorsPerTrack: 63 },
+];
+
+/** A preset's size in KB — which is also its `mkfs` block count. */
+export function presetKb(p: DrivePreset): number {
+  return (p.cylinders * p.heads * p.sectorsPerTrack * 512) / 1024;
+}
+
 export interface StoredImage {
   /** UUID; primary key. */
   id: string;

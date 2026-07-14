@@ -60,6 +60,7 @@ import { EthernetSwitch, type SwitchPort } from '../net/switch.js';
 import { LanGateway } from '../net/gateway.js';
 import { DnsAnswerCache, DnsHost, dohResolve } from '../net/dns.js';
 import { HttpGatewayHost, realGatewayFetch } from '../net/http.js';
+import { ControlHost } from '../net/control.js';
 import { TabAreaNetwork, type FrameChannel } from '../net/tan.js';
 import { addressForName, nameForOctet } from '../net/tan-names.js';
 import {
@@ -220,6 +221,10 @@ export class WorkerHost {
   #nicPort: SwitchPort | null = null;
   #gateway: LanGateway | null = null;
   #dns: DnsHost | null = null;
+  #control: ControlHost | null = null;
+  /** Substrate API v1: mkdrive answers pending from the main thread. */
+  readonly #controlPending = new Map<number, (text: string) => void>();
+  #controlNextId = 1;
   #httpGateway: HttpGatewayHost | null = null;
   /** Secondary disk write tracker (Phase 15 M2 — virtual drives). */
   #secondaryDisk: WriteTrackingDisk | null = null;
@@ -324,6 +329,15 @@ export class WorkerHost {
       this.#post({ type: 'secondary-snapshot', bytes, dirtySectors });
       return;
     }
+    if (msg.type === 'control-response') {
+      // Substrate API v1: the main thread's answer to a control-request.
+      const resolve = this.#controlPending.get(msg.id);
+      if (resolve !== undefined) {
+        this.#controlPending.delete(msg.id);
+        resolve(msg.text);
+      }
+      return;
+    }
     if (msg.type === 'reset') {
       this.#stopping = true;
       // The reset semantics for v0: ask the current run to bail; the next
@@ -344,6 +358,43 @@ export class WorkerHost {
    */
   async whenIdle(): Promise<void> {
     await this.#pending;
+  }
+
+  // ============================================================
+  // Substrate API v1 — the control endpoint's injected actions
+  // ============================================================
+
+  #whoamiText(): string {
+    const id = this.#tan?.identity ?? null;
+    if (id === null) return '10.0.2.15 (solo -- no tab area network)';
+    return `${id.name ?? `octet-${id.hostOctet}`} 10.0.2.${id.hostOctet}`;
+  }
+
+  #peersText(): string {
+    const tan = this.#tan;
+    if (tan === null) return 'no tab area network -- solo machine';
+    const self = tan.identity?.hostOctet ?? -1;
+    const lines = tan.memberOctets.map((o) => {
+      const name = nameForOctet(o) ?? `octet-${o}`;
+      return `${name} 10.0.2.${o}${o === self ? '  <- you' : ''}`;
+    });
+    return lines.length > 0 ? lines.join('\n') : 'nobody here yet';
+  }
+
+  #mkdriveRequest(kb: number): Promise<string> {
+    const id = this.#controlNextId++;
+    return new Promise<string>((resolve) => {
+      this.#controlPending.set(id, resolve);
+      this.#post({ type: 'control-request', id, action: 'mkdrive', kb });
+      // Headless hosts (tests, Node) may have nobody on the other end:
+      // answer honestly instead of leaving urlget to its own timeout.
+      setTimeout(() => {
+        if (this.#controlPending.has(id)) {
+          this.#controlPending.delete(id);
+          resolve('mkdrive: nobody answered on the main thread (headless host?)');
+        }
+      }, 10_000);
+    });
   }
 
   /**
@@ -626,7 +677,14 @@ export class WorkerHost {
         geometry: config.geometry,
         diskClass: config.diskClass,
       },
-      tanIdentity !== null ? [tanIdentity.localipLine] : [],
+      tanIdentity !== null
+        ? [
+            tanIdentity.localipLine,
+            // The shell's who-am-I (API v1): stock /etc/profile does
+            // PS1="$HOSTNAME$PS1", so the prompt becomes `mouse# ` too.
+            ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
+          ]
+        : [],
     );
 
     let secondary: ResolvedSlot | null = null;
@@ -687,6 +745,18 @@ export class WorkerHost {
     });
     httpGateway.attachTo(gateway);
     this.#httpGateway = httpGateway;
+
+    // Substrate API v1 (post-close addendum F): the machine talks to
+    // its own substrate with the tool it already has — urlget against
+    // the gateway's own address. whoami/peers answer here from TAN
+    // state; mkdrive round-trips to the main thread (library+settings).
+    const control = new ControlHost({
+      whoami: () => this.#whoamiText(),
+      peers: () => this.#peersText(),
+      mkdrive: (kb) => this.#mkdriveRequest(kb),
+    });
+    control.attachTo(gateway);
+    this.#control = control;
 
     // M3-tabs: bridge this LAN onto the Tab Area Network.
     if (this.#tan !== null) this.#tan.attach(network);
@@ -847,8 +917,9 @@ export class WorkerHost {
       this.#gateway = null;
     }
     // The HTTP gateway has no switch port of its own — it dies with
-    // the gateway it was plugged into.
+    // the gateway it was plugged into. Same for the control endpoint.
     this.#httpGateway = null;
+    this.#control = null;
     // Unsaved secondary writes die with the machine — save is explicit
     // by design (the settings UI says so before the user reloads).
     this.#secondaryDisk = null;
