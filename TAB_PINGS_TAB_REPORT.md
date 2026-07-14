@@ -183,3 +183,70 @@ The honest path to network-up pinging is a **TCP reachability probe**
 timeout proves it down. Real RTTs, no `net stop`, exercises the same
 path telnet uses. Recorded as a candidate tool for the tools repo — not
 scoped, not started.
+
+---
+
+## 8. FIELD CONFIRMED, and the follow-up wave (2026-07-15, same session)
+
+Jonathan, dev tier, two tabs: **`ping cat` between tabs works.** Rev 5
+accepted. Three follow-ups came straight out of the same field run —
+scoped in the Phase 15 brief's post-close addendum, landed as follows.
+
+### 8a. Correction to §7: ping with ktcp up is RACY, not impossible
+
+Field: with the network up, `nslookup google.com` then `ping cat`
+works. §7's "ktcp drains every inbound frame" overstated the
+constraint — each inbound frame goes to exactly ONE reader, and ping's
+select can win that race per frame. So network-up pinging *can* work
+and evidently often does; it can also silently lose any individual
+reply to ktcp (which discards echo replies — its icmp is answer-only).
+`net stop` remains the reliable mode; tcping (§7) remains the honest
+network-up design. Worth remembering how we got here: the very first
+field failure was blamed on ktcp draining frames when it was actually
+the .15 identity bug (commit 76f9821, "stop blaming the wrong thing")
+— the drain lore was born half-wrong and is now recorded half-right.
+
+### 8b. The resurfaced resolver flake was OURS, not the guest's
+
+Field: with two tabs open, the first resolve after `net start` fails
+and Jonathan had to prime with `sleep 1; nslookup <name>` before
+`urlget` was reliable — the EXACT pre-stall symptom of 5c0aa63.
+Root cause (proven red in `tests/unit/tan-residents.test.ts` before
+the fix): every tab hosts its own DNS host and gateway at identical
+fixed MACs; on a TAN the remote resident's ARP reply crosses the trunk
+AFTER the local one and wins the CAM, so the guest's DNS/gateway
+unicast is served by the OTHER tab — where the DNS/fetch stall pauses
+the WRONG machine (the asker's 2-second `in_resolv` alarm keeps
+running against a cold DoH fetch in a throttled background tab), and
+where the DoH answer cache feeding the HTTP gateway's reverse map
+belongs to the other tab.
+
+Fix: `tan.ts` filters resident-sourced frames off the trunk, both
+directions (egress: never posted; ingress: dropped, in case an older
+build shares the channel). Each tab talks only to its own residents —
+identical services, so nothing is lost; the old "anycast quirk,
+harmless" header note is rewritten to say what it turned out to be.
+The `sleep 1; nslookup` priming line should now be unnecessary — field
+check pending.
+
+### 8c. ping rev 6: self-ping is loopback
+
+Field: `ping mouse` FROM mouse fails. Necessarily: the switch never
+echoes a frame to the port that sent it, the TAN proxy deliberately
+never answers who-has for the asking tab's own octet, and ktcp sits
+behind the same NIC — nothing may answer a self-ARP. Rev 6
+short-circuits a self-target to loopback before the NIC is even
+opened: no ARP, no wire, honest ~0 ms elapsed times — and it works
+with ktcp running, the one ping that always can. The in-VM probe now
+runs `./ping 10.0.2.42 2` against its stamped LOCALIP as its own
+stage.
+
+### 8d. The default network script restores ping from the drive (Jonathan's design)
+
+`SEED_BOOT_SCRIPT` (seedRev 2): mount `/dev/hdb` OVER `/tmp` — the
+drive becomes a persistent /tmp, so the installer's workshop survives
+in place — and a `ping` binary found there is copied to `/bin` on
+every boot. No network, no compile. Recorded limitation: the fast copy
+cannot rev-check (a static seed can't know the current rev); a stale
+drive keeps its old ping until the installer script is re-run, which
+purges by marker. With no drive attached both probe lines fail quietly.

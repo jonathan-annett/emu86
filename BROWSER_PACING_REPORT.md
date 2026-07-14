@@ -39,6 +39,12 @@
 1. ✅ **`sleep 30` takes 30 wall seconds** — field-verified (Jonathan, 2026-07-15, emu86-dev tier): "i can confirm that 30 seconds is 30 seconds." The idle direction (previously ~1 wall second) is fixed.
 2. invaders/tetris over TAN telnet run at proper speed (the busy direction).
 3. First-try `nslookup` still works (stall + pacing compose).
+   **Field result (2026-07-15): FAILED with two tabs open — and the
+   cause was neither the stall nor the pacing but a third party: on a
+   TAN the resolve could be served by the OTHER tab's DNS host, whose
+   stall pauses the wrong machine. Fixed by keeping reserved residents
+   off the trunk; see `TAB_PINGS_TAB_REPORT.md` §8b. Single-tab
+   first-try nslookup was and remains fine.**
 4. Turbo toggle visibly speeds an in-VM `c86` compile, and games slow back down when returned to authentic.
 5. `/agent/stats` numbers recorded into §2.
 

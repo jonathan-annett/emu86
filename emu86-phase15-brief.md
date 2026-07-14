@@ -392,3 +392,73 @@ Fix — a one-message census, small and terminating:
 - Promote dev→stable when Jonathan accepts the dev tier.
 - `BROWSER_PACING_REPORT.md` §2 numbers: invaders-under-Turbo
   impressions + browser instr/s via localhost tab + `/agent/stats`.
+
+---
+
+## Post-close addendum (2026-07-15): field follow-ups from the tab-pings-tab session
+
+Ping rev 5 is field-confirmed (`ping cat` between tabs works). Three
+items came out of the same field session; scoped here before
+implementation per process.
+
+### A. Reserved residents must stay tab-local (bug — the resurfaced resolver flake)
+
+Field: first DNS resolve after `net start` fails "Name not found" with
+two tabs open; `sleep 1; nslookup <name>` priming makes `urlget`
+reliable. This is the OLD pre-stall bug (5c0aa63) resurfaced by a NEW
+mechanism, proven red in `tests/unit/tan-residents.test.ts`:
+
+Every tab hosts its own gateway (.2) and DNS host (.3) with fixed
+identical MACs. A guest's ARP who-has for a resident is answered
+locally AND by every other tab via the trunk; the remote reply arrives
+last and wins the CAM, so the guest's DNS/gateway traffic is served by
+ANOTHER tab — where the DNS/fetch stall cannot pause THIS guest's
+2-second resolver alarm, and where the DoH answer cache feeding the
+HTTP gateway's reverse map is the wrong tab's.
+
+Fix: resident traffic never crosses the trunk. At trunk egress, do not
+post frames sourced from a reserved resident MAC (GATEWAY_MAC,
+DNS_MAC); drop the same at ingress (defence against unfixed tabs on
+the channel). Buries the "anycast quirk, harmless" note honestly: it
+stopped being harmless when the stall and the reverse map became
+tab-local state.
+
+Acceptance: the two red tests go green; existing TAN suites stay
+green; field — with two tabs open, first-try `nslookup` then `urlget`
+works with NO priming line.
+
+### B. Default net boot script: restore ping from the drive (Jonathan's request)
+
+"Probe for /dev/hdb, mount as /tmp, and if there is a ping binary,
+copy it to /bin." The drive-as-workshop generalized: the DEFAULT
+network script gets ping back on every boot with no download and no
+compile — and /tmp itself persists when a drive is attached.
+
+Scope: the seeded network boot script in `web/settings.ts` grows the
+probe (mount /dev/hdb over /tmp; if that fails, plain /tmp remains);
+seedRev bump so stored profiles refresh. Note recorded: the fast copy
+deliberately skips the rev-marker check (a static seed can't know the
+current rev) — a stale drive is refreshed by re-running the installer
+script, which purges by marker. Document that in the script comment.
+
+### C. ping rev 6: self-ping (`ping mouse` from mouse) must not fail
+
+Field: pinging a tab's own name from itself times out. Raw-frame ping
+ARPs for its own address on the wire — the switch never echoes to the
+ingress port, the TAN proxy deliberately never answers for the asking
+tab's own octet, and ktcp behind the same NIC never sees its own
+outbound frames. Nothing CAN answer a self-ARP.
+
+Fix: loopback in ping itself, like every real stack: when the target
+IS my_ip, skip ARP and the wire entirely and answer locally with true
+elapsed times (a self-ping never leaves the machine on real hardware
+either — this is honest, not faked RTT). Ships as rev 6 with a marker
+bump; drives refresh per the rev-5 marker mechanism.
+
+### D. Doc correction (no code): ping-with-ktcp-up is racy, not impossible
+
+Field: with the network up, `nslookup` then `ping cat` works. The
+"ktcp drains every inbound frame" lore overstated: reads race
+per-frame, and ping can win. Record as racy-but-sometimes-working;
+`net stop` remains the reliable mode; the tcping idea stays the honest
+network-up answer (TAB_PINGS_TAB_REPORT §7).
