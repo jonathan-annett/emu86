@@ -80,6 +80,13 @@ export interface AutoexecOptions {
   onKeystroke?: (char: string) => void;
   /** Fired by @turbo/@authentic — main.ts posts set-speed. */
   setSpeed?: (mode: SpeedDirective) => void;
+  /**
+   * Fired exactly once, when the last step has fully completed —
+   * including the final keystroke of a typed line, which lands on a
+   * timer, outside any feed() (field bug: completion checks hung off
+   * feed() never fired for a show that ends in clackety mode).
+   */
+  onDone?: () => void;
   /** Timer injection (tests). Default setTimeout. */
   schedule?: (ms: number, fn: () => void) => void;
   /** Inter-key delay in ms for @type mode (tests inject a constant). */
@@ -98,9 +105,11 @@ export class AutoexecRunner {
   readonly #setSpeed: (mode: SpeedDirective) => void;
   readonly #schedule: (ms: number, fn: () => void) => void;
   readonly #typeDelayMs: () => number;
+  readonly #onDone: () => void;
   #next = 0;
   #buffer = '';
   #typing = false;
+  #doneFired = false;
 
   constructor(opts: AutoexecOptions) {
     this.#send = opts.send;
@@ -108,6 +117,7 @@ export class AutoexecRunner {
     this.#setSpeed = opts.setSpeed ?? (() => { /* no speed control wired */ });
     this.#schedule = opts.schedule ?? ((ms, fn) => { setTimeout(fn, ms); });
     this.#typeDelayMs = opts.typeDelayMs ?? defaultTypeDelay;
+    this.#onDone = opts.onDone ?? (() => { /* unobserved */ });
     this.#steps = parseScript(opts.script);
   }
 
@@ -138,7 +148,15 @@ export class AutoexecRunner {
   #advance(): void {
     for (;;) {
       const step = this.#steps[this.#next];
-      if (step === undefined) return;
+      if (step === undefined) {
+        // Fully complete (never mid-typing — typeOut re-enters here
+        // only after its last character). Announce once.
+        if (!this.#doneFired && !this.#typing) {
+          this.#doneFired = true;
+          this.#onDone();
+        }
+        return;
+      }
 
       if (step.speed !== undefined) {
         this.#next++;
@@ -169,7 +187,10 @@ export class AutoexecRunner {
       // (Without this, @authentic after a build fired the instant the
       // build was *sent*, not when it finished.)
       const nxt = this.#steps[this.#next];
-      if (nxt !== undefined && nxt.nowait && nxt.speed === undefined) continue;
+      // No next step: loop once more so the done branch announces
+      // completion (an instant final line otherwise exited here and
+      // onDone never fired).
+      if (nxt === undefined || (nxt.nowait && nxt.speed === undefined)) continue;
       return;
     }
   }

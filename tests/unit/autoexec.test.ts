@@ -242,3 +242,40 @@ describe('AutoexecRunner — shell continuation (field lockup, 2026-07-15)', () 
     expect(sent).toHaveLength(3);
   });
 });
+
+describe('AutoexecRunner — onDone (field bug: demo never self-retired)', () => {
+  it('fires once when a script ENDING IN A TYPED LINE finishes on a timer', () => {
+    const queue: Array<() => void> = [];
+    let done = 0;
+    const runner = new AutoexecRunner({
+      script: '@type\n./hello\n',
+      send: () => {},
+      onDone: () => { done++; },
+      schedule: (_ms, fn) => queue.push(fn),
+      typeDelayMs: () => 1,
+    });
+    runner.feed('# ');
+    expect(done).toBe(0); // typing in flight — not done yet
+    // Completion lands on the final keystroke TIMER, with no feed()
+    // ever arriving afterwards — the exact field case.
+    while (queue.length > 0) queue.shift()!();
+    expect(done).toBe(1);
+    expect(runner.active).toBe(false);
+    // Later output must not re-fire it.
+    runner.feed('hello human\r\n# ');
+    expect(done).toBe(1);
+  });
+
+  it('fires once for an instant-mode script completing inside feed()', () => {
+    let done = 0;
+    const runner = new AutoexecRunner({
+      script: 'root\n',
+      send: () => {},
+      onDone: () => { done++; },
+    });
+    runner.feed('login: ');
+    expect(done).toBe(1);
+    runner.feed('# ');
+    expect(done).toBe(1);
+  });
+});

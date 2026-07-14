@@ -177,6 +177,16 @@ async function init(): Promise<void> {
           const msg: MainToWorkerMessage = { type: 'set-speed', mode };
           worker.postMessage(msg);
         },
+        // One-night-only act (Jonathan, 2026-07-15): when the landing
+        // show fully completes — including the final typed keystroke,
+        // which lands on a timer outside any feed() — demote the
+        // active script to the plain network one-liner so reloads get
+        // a working machine, not a rerun. Only the demo self-retires.
+        onDone: () => {
+          if (activeScript.id !== SEED_DEMO_SCRIPT.id) return;
+          settings = { ...settings, activeBootScriptId: SEED_BOOT_SCRIPT.id };
+          saveSettings(settings);
+        },
       })
     : null;
 
@@ -186,15 +196,6 @@ async function init(): Promise<void> {
       term.write(msg.bytes);
       if (autoexec !== null && autoexec.active) {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
-        // One-night-only act (Jonathan, 2026-07-15): when the landing
-        // show finishes its run, demote the active script to the plain
-        // network one-liner so reloads get a working machine, not a
-        // rerun. Only the demo self-retires — a user-chosen script
-        // keeps replaying, as before.
-        if (!autoexec.active && activeScript?.id === SEED_DEMO_SCRIPT.id) {
-          settings = { ...settings, activeBootScriptId: SEED_BOOT_SCRIPT.id };
-          saveSettings(settings);
-        }
       }
       return;
     }
