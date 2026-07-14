@@ -137,8 +137,19 @@ export function buildPingInstallerScript(pingSource: string): string {
     );
   }
 
-  // 3. Run it, then show it working, then join the LAN as usual.
+  // 3. Drop the shell that swallowed the paste.
+  //
+  // ELKS `sh` grows its heap to parse everything typed at it and never
+  // gives it back, so after ~450 lines the login shell's data segment
+  // is fat — and every later fork has to COPY it. Field symptom
+  // (2026-07-14): the build and the ping worked, then `net start`
+  // brought ktcp up but `/bin/net`'s own shell died on `SBRK 1028
+  // FAIL` — it could not spare a kilobyte for an `echo`, and the
+  // telnetd/ftpd daemons never started. `exec sh` replaces the process
+  // image with a clean one; the bloat goes with the old image.
   out.push(
+    'exec sh',
+    // 4. Run the installer, show it working, then join the LAN.
     'sh /tmp/getping.sh',
     '@authentic',
     'ping 10.0.2.2 3',

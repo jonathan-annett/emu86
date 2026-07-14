@@ -93,9 +93,14 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
         return at < 0 ? '' : transcript.slice(at);
       };
 
+      // Run to the END of the script — including `net start ne0`. The
+      // first version of this test stopped at the demo ping and so
+      // never saw the machine run out of RAM bringing the network up
+      // afterwards (field, 2026-07-14). A boot script is only "working"
+      // if its LAST line works.
       const done = (): boolean =>
-        /\d+ packets transmitted, \d+ received/.test(runOutput()) ||
-        /BUILD FAILED|not enough memory/.test(runOutput());
+        /ktcp: ip |not enough memory|Out of space/.test(runOutput()) ||
+        /BUILD FAILED/.test(runOutput());
 
       for (let i = 0; i < MAX_SLICES && !done(); i++) {
         const r = host.runUntil(SLICE);
@@ -127,6 +132,16 @@ describe('Phase 15 M3 — the browser ping installer builds ping and pings the g
       expect(output).toMatch(/bytes from 10\.0\.2\.2/);
       expect(output).toContain('3 packets transmitted, 3 received');
       expect(host.gateway?.echoRepliesSent).toBeGreaterThanOrEqual(3);
+
+      // ---- the LAST line of the script must work too ----
+      // ktcp comes up, and — the part that broke in the field — the
+      // machine still has RAM to spare afterwards. The paste bloats the
+      // login shell's heap (ELKS sh never shrinks it) and every fork
+      // copies it, so `net start`'s own shell died on SBRK 1028 FAIL
+      // and the daemons never started. `exec sh` drops that image.
+      expect(output).toContain('ktcp: ip 10.0.2.');
+      expect(output).not.toContain('OUT OF HEAP SPACE');
+      expect(output).not.toContain('Out of space');
     },
     TEST_TIMEOUT_MS,
   );
