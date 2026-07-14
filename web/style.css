@@ -615,3 +615,45 @@ header code {
   cursor: pointer;
   padding: 0 0.2rem;
 }
+
+/* ------------------------------------------------------------------ */
+/* Virtual-drive save banner (Phase 15 M2)                            */
+/* ------------------------------------------------------------------ */
+
+#drive-banner {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 15;
+  max-width: min(30rem, calc(100vw - 2rem));
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.9rem;
+  background: #101a10;
+  border: 1px solid #2a4a2a;
+  border-radius: 6px;
+  color: #a0c8a0;
+  font-size: 0.85rem;
+}
+
+#drive-banner.is-warning {
+  border-color: #b8860b;
+  color: #e8d8a0;
+}
+
+.drive-save {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  background: #1d3a1d;
+  color: #d8f0d8;
+  border: 1px solid #33ff66;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.drive-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -162,6 +162,66 @@ export class InMemoryDisk implements Disk {
 }
 
 // ============================================================
+// WriteTrackingDisk
+// ============================================================
+
+/**
+ * Decorator that counts distinct written sectors and can snapshot the
+ * full image — the substrate for the browser's persistent secondary
+ * drive (Phase 15 M2): the dirty count drives the "unsaved changes"
+ * indicator, and `snapshot()` is what an explicit Save persists.
+ * Wraps any {@link Disk}; reads pass through untouched.
+ */
+export class WriteTrackingDisk implements Disk {
+  readonly #inner: Disk;
+  readonly #dirty = new Set<number>();
+
+  constructor(inner: Disk) {
+    this.#inner = inner;
+  }
+
+  get geometry(): DiskGeometry {
+    return this.#inner.geometry;
+  }
+
+  get readonly(): boolean {
+    return this.#inner.readonly;
+  }
+
+  get sectorCount(): number {
+    return this.#inner.sectorCount;
+  }
+
+  /** Distinct sectors written since construction or the last markClean(). */
+  get dirtySectorCount(): number {
+    return this.#dirty.size;
+  }
+
+  readSector(lba: number): Uint8Array {
+    return this.#inner.readSector(lba);
+  }
+
+  writeSector(lba: number, data: Uint8Array): void {
+    this.#inner.writeSector(lba, data);
+    this.#dirty.add(lba);
+  }
+
+  /** Full image copy via the sector loop (the probe-disk precedent). */
+  snapshot(): Uint8Array {
+    const out = new Uint8Array(this.sectorCount * SECTOR_SIZE);
+    for (let lba = 0; lba < this.sectorCount; lba++) {
+      out.set(this.#inner.readSector(lba), lba * SECTOR_SIZE);
+    }
+    return out;
+  }
+
+  /** Reset the dirty count — call when a snapshot has been persisted. */
+  markClean(): void {
+    this.#dirty.clear();
+  }
+}
+
+// ============================================================
 // NodeFileDisk
 // ============================================================
 

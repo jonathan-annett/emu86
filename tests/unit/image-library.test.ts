@@ -179,4 +179,73 @@ describe('ImageLibrary', () => {
     expect(uploaded?.viability).toBeUndefined();
     lib.close();
   });
+
+  // ---- Virtual drives (Phase 15 M2) ----
+
+  const DRIVE_GEOMETRY = { cylinders: 2, heads: 2, sectorsPerTrack: 4 }; // 8 KiB
+
+  it('createBlankImage stores zeros with geometry and blank source', async () => {
+    const lib = new ImageLibrary('test-images-blank-1');
+    const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
+    const list = await lib.listImages();
+    expect(list[0]).toMatchObject({
+      id,
+      name: 'drive.img',
+      sizeBytes: 2 * 2 * 4 * 512,
+      source: 'blank',
+      geometry: DRIVE_GEOMETRY,
+    });
+    const bytes = await lib.getImageBytes(id);
+    expect(bytes.length).toBe(8192);
+    expect(bytes.every((b) => b === 0)).toBe(true);
+    lib.close();
+  });
+
+  it('createBlankImage rejects nonsense geometry', async () => {
+    const lib = new ImageLibrary('test-images-blank-2');
+    await expect(
+      lib.createBlankImage('bad.img', { cylinders: 0, heads: 16, sectorsPerTrack: 63 }),
+    ).rejects.toThrow(/invalid geometry/);
+    await expect(
+      lib.createBlankImage('bad.img', { cylinders: 16, heads: 16, sectorsPerTrack: 64 }),
+    ).rejects.toThrow(/invalid geometry/);
+    lib.close();
+  });
+
+  it('updateImageBytes writes back, stamps modifiedAt, keeps geometry', async () => {
+    const lib = new ImageLibrary('test-images-blank-3');
+    const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
+    const updated = sampleBytes(8192, 0xcd);
+    await lib.updateImageBytes(id, updated);
+    const entry = await lib.getImageEntry(id);
+    expect(entry.bytes).toEqual(updated);
+    expect(entry.geometry).toEqual(DRIVE_GEOMETRY);
+    expect(typeof entry.modifiedAt).toBe('number');
+    lib.close();
+  });
+
+  it('updateImageBytes rejects a size mismatch and unknown ids', async () => {
+    const lib = new ImageLibrary('test-images-blank-4');
+    const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
+    await expect(lib.updateImageBytes(id, sampleBytes(4096, 1))).rejects.toThrow(
+      /size mismatch/,
+    );
+    await expect(lib.updateImageBytes('nope', sampleBytes(8192, 1))).rejects.toThrow(
+      /no image with id/,
+    );
+    // The failed writes must not have clobbered the entry.
+    const bytes = await lib.getImageBytes(id);
+    expect(bytes.every((b) => b === 0)).toBe(true);
+    lib.close();
+  });
+
+  it('getImageEntry returns fresh copies (mutation-safe)', async () => {
+    const lib = new ImageLibrary('test-images-blank-5');
+    const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
+    const a = await lib.getImageEntry(id);
+    a.bytes.fill(0xff);
+    const b = await lib.getImageEntry(id);
+    expect(b.bytes.every((byte) => byte === 0)).toBe(true);
+    lib.close();
+  });
 });

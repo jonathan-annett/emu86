@@ -125,11 +125,21 @@ export interface SetSpeedMessage {
   mode: CpuSpeedMode;
 }
 
+/**
+ * Ask the worker for the secondary disk's current bytes (Phase 15 M2 —
+ * virtual drives). The reply is {@link SecondarySnapshotMessage}. Save
+ * is explicit and main-thread-driven: the worker never persists.
+ */
+export interface SnapshotSecondaryMessage {
+  type: 'snapshot-secondary';
+}
+
 export type MainToWorkerMessage =
   | BootMessage
   | RxMessage
   | ResetMessage
-  | SetSpeedMessage;
+  | SetSpeedMessage
+  | SnapshotSecondaryMessage;
 
 // ============================================================
 // Worker → Main
@@ -179,6 +189,24 @@ export interface StatsMessage {
   mode: CpuSpeedMode;
   /** Current adaptive per-turn instruction batch. */
   batch: number;
+  /**
+   * Distinct secondary-disk sectors the guest has written since boot or
+   * the last snapshot (Phase 15 M2). Present only while a secondary is
+   * mounted; drives the main thread's "unsaved changes" indicator.
+   */
+  secondaryDirtySectors?: number;
+}
+
+/**
+ * Reply to {@link SnapshotSecondaryMessage}. `bytes` is null when no
+ * secondary disk is mounted. Taking the snapshot resets the worker's
+ * dirty count — the main thread owns persistence from here.
+ */
+export interface SecondarySnapshotMessage {
+  type: 'secondary-snapshot';
+  bytes: Uint8Array | null;
+  /** Dirty-sector count at snapshot time (diagnostic). */
+  dirtySectors: number;
 }
 
 export type WorkerToMainMessage =
@@ -187,4 +215,5 @@ export type WorkerToMainMessage =
   | HaltedMessage
   | ErrorMessage
   | TanIdentityMessage
-  | StatsMessage;
+  | StatsMessage
+  | SecondarySnapshotMessage;

@@ -106,6 +106,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'rx':    return 'rx';
       case 'reset': return 'reset';
       case 'set-speed': return 'set-speed';
+      case 'snapshot-secondary': return 'snapshot-secondary';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -121,6 +122,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'error':  return 'error';
       case 'tan-identity': return 'tan-identity';
       case 'stats': return 'stats';
+      case 'secondary-snapshot': return 'secondary-snapshot';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;

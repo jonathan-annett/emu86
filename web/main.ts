@@ -190,6 +190,19 @@ async function init(): Promise<void> {
       })
     : null;
 
+  // Virtual drives (Phase 15 M2): the save banner appears while the
+  // booted secondary has unsaved guest writes. Save is explicit — the
+  // worker snapshots, we persist to the library, nothing is automatic.
+  // The Web Locks guard below downgrades the banner to a warning when
+  // another tab already holds this drive (per-origin IDB is shared).
+  const bootedSecondaryId = settings.secondaryImageSource?.id ?? null;
+  const driveBanner = ensureDriveBanner(() => {
+    driveBanner.saving();
+    const msg: MainToWorkerMessage = { type: 'snapshot-secondary' };
+    worker.postMessage(msg);
+  });
+  let driveLockHeld = true;
+
   worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
     const msg = event.data;
     if (msg.type === 'tx') {
@@ -205,6 +218,17 @@ async function init(): Promise<void> {
       // messages — see worker-host.ts shared txBuffer.
       return;
     }
+    if (msg.type === 'secondary-snapshot') {
+      if (msg.bytes === null || bootedSecondaryId === null) {
+        driveBanner.error('no secondary drive mounted');
+        return;
+      }
+      void library
+        .updateImageBytes(bootedSecondaryId, msg.bytes)
+        .then(() => driveBanner.saved())
+        .catch((err: unknown) => driveBanner.error(String(err)));
+      return;
+    }
     if (msg.type === 'tan-identity') {
       // Sticky IP: persist the settled octet so the next reload offers
       // it back to the lease; tell the user where they live.
@@ -216,6 +240,14 @@ async function init(): Promise<void> {
       // Pacing telemetry (~1/sec). Console-only by design — the numbers
       // are for the pacing report and the dev /agent/stats endpoint.
       latestStats = msg;
+      // Unsaved-drive indicator rides the same heartbeat.
+      if (typeof msg.secondaryDirtySectors === 'number' && driveLockHeld) {
+        if (msg.secondaryDirtySectors > 0) {
+          driveBanner.dirty(msg.secondaryDirtySectors);
+        } else {
+          driveBanner.clean();
+        }
+      }
       console.debug(
         `[emu86] ${msg.instrPerSec.toLocaleString()} instr/s ` +
           `(${(msg.realTimeRatio * 100).toFixed(0)}% of 4.77 MHz), ` +
@@ -288,6 +320,26 @@ async function init(): Promise<void> {
   // Pacing: initial CPU speed from settings.
   boot.config.cpuSpeed = settings.cpuSpeed;
   worker.postMessage(boot);
+
+  // Single-writer guard (Phase 15 M2): per-origin IDB is shared across
+  // tabs (the TAN makes multi-tab normal), and two tabs writing one
+  // drive is silent corruption. Advisory v1: the first tab holds a Web
+  // Lock for the page's lifetime; later tabs still boot the drive but
+  // their banner warns that Save is disabled there.
+  if (bootedSecondaryId !== null && 'locks' in navigator) {
+    void navigator.locks.request(
+      `emu86-drive-${bootedSecondaryId}`,
+      { ifAvailable: true },
+      (lock) => {
+        if (lock === null) {
+          driveLockHeld = false;
+          driveBanner.lockWarning();
+          return Promise.resolve();
+        }
+        return new Promise<never>(() => { /* held until tab close */ });
+      },
+    );
+  }
 
   // Mount the settings UI. `bootedFrom` and `bootedSecondary` capture the
   // sources that are actually running, so the modal can render
@@ -427,14 +479,96 @@ async function buildBootMessage(
 
   // Secondary slot — Phase 11. Only library entries reach here (the
   // bundled image is a boot image, never a secondary). The worker host's
-  // size table infers the class. Failure to read the secondary's bytes is
-  // surfaced to the caller; partial-success boot would leave the user
-  // confused about why /dev/hdb didn't appear.
+  // size table infers the class — unless the entry carries an explicit
+  // geometry (Phase 15 M2 blank drives, whose sizes the table doesn't
+  // know). Failure to read the secondary's bytes is surfaced to the
+  // caller; partial-success boot would leave the user confused about
+  // why /dev/hdb didn't appear.
   if (secondary !== null) {
-    const bytes = await library.getImageBytes(secondary.id);
-    config.secondary = { imageBytes: bytes };
+    const entry = await library.getImageEntry(secondary.id);
+    config.secondary = {
+      imageBytes: entry.bytes,
+      ...(entry.geometry !== undefined ? { geometry: entry.geometry } : {}),
+    };
   }
   return { type: 'boot', config };
+}
+
+/**
+ * The virtual-drive save banner (bottom-left; the showcase banner owns
+ * bottom-center). One element, five states: hidden, dirty (Save
+ * enabled), saving, saved-flash, and the cross-tab lock warning.
+ * `dirty`/`clean` ride the worker's 1 Hz stats heartbeat and never
+ * clobber an in-flight save.
+ */
+function ensureDriveBanner(onSave: () => void): {
+  dirty: (sectors: number) => void;
+  clean: () => void;
+  saving: () => void;
+  saved: () => void;
+  error: (message: string) => void;
+  lockWarning: () => void;
+} {
+  const el = document.createElement('div');
+  el.id = 'drive-banner';
+  el.hidden = true;
+  const text = document.createElement('span');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'drive-save';
+  btn.textContent = 'Save';
+  btn.addEventListener('click', () => onSave());
+  el.append(text, btn);
+  document.body.appendChild(el);
+
+  let state: 'idle' | 'saving' | 'saved' | 'locked' = 'idle';
+  let savedTimer: number | null = null;
+
+  const show = (message: string, withButton: boolean, warning = false): void => {
+    el.hidden = false;
+    el.classList.toggle('is-warning', warning);
+    text.textContent = message;
+    btn.hidden = !withButton;
+  };
+
+  return {
+    dirty(sectors: number): void {
+      if (state !== 'idle') return;
+      btn.disabled = false;
+      show(
+        `/dev/hdb: ${sectors} sector${sectors === 1 ? '' : 's'} unsaved — ` +
+          'umount (or sync) in the guest, then',
+        true,
+      );
+    },
+    clean(): void {
+      if (state !== 'idle') return;
+      el.hidden = true;
+    },
+    saving(): void {
+      state = 'saving';
+      btn.disabled = true;
+      show('Saving /dev/hdb…', true);
+    },
+    saved(): void {
+      state = 'saved';
+      show('/dev/hdb saved ✓', false);
+      if (savedTimer !== null) window.clearTimeout(savedTimer);
+      savedTimer = window.setTimeout(() => {
+        state = 'idle';
+        el.hidden = true;
+      }, 2500);
+    },
+    error(message: string): void {
+      state = 'idle';
+      btn.disabled = false;
+      show(`Save failed: ${message} — retry?`, true, true);
+    },
+    lockWarning(): void {
+      state = 'locked';
+      show('This drive is open in another tab — changes here will NOT be saved.', false, true);
+    },
+  };
 }
 
 async function describeImageSource(

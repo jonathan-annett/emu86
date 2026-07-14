@@ -335,6 +335,65 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     secondaryList.className = 'emu86-image-list';
     secondarySection.body.appendChild(secondaryList);
 
+    /* Create blank drive (Phase 15 M2 — virtual drives) ----------- */
+    // An all-zero image with explicit CHS geometry, stored in the
+    // library like any other entry. Guest formats it (mkfs) and the
+    // explicit Save button on the main page persists guest writes back.
+    const createRow = document.createElement('div');
+    createRow.className = 'emu86-upload-row';
+    const sizeSelect = document.createElement('select');
+    // 16 heads × 63 spt × 512 B = 516,096 B per cylinder; presets pick
+    // cylinder counts, so every size is CHS-exact. The 32 MB shape is
+    // the same 63×16×63 the hd32 images use.
+    const PRESETS: Array<{ label: string; cylinders: number }> = [
+      { label: '8 MB', cylinders: 16 },
+      { label: '16 MB', cylinders: 32 },
+      { label: '32 MB', cylinders: 63 },
+    ];
+    for (const p of PRESETS) {
+      const opt = document.createElement('option');
+      opt.value = String(p.cylinders);
+      opt.textContent = p.label;
+      sizeSelect.appendChild(opt);
+    }
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.textContent = 'Create blank drive';
+    const createStatus = document.createElement('div');
+    createStatus.className = 'emu86-hint';
+    createStatus.setAttribute('aria-live', 'polite');
+    createRow.append(sizeSelect, createBtn);
+    secondarySection.body.appendChild(createRow);
+    secondarySection.body.appendChild(createStatus);
+    createBtn.addEventListener('click', () => {
+      void (async () => {
+        const cylinders = Number.parseInt(sizeSelect.value, 10);
+        const preset = PRESETS.find((p) => p.cylinders === cylinders);
+        if (preset === undefined) return;
+        const geometry = { cylinders, heads: 16, sectorsPerTrack: 63 };
+        try {
+          const id = await deps.library.createBlankImage(
+            `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
+            geometry,
+          );
+          // Select it as the secondary right away — creating a drive
+          // and not attaching it is never what the user meant.
+          deps.onChange({
+            ...deps.getSettings(),
+            secondaryImageSource: { kind: 'library', id },
+          });
+          const blocks = (cylinders * 16 * 63 * 512) / 1024;
+          createStatus.textContent =
+            `Created. After reload: mkfs /dev/hdb ${blocks} && mount /dev/hdb /mnt ` +
+            '— then use Save (bottom banner) to persist guest writes.';
+          await refreshSecondaryList(secondaryList, secondaryReloadDiv);
+          await refreshList(list);
+        } catch (err) {
+          createStatus.textContent = `Create failed: ${describeError(err)}`;
+        }
+      })();
+    });
+
     host.appendChild(secondarySection.el);
 
     void refreshSecondaryList(secondaryList, secondaryReloadDiv);
@@ -412,7 +471,7 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
       // glance, plus the viability tag if known.
       const tagBits: string[] = [
         formatBytes(entry.sizeBytes),
-        `${entry.source === 'github' ? 'github' : 'upload'} · ${formatDate(entry.uploadedAt)}`,
+        `${entry.source} · ${formatDate(entry.uploadedAt)}`,
       ];
       if (entry.viability) {
         tagBits.push(`tag: ${describeTag(entry.viability)}`);
@@ -528,7 +587,7 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
         && cur.secondaryImageSource.id === entry.id;
       const tagBits: string[] = [
         formatBytes(entry.sizeBytes),
-        `${entry.source === 'github' ? 'github' : 'upload'} · ${formatDate(entry.uploadedAt)}`,
+        `${entry.source} · ${formatDate(entry.uploadedAt)}`,
       ];
       // No viability tag here — secondary is a data disk, not a boot disk.
       host.appendChild(

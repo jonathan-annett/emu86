@@ -46,7 +46,7 @@ import type {
 } from './protocol.js';
 import { BrowserConsole } from './browser-console.js';
 import { IBMPCMachine } from '../machine/ibm-pc.js';
-import { InMemoryDisk } from '../disk/disk.js';
+import { InMemoryDisk, WriteTrackingDisk } from '../disk/disk.js';
 import { NodeHostClock } from '../host-clock/host-clock.js';
 import {
   installCGAMirror,
@@ -220,6 +220,8 @@ export class WorkerHost {
   #gateway: LanGateway | null = null;
   #dns: DnsHost | null = null;
   #httpGateway: HttpGatewayHost | null = null;
+  /** Secondary disk write tracker (Phase 15 M2 — virtual drives). */
+  #secondaryDisk: WriteTrackingDisk | null = null;
   #tanConfig: { channel: FrameChannel; hostOctet?: number } | null = null;
   #tan: TabAreaNetwork | null = null;
   #stopping = false;
@@ -303,6 +305,22 @@ export class WorkerHost {
     if (msg.type === 'set-speed') {
       // Live toggle from the settings modal — takes effect next turn.
       this.#pacer.setMode(msg.mode);
+      return;
+    }
+    if (msg.type === 'snapshot-secondary') {
+      // Synchronous with respect to the machine: messages land between
+      // run batches, never mid-step. Taking the snapshot marks the disk
+      // clean — persistence is the main thread's job from here; if its
+      // IDB write fails the user simply saves again.
+      const disk = this.#secondaryDisk;
+      if (disk === null) {
+        this.#post({ type: 'secondary-snapshot', bytes: null, dirtySectors: 0 });
+        return;
+      }
+      const dirtySectors = disk.dirtySectorCount;
+      const bytes = disk.snapshot();
+      disk.markClean();
+      this.#post({ type: 'secondary-snapshot', bytes, dirtySectors });
       return;
     }
     if (msg.type === 'reset') {
@@ -513,6 +531,9 @@ export class WorkerHost {
           realTimeRatio: instrPerSec / (AUTHENTIC_CYCLES_PER_MS * 1000),
           mode: this.#pacer.mode,
           batch: this.#adaptiveBatch,
+          ...(this.#secondaryDisk !== null
+            ? { secondaryDirtySectors: this.#secondaryDisk.dirtySectorCount }
+            : {}),
         });
         this.#statsWindowStart = now;
         this.#statsInstructions = 0;
@@ -657,12 +678,18 @@ export class WorkerHost {
     // M3-tabs: bridge this LAN onto the Tab Area Network.
     if (this.#tan !== null) this.#tan.attach(network);
 
+    // Phase 15 M2: the secondary rides behind a write tracker so guest
+    // writes can be counted (unsaved-changes indicator) and snapshotted
+    // out for explicit save-back to the image library.
+    const trackedSecondary = secondary !== null ? new WriteTrackingDisk(secondary.disk) : null;
+    this.#secondaryDisk = trackedSecondary;
+
     const machine = new IBMPCMachine({
       disk: primary.disk,
       diskClass: primary.diskClass,
-      ...(secondary
+      ...(secondary && trackedSecondary
         ? {
-            secondaryDisk: secondary.disk,
+            secondaryDisk: trackedSecondary,
             secondaryDiskClass: secondary.diskClass,
           }
         : {}),
@@ -809,6 +836,9 @@ export class WorkerHost {
     // The HTTP gateway has no switch port of its own — it dies with
     // the gateway it was plugged into.
     this.#httpGateway = null;
+    // Unsaved secondary writes die with the machine — save is explicit
+    // by design (the settings UI says so before the user reloads).
+    this.#secondaryDisk = null;
     if (this.#dns) {
       this.#dns.detach();
       this.#dns = null;

@@ -40,8 +40,21 @@ const DATABASE_NAME = 'emu86-images';
 const STORE_NAME = 'images';
 const SCHEMA_VERSION = 1;
 
-/** Source discriminator. */
-export type ImageSourceTag = 'upload' | 'github';
+/** Source discriminator. `'blank'` = created-in-browser virtual drive (Phase 15 M2). */
+export type ImageSourceTag = 'upload' | 'github' | 'blank';
+
+/**
+ * CHS geometry stored on a library entry (Phase 15 M2). Structurally
+ * identical to the protocol's `DiskGeometry` — declared locally so the
+ * storage layer doesn't import emulator types. Present on blank-created
+ * drives (whose sizes the worker's inference table may not know);
+ * absent on uploads/GitHub images, which infer as before.
+ */
+export interface StoredDiskGeometry {
+  cylinders: number;
+  heads: number;
+  sectorsPerTrack: number;
+}
 
 /**
  * Per-asset viability tag, mirrored from web/viability-tagging.ts. Stored
@@ -72,6 +85,14 @@ export interface StoredImage {
    * the field existed.
    */
   viability?: StoredViabilityTag;
+  /**
+   * Explicit CHS geometry (Phase 15 M2). Same additive-optional
+   * forward-compat trick as `viability` — old entries lack it and boot
+   * via size inference exactly as before.
+   */
+  geometry?: StoredDiskGeometry;
+  /** Date.now() of the last updateImageBytes write-back, if any. */
+  modifiedAt?: number;
 }
 
 /** Listing shape — same fields as StoredImage minus the bulk bytes. */
@@ -187,6 +208,8 @@ export class ImageLibrary {
       sizeBytes: entry.sizeBytes,
       source: entry.source,
       ...(entry.viability !== undefined ? { viability: entry.viability } : {}),
+      ...(entry.geometry !== undefined ? { geometry: entry.geometry } : {}),
+      ...(entry.modifiedAt !== undefined ? { modifiedAt: entry.modifiedAt } : {}),
     }));
     meta.sort((a, b) => b.uploadedAt - a.uploadedAt);
     return meta;
@@ -218,6 +241,92 @@ export class ImageLibrary {
       throw new Error(`ImageLibrary: stored image ${id} has non-Uint8Array bytes`);
     }
     return new Uint8Array(entry.bytes);
+  }
+
+  /**
+   * Create an all-zero virtual drive (Phase 15 M2). Size is derived
+   * from the geometry (C×H×S×512) so the entry always boots via the
+   * explicit-geometry path — blank sizes need not match the worker's
+   * inference table. In the guest: `mkfs /dev/hdb <blocks>` then mount
+   * (blocks = sizeBytes/1024).
+   */
+  async createBlankImage(name: string, geometry: StoredDiskGeometry): Promise<string> {
+    const { cylinders, heads, sectorsPerTrack } = geometry;
+    if (
+      !Number.isInteger(cylinders) || cylinders <= 0 || cylinders > 1024 ||
+      !Number.isInteger(heads) || heads <= 0 || heads > 255 ||
+      !Number.isInteger(sectorsPerTrack) || sectorsPerTrack <= 0 || sectorsPerTrack > 63
+    ) {
+      throw new Error(
+        `ImageLibrary: invalid geometry C=${cylinders} H=${heads} S=${sectorsPerTrack}`,
+      );
+    }
+    const sizeBytes = cylinders * heads * sectorsPerTrack * 512;
+    const id = generateId();
+    const entry: StoredImage = {
+      id,
+      name,
+      bytes: new Uint8Array(sizeBytes),
+      uploadedAt: Date.now(),
+      sizeBytes,
+      source: 'blank',
+      geometry: { cylinders, heads, sectorsPerTrack },
+    };
+    const db = await this.ready();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).add(entry);
+    await awaitTransaction(tx);
+    return id;
+  }
+
+  /**
+   * Write a drive's current bytes back onto its entry (Phase 15 M2 —
+   * the explicit Save). Size may not change: the geometry is part of
+   * the drive's identity, and a mismatched snapshot means the caller
+   * grabbed the wrong disk. Rejects on a missing id for the same
+   * staleness-surfacing reason as renameImage.
+   */
+  async updateImageBytes(id: string, bytes: Uint8Array): Promise<void> {
+    const db = await this.ready();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const existing = await awaitRequest<StoredImage | undefined>(store.get(id));
+    if (!existing) {
+      tx.abort();
+      throw new Error(`ImageLibrary: no image with id ${id}`);
+    }
+    if (bytes.byteLength !== existing.sizeBytes) {
+      tx.abort();
+      throw new Error(
+        `ImageLibrary: updateImageBytes size mismatch for ${id} ` +
+          `(entry ${existing.sizeBytes} B, snapshot ${bytes.byteLength} B)`,
+      );
+    }
+    const updated: StoredImage = {
+      ...existing,
+      bytes: new Uint8Array(bytes),
+      modifiedAt: Date.now(),
+    };
+    store.put(updated);
+    await awaitTransaction(tx);
+  }
+
+  /**
+   * Pull one full entry (bytes included, fresh copies). The boot path
+   * uses this for secondaries so the stored geometry rides along.
+   */
+  async getImageEntry(id: string): Promise<StoredImage> {
+    const db = await this.ready();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const request = tx.objectStore(STORE_NAME).get(id);
+    const entry = await awaitRequest<StoredImage | undefined>(request);
+    if (!entry) {
+      throw new Error(`ImageLibrary: no image with id ${id}`);
+    }
+    if (!(entry.bytes instanceof Uint8Array)) {
+      throw new Error(`ImageLibrary: stored image ${id} has non-Uint8Array bytes`);
+    }
+    return { ...entry, bytes: new Uint8Array(entry.bytes) };
   }
 
   /**
