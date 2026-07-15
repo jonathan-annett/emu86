@@ -74,6 +74,19 @@ describe('session-store', () => {
     expect(s.driveForkId).toBe('row-1'); // patches stay independent
   });
 
+  it('overlayResetPending round-trips and anything non-true reads false (Phase 17 M2)', () => {
+    saveSession({ overlayResetPending: true });
+    expect(loadSession().overlayResetPending).toBe(true);
+    saveSession({ overlayResetPending: false });
+    expect(loadSession().overlayResetPending).toBe(false);
+    // A tampered/legacy value degrades to false, never truthy-coerces.
+    sessionStorage.setItem(
+      'emu86.session.v1',
+      JSON.stringify({ sessionId: 'old', overlayResetPending: 'yes' }),
+    );
+    expect(loadSession().overlayResetPending).toBe(false);
+  });
+
   it('saveSession patches one field and preserves the rest', () => {
     const { sessionId } = loadSession();
     const patched = saveSession({ tanHostOctet: 42 });

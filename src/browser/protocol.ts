@@ -100,6 +100,22 @@ export interface BootConfig {
    * {@link SetSpeedMessage}.
    */
   cpuSpeed?: CpuSpeedMode;
+  /**
+   * Boot-disk overlay to fold (Phase 17 M2). Main loads the tab's
+   * chunks from `emu86-overlays` pre-boot; the worker folds them into
+   * the primary's bytes ONLY if `fingerprint` matches the SHA-256 it
+   * computes over the pristine base this boot (mismatch ⇒ not
+   * applied, reported via {@link OverlayIdentityMessage} — a silently
+   * mis-applied overlay is a corrupt root fs). Fold happens before
+   * the per-boot bootopts stamp: base → overlay → stamps.
+   */
+  overlay?: {
+    chunks: OverlayChunk[];
+    /** Aligned span the chunks were swept under (self-describing). */
+    chunkSizeBytes: number;
+    /** SHA-256 hex of the base these chunks were written against. */
+    fingerprint: string;
+  };
 }
 
 // ============================================================
@@ -328,6 +344,24 @@ export interface OverlaySweepMessage {
   chunks: OverlayChunk[];
 }
 
+/**
+ * Phase 17 M2: the primary base's identity, computed and posted every
+ * boot (before `ready`). Main stamps `fingerprint` into the overlay
+ * meta row on future sweeps; `applied:false` with `chunksOffered > 0`
+ * means the offered overlay did NOT match this base — the worker
+ * refused the fold and main must move the tab's sweeps to a fresh
+ * overlayId so the kept rows aren't clobbered.
+ */
+export interface OverlayIdentityMessage {
+  type: 'overlay-identity';
+  /** SHA-256 hex of the pristine primary bytes, this boot. */
+  fingerprint: string;
+  /** Whether offered chunks were folded into the base. */
+  applied: boolean;
+  /** How many chunks BootConfig.overlay offered (0 = none offered). */
+  chunksOffered: number;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -338,4 +372,5 @@ export type WorkerToMainMessage =
   | SecondarySnapshotMessage
   | SecondaryWrittenMessage
   | ControlRequestMessage
-  | OverlaySweepMessage;
+  | OverlaySweepMessage
+  | OverlayIdentityMessage;

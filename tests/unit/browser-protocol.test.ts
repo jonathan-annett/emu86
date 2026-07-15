@@ -96,6 +96,23 @@ describe('browser protocol — message shapes', () => {
     expect(m.config.geometry?.sectorsPerTrack).toBe(18);
   });
 
+  it('boot config carries the overlay fold set (Phase 17 M2)', () => {
+    const m: BootMessage = {
+      type: 'boot',
+      config: {
+        imageUrl: '/x',
+        overlay: {
+          chunks: [{ chunkIndex: 1, bytes: new Uint8Array([7]) }],
+          chunkSizeBytes: 32 * 1024,
+          fingerprint: 'cd'.repeat(32),
+        },
+      },
+    };
+    const cloned = structuredClone(m);
+    expect(cloned.config.overlay?.fingerprint).toBe('cd'.repeat(32));
+    expect(cloned.config.overlay?.chunks[0]?.bytes[0]).toBe(7);
+  });
+
   it('overlay-sweep chunks survive structured-clone round-trip (Phase 17 M1)', () => {
     // Small payloads on purpose — clone semantics are what's under
     // test, not throughput.
@@ -150,6 +167,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'secondary-written': return 'secondary-written';
       case 'control-request': return 'control-request';
       case 'overlay-sweep': return 'overlay-sweep';
+      case 'overlay-identity': return 'overlay-identity';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -204,5 +222,14 @@ describe('browser protocol — exhaustiveness', () => {
         chunks: [{ chunkIndex: 0, bytes: new Uint8Array(8) }],
       }),
     ).toBe('overlay-sweep');
+    // Phase 17 M2: the base identity report, every boot.
+    expect(
+      describeWorker({
+        type: 'overlay-identity',
+        fingerprint: 'ab'.repeat(32),
+        applied: true,
+        chunksOffered: 3,
+      }),
+    ).toBe('overlay-identity');
   });
 });

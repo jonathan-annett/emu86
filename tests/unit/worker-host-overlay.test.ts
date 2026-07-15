@@ -16,9 +16,18 @@
 
 import { describe, it, expect } from 'vitest';
 import { WorkerHost } from '../../src/browser/worker-host.js';
-import type { OverlaySweepMessage, WorkerToMainMessage } from '../../src/browser/protocol.js';
+import type {
+  OverlayIdentityMessage,
+  OverlaySweepMessage,
+  WorkerToMainMessage,
+} from '../../src/browser/protocol.js';
 import { SECTOR_SIZE } from '../../src/disk/disk.js';
-import { FORCED_SWEEP_BYTES, OVERLAY_CHUNK_BYTES, OverlayDisk } from '../../src/disk/overlay.js';
+import {
+  FORCED_SWEEP_BYTES,
+  OVERLAY_CHUNK_BYTES,
+  OverlayDisk,
+  sha256Hex,
+} from '../../src/disk/overlay.js';
 
 /** 1.44 MB all-HLT primary so boot idles immediately. */
 function haltImage(bytes = 1474560): Uint8Array {
@@ -150,6 +159,86 @@ describe('WorkerHost — overlay wiring', () => {
     const ids = sweeps(messages).map((s) => s.epochId);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('WorkerHost — M2 boot fold + identity', () => {
+  function identities(messages: readonly WorkerToMainMessage[]): OverlayIdentityMessage[] {
+    return messages.filter((m): m is OverlayIdentityMessage => m.type === 'overlay-identity');
+  }
+
+  it('posts the base identity on every boot, even with no overlay offered', async () => {
+    const image = haltImage();
+    const expected = await sha256Hex(image);
+    const messages: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => messages.push(m), autoRun: false });
+    host.handleMessage({ type: 'boot', config: { imageBytes: image } });
+    await host.whenIdle();
+
+    const ids = identities(messages);
+    expect(ids).toHaveLength(1);
+    expect(ids[0]?.fingerprint).toBe(expected);
+    expect(ids[0]?.applied).toBe(false);
+    expect(ids[0]?.chunksOffered).toBe(0);
+    // Identity precedes ready (main wants it before wiring the banner).
+    expect(messages.findIndex((m) => m.type === 'overlay-identity'))
+      .toBeLessThan(messages.findIndex((m) => m.type === 'ready'));
+  });
+
+  it('folds offered chunks when the fingerprint matches', async () => {
+    const image = haltImage();
+    const fingerprint = await sha256Hex(image);
+    // Chunk 0 with a marker in sector 5; the rest of the span replays
+    // the base's own bytes so untouched sectors stay honest.
+    const chunk = image.slice(0, OVERLAY_CHUNK_BYTES);
+    chunk.fill(0x5e, 5 * SECTOR_SIZE, 6 * SECTOR_SIZE);
+
+    const messages: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => messages.push(m), autoRun: false });
+    host.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: image,
+        overlay: {
+          chunks: [{ chunkIndex: 0, bytes: chunk }],
+          chunkSizeBytes: OVERLAY_CHUNK_BYTES,
+          fingerprint,
+        },
+      },
+    });
+    await host.whenIdle();
+
+    expect(identities(messages)[0]?.applied).toBe(true);
+    expect(identities(messages)[0]?.chunksOffered).toBe(1);
+    expect(host.machine?.disk?.readSector(5)[0]).toBe(0x5e);
+    expect(host.machine?.disk?.readSector(64)[0]).toBe(0xf4); // past the chunk: base
+    // The folded state is the new RAM baseline — it is NOT hot-map
+    // content (folding is not writing).
+    expect(host.overlayDisk?.hotSectorCount).toBe(0);
+  });
+
+  it('REFUSES the fold on a fingerprint mismatch and says so', async () => {
+    const image = haltImage();
+    const chunk = new Uint8Array(OVERLAY_CHUNK_BYTES).fill(0x99);
+    const messages: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => messages.push(m), autoRun: false });
+    host.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: image,
+        overlay: {
+          chunks: [{ chunkIndex: 0, bytes: chunk }],
+          chunkSizeBytes: OVERLAY_CHUNK_BYTES,
+          fingerprint: 'not-the-real-fingerprint',
+        },
+      },
+    });
+    await host.whenIdle();
+
+    const id = identities(messages)[0];
+    expect(id?.applied).toBe(false);
+    expect(id?.chunksOffered).toBe(1);
+    expect(host.machine?.disk?.readSector(0)[0]).toBe(0xf4); // untouched base
   });
 });
 

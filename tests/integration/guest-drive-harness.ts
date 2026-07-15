@@ -18,7 +18,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { WorkerHost } from '../../src/browser/worker-host.js';
-import type { DiskSlotSpec, WorkerToMainMessage } from '../../src/browser/protocol.js';
+import type {
+  BootConfig,
+  DiskSlotSpec,
+  WorkerToMainMessage,
+} from '../../src/browser/protocol.js';
 
 export const HD32_PATH = resolve('reference/elks-images-hd', 'hd32-minix.img');
 
@@ -38,13 +42,27 @@ export interface GuestSession {
   txText: () => string;
 }
 
-/** Boot hd32-minix.img with `secondary` attached; log in as root. */
-export async function bootGuest(secondary: DiskSlotSpec): Promise<GuestSession> {
+/**
+ * Boot hd32-minix.img with `secondary` attached; log in as root.
+ * `opts.overlay` (Phase 17 M2) rides the boot config so the two-boot
+ * overlay acceptance drives the exact fold path the browser uses.
+ */
+export async function bootGuest(
+  secondary: DiskSlotSpec,
+  opts: { overlay?: BootConfig['overlay'] } = {},
+): Promise<GuestSession> {
   const raw = readFileSync(HD32_PATH);
   const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
   const posts: WorkerToMainMessage[] = [];
   const host = new WorkerHost({ post: (m) => posts.push(m), autoRun: false });
-  host.handleMessage({ type: 'boot', config: { imageBytes: bytes, secondary } });
+  host.handleMessage({
+    type: 'boot',
+    config: {
+      imageBytes: bytes,
+      secondary,
+      ...(opts.overlay !== undefined ? { overlay: opts.overlay } : {}),
+    },
+  });
   await host.whenIdle();
   const txText = (): string => {
     let s = '';

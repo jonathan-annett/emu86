@@ -32,11 +32,16 @@
  *     boot, which replaces the fork with a fresh blank of this size.
  *     Session-scoped on purpose: it must only ever swap THIS tab's
  *     drive, never the shared base image.
- *   - `overlayId` — Phase 17 M1: the key this tab's boot-disk overlay
- *     chunks live under in `emu86-overlays`. PROVISIONAL identity in
- *     M1 (minted on first sweep): M2 adds the Web-Lock duplication
- *     handling and GC — until then a duplicated tab shares its
- *     parent's id, the known octet-lease caveat above.
+ *   - `overlayId` — Phase 17 M1/M2: the key this tab's boot-disk
+ *     overlay chunks live under in `emu86-overlays`. Settled pre-boot
+ *     by overlay-session.ts (M2): Web Lock detects duplication and
+ *     copies chunks under a fresh id — the octet-lease pattern's
+ *     third deployment, as the caveat above predicted.
+ *   - `overlayResetPending` — Phase 17 M2: a queued factory reset.
+ *     Set by the settings modal; consumed at the tab's next boot,
+ *     which drops the overlay so the machine boots the pristine base
+ *     (the pendingBlankKb pattern). Session-scoped: resets THIS tab's
+ *     machine state only.
  *
  * Fail-open like settings.ts: no sessionStorage (sandboxed iframe,
  * exotic privacy mode) degrades to fresh ephemeral values per load.
@@ -53,6 +58,8 @@ export interface SessionState {
   pendingBlankKb: number | null;
   /** This tab's boot-disk overlay key (Phase 17 M1), or null before the first sweep. */
   overlayId: string | null;
+  /** Queued factory reset (Phase 17 M2) — consumed at next boot. */
+  overlayResetPending: boolean;
 }
 
 const STORAGE_KEY = 'emu86.session.v1';
@@ -67,6 +74,7 @@ function freshState(): SessionState {
     driveForkId: null,
     pendingBlankKb: null,
     overlayId: null,
+    overlayResetPending: false,
   };
 }
 
@@ -93,6 +101,7 @@ export function loadSession(): SessionState {
           driveForkId?: unknown;
           pendingBlankKb?: unknown;
           overlayId?: unknown;
+          overlayResetPending?: unknown;
         };
         if (typeof obj.sessionId === 'string' && obj.sessionId.length > 0) {
           state = {
@@ -113,6 +122,7 @@ export function loadSession(): SessionState {
               typeof obj.overlayId === 'string' && obj.overlayId.length > 0
                 ? obj.overlayId
                 : null,
+            overlayResetPending: obj.overlayResetPending === true,
           };
         }
       }

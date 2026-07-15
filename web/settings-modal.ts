@@ -71,6 +71,18 @@ export interface SettingsModalDeps {
    * unlike image sources, speed applies without a reload.
    */
   onCpuSpeedChange?: (mode: 'authentic' | 'turbo') => void;
+  /**
+   * Machine state (Phase 17 M2 — the boot-disk overlay). Absent in
+   * the degraded no-overlay boot. `onFactoryReset` QUEUES the reset
+   * (consumed at the tab's next boot — the pendingBlankKb pattern);
+   * `staleState` is non-null when this session detected machine
+   * state saved against a DIFFERENT base image (kept unused; the
+   * callback discards it now).
+   */
+  machineState?: {
+    onFactoryReset: () => void;
+    staleState: () => { discard: () => Promise<void> } | null;
+  };
 }
 
 /** 100 MB cap on local uploads — aligned with GITHUB_DOWNLOAD_MAX_BYTES.
@@ -410,6 +422,58 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
       onChange: deps.onChange,
     }));
     host.appendChild(scriptSection.el);
+
+    /* Machine state (Phase 17 M2) --------------------------------- */
+    if (deps.machineState !== undefined) {
+      const ms = deps.machineState;
+      const stateSection = section('Machine state');
+      const stateHint = document.createElement('div');
+      stateHint.className = 'emu86-hint';
+      stateHint.textContent =
+        'Changes the guest makes to its boot disk persist per-tab and ' +
+        'are restored on reload. Reset boots the pristine base image ' +
+        'again — the escape hatch if the guest wrecks its own root ' +
+        'filesystem.';
+      stateSection.body.appendChild(stateHint);
+
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'emu86-button';
+      resetBtn.textContent = 'Reset machine state…';
+      resetBtn.addEventListener('click', () => {
+        ms.onFactoryReset();
+        resetBtn.textContent = 'Reset queued — reload to apply';
+        resetBtn.disabled = true;
+      });
+      stateSection.body.appendChild(resetBtn);
+
+      const stale = ms.staleState();
+      if (stale !== null) {
+        const staleRow = document.createElement('div');
+        staleRow.className = 'emu86-upload-row';
+        const staleBtn = document.createElement('button');
+        staleBtn.type = 'button';
+        staleBtn.className = 'emu86-button';
+        staleBtn.textContent = 'Discard state from previous base image';
+        const staleNote = document.createElement('span');
+        staleNote.className = 'emu86-hint';
+        staleNote.textContent =
+          'saved against a different base image — kept, but unused';
+        staleRow.append(staleBtn, staleNote);
+        staleBtn.addEventListener('click', () => {
+          staleBtn.disabled = true;
+          void stale.discard().then(
+            () => { staleNote.textContent = 'discarded.'; },
+            (err: unknown) => {
+              staleBtn.disabled = false;
+              staleNote.textContent = `discard failed: ${String(err)}`;
+            },
+          );
+        });
+        stateSection.body.appendChild(staleRow);
+      }
+      host.appendChild(stateSection.el);
+    }
 
     /* Storage usage ---------------------------------------------- */
     const storageSection = section('Storage usage');

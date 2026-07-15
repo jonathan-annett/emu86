@@ -61,6 +61,13 @@ import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
 import { OverlayStore } from './overlay-store.js';
+import {
+  gcOrphanOverlays,
+  mintOverlayId,
+  overlayLockName,
+  resolveOverlaySession,
+  type OverlaySession,
+} from './overlay-session.js';
 import { mountEditorPanel } from './editor-panel.js';
 import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, reconcileSeededScripts } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
@@ -157,6 +164,31 @@ async function init(): Promise<void> {
   }
   void gcOrphanForks(library, forkLocks).then((n) => {
     if (n > 0) console.debug(`[emu86] swept ${n} orphaned tab drive${n === 1 ? '' : 's'}`);
+  }).catch(() => { /* sweep is best-effort */ });
+
+  // Boot-disk overlay session (Phase 17 M2): settle this tab's
+  // overlayId — fresh / reload / duplicate-copies-under-fresh-id /
+  // queued-factory-reset — and load the chunks the worker will fold.
+  // Same lock wrapper as the forks (the octet-lease pattern's third
+  // deployment); failure degrades to a pristine boot, never a dead
+  // page. Orphans GC in the background, mirror of the fork sweep.
+  const overlayStore = new OverlayStore();
+  let overlaySession: OverlaySession | null = null;
+  try {
+    overlaySession = await resolveOverlaySession({
+      store: overlayStore,
+      locks: forkLocks,
+      loadSession,
+      saveSession,
+    });
+    for (const note of overlaySession.notes) {
+      console.debug(`[emu86] machine state: ${note}`);
+    }
+  } catch (err) {
+    console.warn('[emu86] machine-state overlay unavailable, booting pristine:', err);
+  }
+  void gcOrphanOverlays(overlayStore, forkLocks).then((n) => {
+    if (n > 0) console.debug(`[emu86] swept ${n} orphaned machine overlay${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);
@@ -262,25 +294,26 @@ async function init(): Promise<void> {
     });
   }
 
-  // Boot-disk overlay persistence (Phase 17 M1). The worker sweeps
+  // Boot-disk overlay persistence (Phase 17 M1+M2). The worker sweeps
   // coalesced chunk epochs at its own cadence (5 s throttle / 4 MB
   // forced); this side persists each epoch in ONE IndexedDB
   // transaction and acks with the same epoch id — a nack (or silence)
   // folds the epoch back into the worker's hot map for retry, so a
-  // failed IDB write loses nothing. Identity is PROVISIONAL in M1: a
-  // per-tab overlayId minted on first sweep, no fingerprint, no
-  // duplication lock, no GC — that whole lifecycle is M2, and until
-  // then nothing reads these chunks back at boot.
-  const overlayStore = new OverlayStore();
+  // failed IDB write loses nothing. Identity (M2): sweeps land under
+  // the session's resolved overlayId and stamp the base fingerprint
+  // the worker reported this boot; on a fingerprint MISMATCH (base
+  // changed under the tab's machine state) sweeps move to a fresh id
+  // so the kept rows aren't clobbered — discard is a settings action.
+  let activeOverlayId: string | null = overlaySession?.overlayId ?? null;
+  let bootFingerprint: string | null = null;
+  let staleOverlayId: string | null = null;
   function ensureOverlayId(): string {
-    const session = loadSession();
-    if (session.overlayId !== null) return session.overlayId;
-    const id =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `o-${Math.random().toString(36).slice(2)}`;
-    saveSession({ overlayId: id });
-    return id;
+    // Fallback for the degraded path (resolveOverlaySession threw but
+    // sweeps still arrive): mint-and-persist, no lock, best effort.
+    if (activeOverlayId !== null) return activeOverlayId;
+    activeOverlayId = loadSession().overlayId ?? mintOverlayId();
+    saveSession({ overlayId: activeOverlayId });
+    return activeOverlayId;
   }
 
   const AUTO_PERSIST_MS = 5_000;
@@ -395,12 +428,14 @@ async function init(): Promise<void> {
       // Phase 17 M1: persist the epoch — one transaction — then ack
       // with the same id. On failure, nack honestly: the worker folds
       // the epoch back and retries, so an IDB hiccup costs latency,
-      // not data. baseFingerprint stays null until M2 stamps identity.
+      // not data. M2: the meta row carries the base fingerprint the
+      // worker reported this boot (null only on the degraded path —
+      // the store's merge rule never downgrades a real one).
       const overlayId = ensureOverlayId();
       overlayStore
         .putChunks(overlayId, msg.chunks, {
           chunkSizeBytes: msg.chunkSizeBytes,
-          baseFingerprint: null,
+          baseFingerprint: bootFingerprint,
         })
         .then(
           () => {
@@ -458,6 +493,27 @@ async function init(): Promise<void> {
           worker.postMessage(resp);
         },
       );
+      return;
+    }
+    if (msg.type === 'overlay-identity') {
+      // Phase 17 M2: the base's fingerprint, every boot. Future sweeps
+      // stamp it into the meta row. applied:false with chunks offered
+      // means the worker REFUSED the fold — this tab's machine state
+      // belongs to a different base image. Keep those rows (the user
+      // may switch the base back); move this session's sweeps to a
+      // fresh id so they can't clobber what we kept; the settings
+      // modal offers the discard.
+      bootFingerprint = msg.fingerprint;
+      if (!msg.applied && msg.chunksOffered > 0) {
+        staleOverlayId = activeOverlayId;
+        activeOverlayId = mintOverlayId();
+        saveSession({ overlayId: activeOverlayId });
+        void forkLocks.acquireForever(overlayLockName(activeOverlayId));
+        term.writeln(
+          '[machine state was saved against a different base image — ' +
+            'kept unused; Settings → Machine state can discard it]',
+        );
+      }
       return;
     }
     if (msg.type === 'tan-identity') {
@@ -570,7 +626,24 @@ async function init(): Promise<void> {
   }
   // Pacing: initial CPU speed from settings.
   boot.config.cpuSpeed = settings.cpuSpeed;
-  worker.postMessage(boot);
+  // Machine state (Phase 17 M2): hand the worker this tab's overlay to
+  // fold. Chunk buffers ride as Transferables — fresh out of IDB,
+  // referenced nowhere else on this side, and a 32 MB machine's worth
+  // of chunks would otherwise structured-clone twice.
+  const bootTransfers = new Set<ArrayBuffer>();
+  if (overlaySession !== null && overlaySession.boot !== null) {
+    boot.config.overlay = {
+      chunks: overlaySession.boot.chunks,
+      chunkSizeBytes: overlaySession.boot.chunkSizeBytes,
+      fingerprint: overlaySession.boot.fingerprint,
+    };
+    for (const chunk of overlaySession.boot.chunks) {
+      if (chunk.bytes.buffer instanceof ArrayBuffer) {
+        bootTransfers.add(chunk.bytes.buffer);
+      }
+    }
+  }
+  worker.postMessage(boot, [...bootTransfers]);
 
   // (The Phase 15 M2 single-writer Web Lock that used to live here is
   // retired: it guarded a shared mutable attach that no longer exists.
@@ -592,6 +665,24 @@ async function init(): Promise<void> {
     onCpuSpeedChange: (mode) => {
       const msg: MainToWorkerMessage = { type: 'set-speed', mode };
       worker.postMessage(msg);
+    },
+    // Machine state (Phase 17 M2): factory reset queues (consumed at
+    // next boot — a running machine can't un-write its RAM); the
+    // stale-state discard appears only after a mismatch this session.
+    machineState: {
+      onFactoryReset: () => {
+        saveSession({ overlayResetPending: true });
+      },
+      staleState: () => {
+        const stale = staleOverlayId;
+        if (stale === null) return null;
+        return {
+          discard: async () => {
+            await overlayStore.deleteOverlay(stale);
+            staleOverlayId = null;
+          },
+        };
+      },
     },
   });
 

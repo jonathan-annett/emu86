@@ -72,6 +72,70 @@ export interface OverlayDiskOptions {
   chunkBytes?: number;
 }
 
+/** The chunk set a boot folds — matches BootConfig's overlay carriage. */
+export interface OverlayFoldInput {
+  chunks: readonly OverlayChunk[];
+  /** The aligned span the chunks were swept under (self-describing —
+   *  fold must not assume the CURRENT constant, which may retune). */
+  chunkSizeBytes: number;
+}
+
+/**
+ * Fold swept chunks over a base image (Phase 17 M2): returns a
+ * full-disk-size buffer — base bytes zero-padded to `diskSizeBytes`,
+ * then each chunk written at its aligned offset. Chunks are byte
+ * spans, not sector maps, so later stamps (bootopts patch) apply on
+ * the RESULT — the order is base → overlay → stamps (brief §1.4).
+ * Throws on a chunk outside the disk: the caller verified the base
+ * fingerprint, so an out-of-range chunk is a corrupt store, not a
+ * mismatch to tolerate.
+ */
+export function foldOverlay(
+  base: Uint8Array,
+  diskSizeBytes: number,
+  overlay: OverlayFoldInput,
+): Uint8Array {
+  if (base.length > diskSizeBytes) {
+    throw new Error(
+      `foldOverlay: base image (${base.length} B) exceeds disk size (${diskSizeBytes} B)`,
+    );
+  }
+  const out = new Uint8Array(diskSizeBytes);
+  out.set(base, 0);
+  for (const chunk of overlay.chunks) {
+    const offset = chunk.chunkIndex * overlay.chunkSizeBytes;
+    if (offset < 0 || offset + chunk.bytes.length > diskSizeBytes) {
+      throw new Error(
+        `foldOverlay: chunk ${chunk.chunkIndex} (${chunk.bytes.length} B at ${offset}) ` +
+          `outside disk (${diskSizeBytes} B)`,
+      );
+    }
+    out.set(chunk.bytes, offset);
+  }
+  return out;
+}
+
+/**
+ * SHA-256 of `bytes` as lowercase hex — the overlay identity
+ * fingerprint (brief §1.3: overlay validity is keyed to the EXACT
+ * base). `crypto.subtle` is native in workers, browsers, and Node —
+ * no new deps (hard rule 2). ~tens of ms over a 32 MB image, once
+ * per boot, pre-run.
+ */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  // crypto.subtle wants a view over a plain ArrayBuffer; TS 5.7+ types
+  // Uint8Array generically over ArrayBufferLike. The copy keeps this
+  // correct for ANY view (offset, shared backing) without type
+  // gymnastics — one extra pass over the bytes, boot-time only.
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+  const view = new Uint8Array(digest);
+  let hex = '';
+  for (let i = 0; i < view.length; i++) {
+    hex += (view[i] ?? 0).toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
 /**
  * Disk decorator + overlay epoch state machine. Wraps the primary
  * disk transparently — the machine and BIOS see only {@link Disk}.

@@ -21,6 +21,8 @@ import {
   FORCED_SWEEP_BYTES,
   OVERLAY_CHUNK_BYTES,
   OverlayDisk,
+  foldOverlay,
+  sha256Hex,
   type OverlayChunk,
 } from '../../src/disk/overlay.js';
 
@@ -285,5 +287,47 @@ describe('OverlayDisk — M1 acceptance', () => {
     expect(chunks[0]?.bytes.buffer).not.toBe(chunks[1]?.bytes.buffer);
     expect(chunks[0]?.bytes.byteOffset).toBe(0);
     expect(chunks[0]?.bytes.byteLength).toBe(chunks[0]?.bytes.buffer.byteLength);
+  });
+});
+
+describe('foldOverlay + sha256Hex (Phase 17 M2)', () => {
+  it('folds chunks over a zero-padded base at their aligned offsets', () => {
+    const base = new Uint8Array([1, 2, 3, 4]);
+    const folded = foldOverlay(base, 4096, {
+      chunkSizeBytes: 1024,
+      chunks: [
+        { chunkIndex: 1, bytes: new Uint8Array(1024).fill(0xbb) },
+        { chunkIndex: 3, bytes: new Uint8Array(512).fill(0xcc) }, // short tail
+      ],
+    });
+    expect(folded.length).toBe(4096);
+    expect(folded[0]).toBe(1);      // base survives
+    expect(folded[4]).toBe(0);      // zero-pad past base
+    expect(folded[1024]).toBe(0xbb);
+    expect(folded[2047]).toBe(0xbb);
+    expect(folded[2048]).toBe(0);   // untouched chunk 2
+    expect(folded[3072]).toBe(0xcc);
+    expect(folded[3584]).toBe(0);   // past the short tail chunk
+  });
+
+  it('rejects a chunk outside the disk and an oversized base', () => {
+    expect(() =>
+      foldOverlay(new Uint8Array(16), 1024, {
+        chunkSizeBytes: 1024,
+        chunks: [{ chunkIndex: 1, bytes: new Uint8Array(8) }],
+      }),
+    ).toThrow(/outside disk/);
+    expect(() =>
+      foldOverlay(new Uint8Array(2048), 1024, { chunkSizeBytes: 1024, chunks: [] }),
+    ).toThrow(/exceeds disk size/);
+  });
+
+  it('sha256Hex matches the known test vectors', async () => {
+    expect(await sha256Hex(new Uint8Array(0))).toBe(
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    );
+    expect(await sha256Hex(new TextEncoder().encode('abc'))).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
   });
 });

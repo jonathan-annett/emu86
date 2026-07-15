@@ -46,8 +46,13 @@ import type {
 } from './protocol.js';
 import { BrowserConsole } from './browser-console.js';
 import { IBMPCMachine } from '../machine/ibm-pc.js';
-import { InMemoryDisk, WriteTrackingDisk } from '../disk/disk.js';
-import { FORCED_SWEEP_BYTES, OverlayDisk } from '../disk/overlay.js';
+import { InMemoryDisk, SECTOR_SIZE, WriteTrackingDisk } from '../disk/disk.js';
+import {
+  FORCED_SWEEP_BYTES,
+  OverlayDisk,
+  foldOverlay,
+  sha256Hex,
+} from '../disk/overlay.js';
 import { NodeHostClock } from '../host-clock/host-clock.js';
 import {
   installCGAMirror,
@@ -194,6 +199,10 @@ export interface WorkerHostOptions {
 interface ResolvedSlot {
   disk: InMemoryDisk;
   diskClass: DiskClass;
+  /** SHA-256 hex of the pristine bytes (primary slot only, Phase 17 M2). */
+  overlayFingerprint?: string;
+  /** Whether BootConfig.overlay chunks were folded in (primary only). */
+  overlayApplied?: boolean;
 }
 
 export interface RunResult {
@@ -796,7 +805,22 @@ export class WorkerHost {
             ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
           ]
         : [],
+      config.overlay,
     );
+
+    // Phase 17 M2: report the base's identity every boot. Main stamps
+    // the fingerprint into the overlay meta on future sweeps; applied
+    // false with chunks offered = the fold was REFUSED (base changed
+    // under the tab's machine state) and main moves sweeps to a fresh
+    // overlayId.
+    if (primary.overlayFingerprint !== undefined) {
+      this.#post({
+        type: 'overlay-identity',
+        fingerprint: primary.overlayFingerprint,
+        applied: primary.overlayApplied === true,
+        chunksOffered: config.overlay?.chunks.length ?? 0,
+      });
+    }
 
     let secondary: ResolvedSlot | null = null;
     if (config.secondary) {
@@ -930,6 +954,7 @@ export class WorkerHost {
     slotName: 'primary' | 'secondary',
     spec: DiskSlotSpec,
     extraBootoptsLines: readonly string[] = [],
+    overlay?: BootConfig['overlay'],
   ): Promise<ResolvedSlot> {
     let bytes: Uint8Array;
     if (spec.imageBytes) {
@@ -960,21 +985,60 @@ export class WorkerHost {
       diskClass ??= inferred.diskClass;
     }
     diskClass ??= classFromGeometry(geometry);
+
+    // Phase 17 M2 — overlay identity + fold, primary only. The
+    // fingerprint hashes the PRISTINE bytes every boot (identity is
+    // the exact base, not our per-boot stamps); offered chunks fold
+    // in ONLY on a match — a silently mis-applied overlay is a
+    // corrupt root fs (brief §1.3, hard invariant). Order below is
+    // base → overlay → stamps (§1.4).
+    let overlayFingerprint: string | undefined;
+    let overlayApplied = false;
+    if (slotName === 'primary') {
+      overlayFingerprint = await sha256Hex(bytes);
+      if (overlay !== undefined && overlay.chunks.length > 0) {
+        if (overlay.fingerprint === overlayFingerprint) {
+          const diskSizeBytes =
+            geometry.cylinders * geometry.heads * geometry.sectorsPerTrack * SECTOR_SIZE;
+          bytes = foldOverlay(bytes, diskSizeBytes, overlay);
+          overlayApplied = true;
+        }
+      }
+    }
+
     // Phase 14 M2: HD images default to the CGA console, which the
     // browser can't render — auto-patch /bootopts to console=ttyS0 so
     // the xterm terminal works. In-memory copy only (the stored library
     // image is untouched); floppies and already-serial images pass
     // through unchanged; images without a /bootopts block boot as-is.
+    // Phase 17 M2: after a fold the patch runs UNCONDITIONALLY — the
+    // folded image carries the PREVIOUS session's stamped block
+    // (console= present, stale LOCALIP), and the patch is idempotent
+    // by construction (drops active claims, re-appends ours), so this
+    // is what keeps the bootopts stamp region ours-per-boot (brief
+    // §1.4: guest edits to /bootopts don't survive, fold or no fold).
+    // A guest-mangled block that can't be patched (crammed past 1023
+    // bytes) boots unpatched with a warning — stamps are conveniences,
+    // never gates; factory reset is the escape hatch.
     if (
       slotName === 'primary' &&
       diskClass === 'hard-disk' &&
-      !hasSerialConsole(bytes)
+      (overlayApplied || !hasSerialConsole(bytes))
     ) {
-      const patched = patchBootoptsForSerial(bytes, extraBootoptsLines);
-      if (patched !== null) bytes = patched;
+      try {
+        const patched = patchBootoptsForSerial(bytes, extraBootoptsLines);
+        if (patched !== null) bytes = patched;
+      } catch (err) {
+        console.warn(`WorkerHost: /bootopts stamp skipped — ${String(err)}`);
+      }
     }
     const disk = new InMemoryDisk({ geometry, contents: bytes });
-    return { disk, diskClass };
+    return {
+      disk,
+      diskClass,
+      ...(overlayFingerprint !== undefined ? { overlayFingerprint } : {}),
+      ...(slotName === 'primary' ? { overlayApplied } : {}),
+    };
   }
 
   /**

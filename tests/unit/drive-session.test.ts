@@ -152,6 +152,7 @@ function makeSession(initial?: Partial<SessionState>): {
     driveForkId: null,
     pendingBlankKb: null,
     overlayId: null,
+    overlayResetPending: false,
     ...initial,
   };
   return {
