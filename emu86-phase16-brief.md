@@ -243,6 +243,39 @@ swap. Integration: the existing drives tests keep passing behind the
 fork layer; the two-boot persistence test round-trips through a
 fork + promote.
 
+## Addendum B (2026-07-15) — field item, TODO: guest line-editor keys
+
+Jonathan, same session M4 landed (verbatim symptoms): "the elks
+command line editor seems to be getting the wrong key when i hit
+backspace (or the xterm is sending confusing keys). if i am at the
+end of a line i have just typed it works fine. if i use the arrowkeys
+it deletes forwards instead of backwards. i also notice that the
+insert point (or delete point if i use backspace or delete) is one
+character off — meaning whatever i type or delete is one character to
+the right of what the cursor suggests."
+
+NOT diagnosed yet. Suspects, in rough order:
+1. **DEL vs BS**: xterm.js sends 0x7F for Backspace; ELKS's line
+   editor / tty erase char may expect 0x08 — would explain
+   delete-FORWARD (0x7F is also the delete-forward key in some
+   editors) while plain end-of-line backspace still works via the
+   tty's simpler erase path.
+2. **CSI parser off-by-one**: arrow keys are multi-byte (ESC [ D…);
+   if the guest's editor consumes one byte short, its internal column
+   drifts one right of the real cursor — matching BOTH the
+   insert-point offset and the arrows triggering it.
+3. **Prompt-length assumption**: PS1 grew from `# ` to `cat# ` with
+   the HOSTNAME stamp (API v1) — if the editor computes columns from
+   an assumed prompt width, the .tabs prompt would shift everything
+   (though the observed offset is 1, not the name's length —
+   weakest suspect).
+
+Diagnostics when picked up: reproduce with a solo machine (bare `# `
+prompt) to kill/confirm suspect 3; `stty` in the guest for the erase
+char; compare behavior over tab-to-tab telnet (different input path).
+May well be an UPSTREAM ELKS bug like the urlget overflow — diagnose
+before touching anything on our side.
+
 ## 4. Hard-rule notes for the implementing session
 
 - Rule 2 (no new deps): CodeJar is vendored source, not an npm dep;
