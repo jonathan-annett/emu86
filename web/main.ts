@@ -77,6 +77,7 @@ import {
   reconcileSeededScripts,
 } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
+import { gunzipStream } from './gzip.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -823,18 +824,12 @@ async function init(): Promise<void> {
       if (existing !== undefined) {
         imageId = existing.id; // downloaded on an earlier visit, never staged
       } else {
-        const releases = await listReleases({ includePrereleases: false, prereleaseLimit: 0 });
-        const asset = releases
-          .flatMap((r) => r.assets)
-          .find((a) => a.name === 'hd32-minix.img');
-        if (asset === undefined) return;
-        status.show(`fetching a hard disk… 0 / ${Math.round(asset.sizeBytes / 1048576)} MB`);
-        const bytes = await downloadAsset(asset.downloadUrl, (p) => {
-          const total = p.total ?? asset.sizeBytes;
-          status.show(
-            `fetching a hard disk… ${Math.round(p.loaded / 1048576)} / ${Math.round(total / 1048576)} MB`,
-          );
-        });
+        // Same-origin gzipped image first (Phase 17 follow-on): ~3 MB
+        // over the wire instead of ~31 MB, no GitHub API rate limit,
+        // byte-pinned to the repo's verified image. The release flow
+        // stays as the fallback for hosts without the asset.
+        const bytes = await fetchBundledHd(status) ?? await fetchReleaseHd(status);
+        if (bytes === null) return;
         imageId = await library.addImage('hd32-minix.img', bytes, 'github', 'likely-works');
       }
 
@@ -858,6 +853,48 @@ async function init(): Promise<void> {
       console.warn('[emu86] showcase staging failed:', err);
       status.hide();
     }
+  }
+
+  /** The same-origin gzipped HD image, or null if this host lacks it. */
+  async function fetchBundledHd(
+    status: ReturnType<typeof ensureShowcaseBanner>,
+  ): Promise<Uint8Array | null> {
+    try {
+      const res = await fetch('/hd32-minix.img.gz');
+      if (!res.ok || res.body === null) return null;
+      const totalMb = Math.round(
+        Number(res.headers.get('content-length') ?? 3_279_912) / 1048576,
+      );
+      status.show(`fetching a hard disk… 0 / ${totalMb} MB`);
+      const bytes = await gunzipStream(res.body, (loaded) => {
+        status.show(
+          `fetching a hard disk… ${Math.round(loaded / 1048576)} / ${totalMb} MB`,
+        );
+      });
+      return bytes;
+    } catch (err) {
+      // Corrupt asset (gzip CRC) or missing — the release flow decides.
+      console.warn('[emu86] bundled hd32 gz unavailable:', err);
+      return null;
+    }
+  }
+
+  /** The original GitHub-releases flow — the fallback path. */
+  async function fetchReleaseHd(
+    status: ReturnType<typeof ensureShowcaseBanner>,
+  ): Promise<Uint8Array | null> {
+    const releases = await listReleases({ includePrereleases: false, prereleaseLimit: 0 });
+    const asset = releases
+      .flatMap((r) => r.assets)
+      .find((a) => a.name === 'hd32-minix.img');
+    if (asset === undefined) return null;
+    status.show(`fetching a hard disk… 0 / ${Math.round(asset.sizeBytes / 1048576)} MB`);
+    return downloadAsset(asset.downloadUrl, (p) => {
+      const total = p.total ?? asset.sizeBytes;
+      status.show(
+        `fetching a hard disk… ${Math.round(p.loaded / 1048576)} / ${Math.round(total / 1048576)} MB`,
+      );
+    });
   }
 
   // Page unload cleans up workers automatically; no manual teardown needed.

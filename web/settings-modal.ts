@@ -411,24 +411,15 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
     void refreshSecondaryList(secondaryList);
 
-    /* Boot script (Phase 14 — autoexec) ---------------------------- */
-    // Named keystroke scripts typed into the console at boot by the
-    // prompt-aware runner (web/autoexec.ts). The picker chooses both
-    // what runs at next reload and what the editor below edits; "None"
-    // hides the editor and boots silent.
-    const scriptSection = section('Boot script');
-    const scriptHelp = document.createElement('div');
-    scriptHelp.className = 'emu86-hint';
-    scriptHelp.textContent =
-      'Typed into the console at boot — each line waits for a prompt ' +
-      '(login:/Password:/#/$); a line "@expect some text" makes the next ' +
-      'line wait for that output instead. Applies on next reload.';
-    scriptSection.body.appendChild(scriptHelp);
-    scriptSection.body.appendChild(renderBootScriptPane({
-      getSettings: deps.getSettings,
-      onChange: deps.onChange,
-    }));
-    host.appendChild(scriptSection.el);
+    // The Boot script section (Phase 14 — the keystroke-script picker
+    // and editor) was REMOVED here (Phase 17 wrap, Jonathan: "we can
+    // remove the keyboard script tool from the settings") — the boot
+    // is un-typed now and the show is native. The AutoexecRunner
+    // engine stays (the hello-human relay uses it), stored scripts and
+    // settings fields stay parsed (archived builds share this
+    // localStorage; a still-active custom script still runs, and the
+    // seeded ones are suppressed under autologin). Full retirement of
+    // the script machinery is a later phase, per brief §4.6.
 
     /* Machine state (Phase 17 M2) --------------------------------- */
     if (deps.machineState !== undefined) {
@@ -1017,176 +1008,6 @@ function renderGithubPane(opts: GithubPaneOpts): HTMLDivElement {
 
   wrap.appendChild(details);
   return wrap;
-}
-
-/* -------------------------------------------------------------------- */
-/* Boot script pane (Phase 14 — autoexec)                                 */
-/* -------------------------------------------------------------------- */
-
-interface BootScriptPaneOpts {
-  getSettings: () => Settings;
-  onChange: (s: Settings) => void;
-}
-
-/**
- * Picker + inline editor for boot scripts. The picker selects what runs
- * at next reload AND what the editor edits; "None" hides the editor and
- * boots silent. Edits write through on every input, same live-persist
- * pattern as the font/theme fields.
- */
-function renderBootScriptPane(opts: BootScriptPaneOpts): HTMLDivElement {
-  const root = document.createElement('div');
-
-  const pickerRow = document.createElement('div');
-  pickerRow.className = 'emu86-upload-row';
-  const select = document.createElement('select');
-  select.className = 'emu86-input-select';
-  select.setAttribute('aria-label', 'Boot script');
-  const newBtn = document.createElement('button');
-  newBtn.type = 'button';
-  newBtn.className = 'emu86-button';
-  newBtn.textContent = 'New script';
-  pickerRow.append(select, newBtn);
-
-  const editor = document.createElement('div');
-  editor.className = 'emu86-bootscript-editor';
-  const nameRow = document.createElement('div');
-  nameRow.className = 'emu86-upload-row';
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'emu86-input-text';
-  nameInput.setAttribute('aria-label', 'Boot script name');
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'emu86-button';
-  deleteBtn.textContent = 'Delete';
-  nameRow.append(nameInput, deleteBtn);
-  const textArea = document.createElement('textarea');
-  textArea.className = 'emu86-textarea';
-  textArea.rows = 6;
-  textArea.spellcheck = false;
-  textArea.setAttribute('aria-label', 'Boot script contents');
-
-  // @directive cheat sheet (field request) — collapsed by default,
-  // content mirrors parseScript() in web/autoexec.ts. If a directive
-  // changes there, change it here.
-  const cheat = document.createElement('details');
-  cheat.className = 'emu86-cheatsheet';
-  const cheatSummary = document.createElement('summary');
-  cheatSummary.textContent = '@directive cheat sheet';
-  const cheatBody = document.createElement('pre');
-  cheatBody.textContent = [
-    'plain line      sent after the next prompt (login: / Password: / # / $ / > )',
-    '@expect TEXT    next line waits for TEXT in output instead of a prompt',
-    '@type           lines below are typed key-by-key, with key clicks',
-    '@instant        lines below are sent whole (default)',
-    '@here … @end    verbatim block for heredocs: every line incl. blanks,',
-    '                each waiting for the "> " continuation prompt (tty-safe)',
-    '@turbo          uncap CPU speed from here on (this session only)',
-    '@authentic      back to 4.77 MHz pacing (this session only)',
-  ].join('\n');
-  cheat.append(cheatSummary, cheatBody);
-
-  editor.append(nameRow, textArea, cheat);
-
-  root.append(pickerRow, editor);
-
-  function activeScript(): BootScript | undefined {
-    const s = opts.getSettings();
-    return s.bootScripts.find((x) => x.id === s.activeBootScriptId);
-  }
-
-  /** Replace one script by id, immutably, and persist. */
-  function updateScript(id: string, patch: Partial<BootScript>): void {
-    const cur = opts.getSettings();
-    opts.onChange({
-      ...cur,
-      bootScripts: cur.bootScripts.map((x) => (x.id === id ? { ...x, ...patch } : x)),
-    });
-  }
-
-  function render(): void {
-    const s = opts.getSettings();
-    select.innerHTML = '';
-    const none = document.createElement('option');
-    none.value = '';
-    none.textContent = 'None (boot silent)';
-    select.appendChild(none);
-    for (const script of s.bootScripts) {
-      const opt = document.createElement('option');
-      opt.value = script.id;
-      opt.textContent = script.name;
-      if (script.id === s.activeBootScriptId) opt.selected = true;
-      select.appendChild(opt);
-    }
-    const active = activeScript();
-    editor.hidden = active === undefined;
-    if (active !== undefined) {
-      nameInput.value = active.name;
-      textArea.value = active.text;
-    }
-  }
-
-  select.addEventListener('change', () => {
-    const cur = opts.getSettings();
-    opts.onChange({
-      ...cur,
-      activeBootScriptId: select.value === '' ? null : select.value,
-    });
-    render();
-  });
-
-  newBtn.addEventListener('click', () => {
-    const cur = opts.getSettings();
-    const script: BootScript = {
-      id: crypto.randomUUID(),
-      name: 'new script',
-      text: '',
-    };
-    opts.onChange({
-      ...cur,
-      bootScripts: [...cur.bootScripts, script],
-      activeBootScriptId: script.id,
-    });
-    render();
-    nameInput.focus();
-    nameInput.select();
-  });
-
-  // Editing a seeded script ADOPTS it: `userEdited` makes it the user's
-  // for good, so no shipped fix ever silently overwrites their work
-  // (see reconcileSeededScripts in settings.ts).
-  nameInput.addEventListener('input', () => {
-    const active = activeScript();
-    if (active === undefined) return;
-    updateScript(active.id, { name: nameInput.value, userEdited: true });
-    // Keep the picker label in sync without a full re-render (which
-    // would fight the user's caret).
-    for (const opt of Array.from(select.options)) {
-      if (opt.value === active.id) opt.textContent = nameInput.value;
-    }
-  });
-
-  textArea.addEventListener('input', () => {
-    const active = activeScript();
-    if (active === undefined) return;
-    updateScript(active.id, { text: textArea.value, userEdited: true });
-  });
-
-  deleteBtn.addEventListener('click', () => {
-    const active = activeScript();
-    if (active === undefined) return;
-    const cur = opts.getSettings();
-    opts.onChange({
-      ...cur,
-      bootScripts: cur.bootScripts.filter((x) => x.id !== active.id),
-      activeBootScriptId: null,
-    });
-    render();
-  });
-
-  render();
-  return root;
 }
 
 function tagBadge(tag: ViabilityTag): HTMLSpanElement {
