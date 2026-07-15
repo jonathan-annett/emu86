@@ -48,18 +48,23 @@ at /9728bb6-dirty/ per `RELEASE_PROCEDURE.md` (read it before any
 promotion; settings are key-versioned per semantic era —
 `SETTINGS_VERSIONING_REPORT.md`). Deploys: `npm run deploy:dev` (test
 tier), `npm run deploy:prod` (stable); needs `~/cf-token.env`; the
-FULL suite gates every deploy. **The living plan is
-`emu86-phase17-brief.md`** — boot-disk COW overlay + load-time stamps
-+ the un-typed boot (autologin user1, self-deleting first-boot show);
-its §4 decisions are made, M1 (overlay engine) is next. The old list
-below stands as history.
+FULL suite gates every deploy. **PHASE 17 IS DONE AND FIELD-ACCEPTED (2026-07-15)** — boot-disk COW
+overlay (M1), fold + SHA-256 identity + lifecycle (M2), the un-typed
+boot (M3: autologin user1, per-boot stamps, the native hello-human
+show), and the M4 field loop (setuid passwd/login, stamped /bin/ping,
+replay-proof show — `PHASE17_M4_REPORT.md` is the closing record; the
+brief's §4.7 Addendum B carries the settled M3 design). The dev tier
+carries the full line; **stable promotion is Jonathan's call** per
+RELEASE_PROCEDURE.md. Next-phase candidates (his call): EMBEDDING.md
+handover doc, §3.5 state capture, boot-script retirement. The old
+list below stands as history.
 
 ## 2. Test baseline — read this before you think you broke something
 
 ```
 npm install
 npm run build      # tsc --noEmit (typecheck; `npm run typecheck` covers all configs)
-npx vitest run     # → 1,338 passed, 124 files, 1 skipped (as of 2026-07-15, post-Phase-17-M3)
+npx vitest run     # → 1,339 passed, 2 skipped (as of 2026-07-15, Phase 17 complete; skips = SST corpus + the env-gated ping-binary generator)
 ```
 
 The one **skipped** file is `tests/sst/corpus.test.ts`: it needs the
