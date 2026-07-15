@@ -427,6 +427,11 @@ async function init(): Promise<void> {
     showMarkerTail = (showMarkerTail + text).slice(-256);
     if (!showMarkerTail.includes(HELLO_HUMAN_MARKER)) return;
     showFired = true;
+    // Once-per-drive depends on the .welcome deletion being PERSISTED
+    // before any refresh. The seeded .profile syncs before emitting
+    // the marker, so the deletion is on the virtual disk right now —
+    // force-persist the fork past the 5 s throttle to pin it.
+    maybeAutoPersist(true);
     showRunner = new AutoexecRunner({
       script: showScriptText,
       send: (t) => {

@@ -136,6 +136,15 @@ describe('applyImageStamps on the real image', () => {
     expect(SKEL_PROFILE).toContain(HELLO_HUMAN_MARKER);
     expect(SKEL_PROFILE).toContain('test -f $HOME/.welcome');
     expect(SKEL_PROFILE).toContain('rm -f $HOME/.welcome');
+    // rm → sync → marker, in that order: by marker time the deletion
+    // is on the virtual disk, so main's forced persist pins it and a
+    // quick refresh cannot replay the show (field, 2026-07-15).
+    const rm = SKEL_PROFILE.indexOf('rm -f $HOME/.welcome');
+    const sync = SKEL_PROFILE.indexOf('sync');
+    const marker = SKEL_PROFILE.indexOf(HELLO_HUMAN_MARKER);
+    expect(rm).toBeGreaterThan(-1);
+    expect(sync).toBeGreaterThan(rm);
+    expect(marker).toBeGreaterThan(sync);
   });
 });
 
