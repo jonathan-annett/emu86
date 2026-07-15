@@ -106,7 +106,26 @@ the storage key. Each archive era then owns its key.
   commit that ships this report; Jonathan's archive re-check is the
   acceptance.
 
-## 7. Loose end for the next promotion
+## 7. Lore: the 9728bb6 drive spelunker hack
+
+Found by Jonathan during the same field session, and his words: it
+"will go down in emu86 lore." The archived build's secondary picker
+predates forks, so it lists EVERY drive row in the shared library —
+including other tabs' private forks — as ordinary attachable images.
+And because its era's attach reads bytes at boot and never writes
+back, the archive is a **read-only cross-tab drive inspector**: open
+`/9728bb6-dirty/`, pick another tab's fork, mount it in the guest,
+and spelunk a different tab's drive with zero corruption risk.
+
+Honest limits: the view is the fork as of its last auto-persist
+(≤5 s stale while its owner writes, possibly crash-consistent — the
+fsck class), and the hack is unique to the 9728bb6 era — every
+future archive is fork-aware and hides fork rows from its picker.
+If cross-tab drive inspection is ever wanted as a real feature, it
+belongs in the current line (the M4 panel or a `?peers`-style
+substrate angle) — recorded here so the want has a name.
+
+## 8. Loose end for the next promotion
 
 The NEXT capture (of the current live prod, `9728bb6-dirty`) is
 already taken; the first capture of a fork-aware build will archive a
