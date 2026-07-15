@@ -254,16 +254,25 @@ insert point (or delete point if i use backspace or delete) is one
 character off — meaning whatever i type or delete is one character to
 the right of what the cursor suggests."
 
-NOT diagnosed yet. Suspects, in rough order:
-1. **DEL vs BS**: xterm.js sends 0x7F for Backspace; ELKS's line
-   editor / tty erase char may expect 0x08 — would explain
-   delete-FORWARD (0x7F is also the delete-forward key in some
-   editors) while plain end-of-line backspace still works via the
-   tty's simpler erase path.
-2. **CSI parser off-by-one**: arrow keys are multi-byte (ESC [ D…);
-   if the guest's editor consumes one byte short, its internal column
-   drifts one right of the real cursor — matching BOTH the
-   insert-point offset and the arrows triggering it.
+REFINED same night: "the insert point under the cursor is correct —
+it's just the backspace key that's wrong — it's deleting forwards
+instead of backwards." So there is ONE bug, not two: mid-line
+Backspace acts as delete-forward; insertion and the cursor agree.
+(At end of line it "works" because the editor apparently takes a
+simpler erase path there — or because deleting forward at EOL has
+nothing to eat and the observed delete came from that simpler path.)
+
+NOT diagnosed yet. With the refinement, ONE suspect dominates:
+1. **DEL vs BS**: xterm.js sends 0x7F for Backspace; many editors
+   (and ELKS's shell line editor, plausibly) bind 0x7F to
+   DELETE-FORWARD and 0x08 (Ctrl-H) to backspace. Everything Jonathan
+   sees fits: mid-line Backspace eats the character AHEAD, insertion
+   is untouched, EOL "works" via the simpler erase path. Quick
+   guest-side probe: does Ctrl-H mid-line delete backwards correctly?
+   If yes, the fix could even be OUR side — an xterm.js option or a
+   key handler mapping Backspace to 0x08 for this guest.
+2. ~~CSI parser off-by-one drifting the insert point~~ — mooted by
+   the refinement: the insert point is correct.
 3. ~~Prompt-length assumption (the `cat# ` HOSTNAME prompt)~~ —
    RULED OUT by Jonathan same night: "this off by one observation
    predates cat# etc". The bug is older than the API v1 prompt.
