@@ -98,6 +98,8 @@ describe('settings', () => {
       bootScripts: [{ id: 'bs-1', name: 'network', text: 'root\nnet start ne0\n' }],
       activeBootScriptId: 'bs-1',
       cpuSpeed: 'authentic',
+      autologin: 'user1',
+      autoNet: true,
     };
     saveSettings(target);
     const loaded = loadSettings();
@@ -184,6 +186,8 @@ describe('settings', () => {
       bootScripts: [],
       activeBootScriptId: null,
       cpuSpeed: 'authentic',
+      autologin: 'user1',
+      autoNet: true,
     };
     saveSettings(target);
     docTarget.removeEventListener(SETTINGS_CHANGED_EVENT, handler);
@@ -200,6 +204,8 @@ describe('settings', () => {
       bootScripts: [],
       activeBootScriptId: null,
       cpuSpeed: 'authentic',
+      autologin: 'user1',
+      autoNet: true,
     });
     const original = loadSettings();
 
@@ -277,6 +283,8 @@ describe('settings', () => {
       bootScripts: [],
       activeBootScriptId: null,
       cpuSpeed: 'authentic',
+      autologin: 'user1',
+      autoNet: true,
     });
     const stale = loadSettings();
     const fixed = await validateImageSourceAgainstLibrary(

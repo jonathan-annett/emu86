@@ -60,6 +60,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
+import { HELLO_HUMAN_MARKER } from '../src/browser/image-stamps.js';
 import { OverlayStore } from './overlay-store.js';
 import {
   gcOrphanOverlays,
@@ -393,12 +394,57 @@ async function init(): Promise<void> {
     }
   }
 
+  // Phase 17 M3 — the hello-human show. The fork's seeded .profile
+  // emits the marker exactly once per drive (guest-initiated); the
+  // host renders the performance through the SAME typing relay as
+  // boot scripts, with the key-click silenced (Jonathan: "the typing
+  // relay minus the cheezy sound fx"). The script is the landing
+  // demo's ceremony minus its login/net lines — autologin already
+  // landed us at the prompt, and net is suppressed on show boots.
+  const showScriptText = SEED_DEMO_SCRIPT.text
+    .split('\n')
+    .filter((line) => line !== 'root' && line !== 'net start ne0')
+    .join('\n');
+  const showDecoder = new TextDecoder();
+  let showRunner: AutoexecRunner | null = null;
+  let showFired = false;
+  let showMarkerTail = '';
+  function maybeStartShow(text: string): void {
+    if (showFired) return;
+    showMarkerTail = (showMarkerTail + text).slice(-256);
+    if (!showMarkerTail.includes(HELLO_HUMAN_MARKER)) return;
+    showFired = true;
+    showRunner = new AutoexecRunner({
+      script: showScriptText,
+      send: (t) => {
+        const msg: MainToWorkerMessage = { type: 'rx', bytes: new TextEncoder().encode(t) };
+        worker.postMessage(msg);
+      },
+      // No onKeystroke: the runner's default is silent keys.
+      setSpeed: (mode) => {
+        const msg: MainToWorkerMessage = { type: 'set-speed', mode };
+        worker.postMessage(msg);
+      },
+      onDone: () => {
+        // The ceremony ends @authentic — restore the user's setting.
+        const msg: MainToWorkerMessage = { type: 'set-speed', mode: settings.cpuSpeed };
+        worker.postMessage(msg);
+        showRunner = null;
+      },
+    });
+  }
+
   worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
     const msg = event.data;
     if (msg.type === 'tx') {
       term.write(msg.bytes);
       if (autoexec !== null && autoexec.active) {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
+      }
+      const showText = showDecoder.decode(msg.bytes, { stream: true });
+      maybeStartShow(showText);
+      if (showRunner !== null && showRunner.active) {
+        showRunner.feed(showText);
       }
       return;
     }
@@ -626,6 +672,11 @@ async function init(): Promise<void> {
   }
   // Pacing: initial CPU speed from settings.
   boot.config.cpuSpeed = settings.cpuSpeed;
+  // Phase 17 M3 — the un-typed boot: inittab autologin + net=ne0
+  // stamps ride the boot config; the worker suppresses net on a
+  // first-boot-show boot (640K: ktcp vs the compile show).
+  boot.config.autologin = settings.autologin;
+  boot.config.autoNet = settings.autoNet;
   // Machine state (Phase 17 M2): hand the worker this tab's overlay to
   // fold. Chunk buffers ride as Transferables — fresh out of IDB,
   // referenced nowhere else on this side, and a 32 MB machine's worth

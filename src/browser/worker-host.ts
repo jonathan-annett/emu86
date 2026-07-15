@@ -53,6 +53,11 @@ import {
   foldOverlay,
   sha256Hex,
 } from '../disk/overlay.js';
+import {
+  applyImageStamps,
+  showPending,
+  type ImageStampOptions,
+} from './image-stamps.js';
 import { NodeHostClock } from '../host-clock/host-clock.js';
 import {
   installCGAMirror,
@@ -223,6 +228,16 @@ export interface RunResult {
  */
 const OVERLAY_SWEEP_THROTTLE_MS = 5_000;
 const OVERLAY_ACK_TIMEOUT_MS = 10_000;
+
+/** Full-image copy via the sector loop — boot-time only (Phase 17 M3
+ *  reads the secondary to decide the show/net stamps). */
+function snapshotDisk(disk: InMemoryDisk): Uint8Array {
+  const out = new Uint8Array(disk.sectorCount * SECTOR_SIZE);
+  for (let lba = 0; lba < disk.sectorCount; lba++) {
+    out.set(disk.readSector(lba), lba * SECTOR_SIZE);
+  }
+  return out;
+}
 
 export class WorkerHost {
   readonly #post: (msg: WorkerToMainMessage) => void;
@@ -789,6 +804,33 @@ export class WorkerHost {
       });
     }
 
+    // Phase 17 M3: the secondary resolves FIRST — the primary's stamp
+    // set needs to know the drive (mkfs block count for /etc/home.sh)
+    // and whether the first-boot show is pending on it (net=ne0 is
+    // suppressed for the show boot: ktcp+telnetd+ftpd are the
+    // recorded difference between c86 compiling and not).
+    let secondary: ResolvedSlot | null = null;
+    if (config.secondary) {
+      secondary = await this.#resolveSlot('secondary', config.secondary);
+    }
+
+    let stamps: ImageStampOptions | undefined;
+    let netLine: string[] = [];
+    if (config.autologin !== undefined) {
+      const secondaryBytes =
+        secondary !== null ? snapshotDisk(secondary.disk) : null;
+      stamps = {
+        autologin: config.autologin,
+        secondaryBlocks:
+          secondary !== null
+            ? (secondary.disk.sectorCount * SECTOR_SIZE) / 1024
+            : null,
+      };
+      if (config.autoNet === true && !showPending(secondaryBytes)) {
+        netLine = ['net=ne0'];
+      }
+    }
+
     const primary = await this.#resolveSlot(
       'primary',
       {
@@ -797,15 +839,19 @@ export class WorkerHost {
         geometry: config.geometry,
         diskClass: config.diskClass,
       },
-      tanIdentity !== null
-        ? [
-            tanIdentity.localipLine,
-            // The shell's who-am-I (API v1): stock /etc/profile does
-            // PS1="$HOSTNAME$PS1", so the prompt becomes `mouse# ` too.
-            ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
-          ]
-        : [],
+      [
+        ...(tanIdentity !== null
+          ? [
+              tanIdentity.localipLine,
+              // The shell's who-am-I (API v1): stock /etc/profile does
+              // PS1="$HOSTNAME$PS1", so the prompt becomes `mouse# ` too.
+              ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
+            ]
+          : []),
+        ...netLine,
+      ],
       config.overlay,
+      stamps,
     );
 
     // Phase 17 M2: report the base's identity every boot. Main stamps
@@ -820,11 +866,6 @@ export class WorkerHost {
         applied: primary.overlayApplied === true,
         chunksOffered: config.overlay?.chunks.length ?? 0,
       });
-    }
-
-    let secondary: ResolvedSlot | null = null;
-    if (config.secondary) {
-      secondary = await this.#resolveSlot('secondary', config.secondary);
     }
 
     const browserConsole = new BrowserConsole({
@@ -955,6 +996,7 @@ export class WorkerHost {
     spec: DiskSlotSpec,
     extraBootoptsLines: readonly string[] = [],
     overlay?: BootConfig['overlay'],
+    stamps?: ImageStampOptions,
   ): Promise<ResolvedSlot> {
     let bytes: Uint8Array;
     if (spec.imageBytes) {
@@ -1030,6 +1072,16 @@ export class WorkerHost {
         if (patched !== null) bytes = patched;
       } catch (err) {
         console.warn(`WorkerHost: /bootopts stamp skipped — ${String(err)}`);
+      }
+    }
+    // Phase 17 M3: the load-time stamp set — AFTER the bootopts patch
+    // so the minix-fs writes land in the final buffer, per-boot and
+    // pre-wrapper (stamps never enter the overlay hot map). Failures
+    // are per-stamp skips, never boot gates.
+    if (slotName === 'primary' && stamps !== undefined) {
+      const result = applyImageStamps(bytes, stamps);
+      for (const s of result.skipped) {
+        console.warn(`WorkerHost: image stamp skipped — ${s}`);
       }
     }
     const disk = new InMemoryDisk({ geometry, contents: bytes });

@@ -116,6 +116,21 @@ export interface BootConfig {
     /** SHA-256 hex of the base these chunks were written against. */
     fingerprint: string;
   };
+  /**
+   * Phase 17 M3: apply the load-time stamp set to the primary —
+   * inittab autologin ('off' restores the stock getty), passwd home
+   * moves, /etc/home.sh + skel seeds, mount.cfg marker. ABSENT means
+   * no M3 stamps at all: tests and CLI boots keep untouched images.
+   */
+  autologin?: 'off' | 'root' | 'user1';
+  /**
+   * Phase 17 M3: stamp `net=ne0` into bootopts so rc.sys starts the
+   * NIC with nothing typed. Suppressed by the worker while the
+   * first-boot show is pending on the secondary — the recorded 640K
+   * constraint (ktcp+telnetd+ftpd vs c86 compiling), and the show
+   * compiles. Meaningless without `autologin`.
+   */
+  autoNet?: boolean;
 }
 
 // ============================================================

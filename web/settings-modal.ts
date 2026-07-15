@@ -281,6 +281,59 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     speedSection.body.appendChild(speedSelect);
     host.appendChild(speedSection.el);
 
+    /* Console login (Phase 17 M3 — the un-typed boot) -------------- */
+    const loginSection = section('Console login');
+    const loginHint = document.createElement('div');
+    loginHint.className = 'emu86-hint';
+    loginHint.textContent =
+      'Who the serial console logs in as, with nothing typed. ' +
+      '"user1" is the daily driver (its home is your tab\'s drive); ' +
+      '"off" restores the stock login: prompt. Applies on next reload.';
+    loginSection.body.appendChild(loginHint);
+    const loginSelect = document.createElement('select');
+    loginSelect.className = 'emu86-input-select';
+    loginSelect.setAttribute('aria-label', 'Autologin');
+    for (const [value, label] of [
+      ['user1', 'Autologin as user1 (default)'],
+      ['root', 'Autologin as root'],
+      ['off', 'Off — stock login prompt'],
+    ] as const) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      if (value === settingsAtRender.autologin) opt.selected = true;
+      loginSelect.appendChild(opt);
+    }
+    loginSelect.addEventListener('change', () => {
+      const mode =
+        loginSelect.value === 'off' || loginSelect.value === 'root'
+          ? loginSelect.value
+          : 'user1';
+      const cur = deps.getSettings();
+      if (cur.autologin === mode) return;
+      deps.onChange({ ...cur, autologin: mode });
+      updateReloadNotice();
+    });
+    loginSection.body.appendChild(loginSelect);
+
+    const netRow = document.createElement('label');
+    netRow.className = 'emu86-hint';
+    netRow.style.display = 'block';
+    const netBox = document.createElement('input');
+    netBox.type = 'checkbox';
+    netBox.checked = settingsAtRender.autoNet;
+    netBox.addEventListener('change', () => {
+      const cur = deps.getSettings();
+      deps.onChange({ ...cur, autoNet: netBox.checked });
+      updateReloadNotice();
+    });
+    netRow.append(
+      netBox,
+      ' bring the network up at boot (net=ne0 — skipped on a drive’s first boot so the hello show can compile)',
+    );
+    loginSection.body.appendChild(netRow);
+    host.appendChild(loginSection.el);
+
     /* Image source ----------------------------------------------- */
     const imageSection = section('Boot image');
     const reloadDiv = document.createElement('div');
@@ -341,64 +394,18 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     secondaryList.className = 'emu86-image-list';
     secondarySection.body.appendChild(secondaryList);
 
-    /* Create blank drive (Phase 15 M2 — virtual drives) ----------- */
-    // An all-zero image with explicit CHS geometry, stored in the
-    // library like any other entry and selected as the base template.
-    // Guest formats its fork of it (mkfs) after the next reload... of a
-    // NEW tab — existing tabs keep their forks (M0 semantics).
-    const createRow = document.createElement('div');
-    createRow.className = 'emu86-upload-row';
-    const sizeSelect = document.createElement('select');
-    // The shared table (image-library.ts) — the `?mkdrive` control
-    // endpoint offers exactly these shapes, so the two cannot drift.
-    const PRESETS = DRIVE_PRESETS;
-    for (const [i, p] of PRESETS.entries()) {
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = p.label;
-      sizeSelect.appendChild(opt);
-    }
-    const createBtn = document.createElement('button');
-    createBtn.type = 'button';
-    createBtn.textContent = 'Create blank drive';
-    const createStatus = document.createElement('div');
-    createStatus.className = 'emu86-hint';
-    createStatus.setAttribute('aria-live', 'polite');
-    createRow.append(sizeSelect, createBtn);
-    secondarySection.body.appendChild(createRow);
-    secondarySection.body.appendChild(createStatus);
-    createBtn.addEventListener('click', () => {
-      void (async () => {
-        const preset = PRESETS[Number.parseInt(sizeSelect.value, 10)];
-        if (preset === undefined) return;
-        const geometry = {
-          cylinders: preset.cylinders,
-          heads: preset.heads,
-          sectorsPerTrack: preset.sectorsPerTrack,
-        };
-        try {
-          const id = await deps.library.createBlankImage(
-            `blank-${preset.label.replace(' ', '').toLowerCase()}.img`,
-            geometry,
-          );
-          // Select it as the base right away — creating a template and
-          // not selecting it is never what the user meant.
-          deps.onChange({
-            ...deps.getSettings(),
-            secondaryImageSource: { kind: 'library', id },
-          });
-          const blocks =
-            (preset.cylinders * preset.heads * preset.sectorsPerTrack * 512) / 1024;
-          createStatus.textContent =
-            `Created and set as the base. New tabs fork it; in the guest: ` +
-            `mkfs /dev/hdb ${blocks} && mount /dev/hdb /mnt.`;
-          await refreshSecondaryList(secondaryList);
-          await refreshList(list);
-        } catch (err) {
-          createStatus.textContent = `Create failed: ${describeError(err)}`;
-        }
-      })();
-    });
+    // The "Create blank drive" button died here (Phase 17 M3, D5 —
+    // Jonathan: resize happens on the CLI). ?mkdrive queues a fresh
+    // blank for THIS tab; the stamped /etc/home.sh formats it at the
+    // next boot's sysinit; "Save as default" promotes it for new tabs.
+    const resizeHint = document.createElement('div');
+    resizeHint.className = 'emu86-hint';
+    resizeHint.textContent =
+      'Need a different size? In the guest: ' +
+      'urlget "http://10.0.2.2/?mkdrive=KB", then reload — the fresh ' +
+      'drive formats itself at next boot. "Save as default" makes it ' +
+      'the template new tabs fork.';
+    secondarySection.body.appendChild(resizeHint);
 
     host.appendChild(secondarySection.el);
 

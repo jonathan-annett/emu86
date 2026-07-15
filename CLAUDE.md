@@ -59,7 +59,7 @@ below stands as history.
 ```
 npm install
 npm run build      # tsc --noEmit (typecheck; `npm run typecheck` covers all configs)
-npx vitest run     # → 1,328 passed, 122 files, 1 skipped (as of 2026-07-15, post-Phase-17-M2)
+npx vitest run     # → 1,338 passed, 124 files, 1 skipped (as of 2026-07-15, post-Phase-17-M3)
 ```
 
 The one **skipped** file is `tests/sst/corpus.test.ts`: it needs the

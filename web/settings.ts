@@ -106,6 +106,20 @@ export interface Settings {
    * set-speed message to the running worker.
    */
   cpuSpeed: 'authentic' | 'turbo';
+  /**
+   * Phase 17 M3 (§4.6): who the serial console logs in as, with
+   * NOTHING typed — the worker stamps the inittab ttyS0 line per
+   * boot. 'off' restores the stock getty prompt. Default 'user1'
+   * (Jonathan's Addendum A call). Applies on next reload.
+   */
+  autologin: 'off' | 'root' | 'user1';
+  /**
+   * Phase 17 M3: stamp `net=ne0` into bootopts so rc.sys brings the
+   * NIC up untyped. The worker suppresses it for a first-boot-show
+   * boot (the 640K ktcp-vs-c86 constraint). Default true. Applies on
+   * next reload.
+   */
+  autoNet: boolean;
 }
 
 export const FONT_SIZE_MIN = 8;
@@ -132,13 +146,15 @@ export const SEED_BOOT_SCRIPT: BootScript = {
   name: 'network (root + net start ne0)',
   text: [
     'root',
-    'mount /dev/hdb /tmp 2>/dev/null',
-    'test -f /tmp/ping && cp /tmp/ping /bin/ping',
     'net start ne0',
     '',
   ].join('\n'),
-  // rev 2: probe /dev/hdb as a persistent /tmp; restore ping from it
-  seedRev: 2,
+  // rev 3 (Phase 17 M3, §4.3 executed): the mount and ping-restore
+  // lines are gone — /dev/hdb mounts at /home via the stamped
+  // /etc/home.sh at sysinit, and the ping restore belongs in the
+  // fork's own .profile now. This script only matters with
+  // autologin off; the daily loop types nothing.
+  seedRev: 3,
 };
 
 /**
@@ -218,6 +234,8 @@ export const DEFAULT_SETTINGS: Settings = {
   bootScripts: [SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, SEED_PING_SCRIPT],
   activeBootScriptId: null,
   cpuSpeed: 'authentic',
+  autologin: 'user1',
+  autoNet: true,
 };
 
 /**
@@ -369,6 +387,14 @@ export function loadSettings(): Settings {
     obj.cpuSpeed === 'authentic' || obj.cpuSpeed === 'turbo'
       ? obj.cpuSpeed
       : DEFAULT_SETTINGS.cpuSpeed;
+  // Phase 17 M3 — additive fields, per-field-tolerant (no key bump:
+  // absent in older blobs means the defaults, and the v2 era rule
+  // bites only on SEMANTIC changes to existing fields).
+  const autologin =
+    obj.autologin === 'off' || obj.autologin === 'root' || obj.autologin === 'user1'
+      ? obj.autologin
+      : DEFAULT_SETTINGS.autologin;
+  const autoNet = typeof obj.autoNet === 'boolean' ? obj.autoNet : DEFAULT_SETTINGS.autoNet;
 
   return {
     fontSize,
@@ -378,6 +404,8 @@ export function loadSettings(): Settings {
     bootScripts,
     activeBootScriptId,
     cpuSpeed,
+    autologin,
+    autoNet,
   };
 }
 
