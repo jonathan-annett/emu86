@@ -1,178 +1,133 @@
 # emu86
 
-A browser-oriented TypeScript x86 emulator framework. Roadmap: 8086 → 80286 real mode.
+A 1980s PC written in plain TypeScript, booting a real Unix in your
+browser tab. No WASM, no native code, no runtime dependencies beyond
+TypeScript and vitest. Designed to be understandable first, fast
+second.
 
-No WASM, no bundler magic, no dependencies beyond TypeScript and vitest. Designed to be understandable first, fast second.
+**Live:** [8086-tab.net](https://8086-tab.net) (stable) — boots
+unmodified [ELKS](https://github.com/ghaerr/elks) from real disk
+images, logs itself in, keeps its own state across reloads, and puts
+every open tab's machine on a shared network. There's an
+[about page](https://8086-tab.net/about/) with the story.
 
-## Status
+It exists to answer a question for a different project: a browser
+code editor needed an 8086 emulator, and the choice was pure
+TypeScript versus C-compiled-to-WASM. This repo is the pure-TS arm
+of that bet. Measured verdict so far: ~half the speed of a real
+4.77 MHz IBM XT on genuine kernel workloads, before any serious
+optimization — and half an XT turns out to be plenty.
 
-**v0 — correctness-first, headless.** The CPU core, paged memory subsystem, and async run loop are in place. A deliberately thin slice of the 8086 instruction set (NOP, HLT, MOV r8/r16 imm, JMP short, ADD AL/AX imm) is implemented end-to-end to validate the architecture before expanding opcode coverage. 103 unit tests pass.
+## Status (2026-07-16)
 
-Not yet: the rest of the instruction set, interrupts, devices, machine configurations, UI, IndexedDB page store.
+Phases 1–17 complete and field-accepted; the live site runs the
+Phase 17 line. The suite is 1,342 tests (2 skipped: the
+SingleStepTests corpus when not fetched, and an env-gated binary
+generator). 59 phase reports and 34 briefs record how it got here —
+including the negative results. The current plan of record is
+`emu86-phase18-brief.md` (whole-machine state capture), decisions
+pending.
 
-## Layers
+What the machine does today:
 
-```
-Machine (not yet — v0 is headless)
-  ├─ CPU8086                         sync per-instruction, pure
-  │    ├─ Registers                  AX/AH/AL alias via typed-array views
-  │    ├─ Flags                      bit-level accessors, reserved bits enforced
-  │    ├─ Decoder (opcode table)     (opcodes.ts)
-  │    └─ Executor (handlers)        (opcodes.ts)
-  ├─ Memory = PagedMemory            sync, Map-backed, never faults
-  │    ├─ Page slabs (Uint8Array)    allocated on first access
-  │    ├─ Dirty Set                  O(1) track, drained by write-behind
-  │    └─ PageStore                  InMemoryPageStore | IndexedDBPageStore (later)
-  ├─ IOBus (stub)                    NullIOBus in v0
-  └─ RunLoop                         async, batched, yields to event loop
-```
+- **Boots real operating systems**: ELKS floppy and 32 MB MINIX
+  hard-disk images, unmodified — BIOS, PIT, PIC, RTC, UART, 8042,
+  IDE disks, NE2000, all modeled honestly enough that the stock
+  kernel probes them and finds them.
+- **The un-typed boot**: a fresh tab formats its own home drive,
+  seeds it, autologs in as `user1`, and performs its first-boot
+  show — writing and compiling a C program with the toolchain on
+  its own disk — exactly once per drive. Nothing is typed, ever.
+- **The machine keeps its own state**: guest writes to the boot
+  disk survive reloads via a block-level copy-on-write overlay
+  (SHA-256-fingerprinted against the base image); each tab's
+  `/dev/hdb` is a private fork with auto-persist; factory reset in
+  settings is the escape hatch.
+- **Networking between tabs**: every tab joins the Tab Area Network
+  over a BroadcastChannel trunk — leased IPs, `.tabs` hostnames,
+  guest-to-guest telnet. A gateway at `10.0.2.2` answers ping,
+  serves a control API, and terminates real HTTP for the guest's
+  `urlget` (CORS-bounded); DNS resolves over DoH at `10.0.2.3`.
+- **Honest time**: guest seconds are wall seconds (authentic
+  4.77 MHz pacing with a Turbo switch), and an MC146818 RTC serves
+  real dates.
+- **A host-side editor** over the tab's drive (`/mnt files` drawer):
+  reads the running disk through our own MINIX v1 filesystem module,
+  writes back with floppy-passing coherence (`resync` in the guest
+  picks up edits), and follows the machine live.
 
 ## Quick start
 
 ```bash
 npm install
-npm run test          # run all tests
-npm run test:watch    # vitest watch mode
-npm run typecheck     # type-check src + tests
+npm run dev:browser    # vite dev server — the full browser harness
+npx vitest run         # the suite (≈15 min; targeted runs are fine day-to-day)
+npm run typecheck      # all three tsconfigs
+npm run start:elks-serial   # boot ELKS at a terminal, no browser
 ```
 
-## Design principles
+Deployment is two-tier and not git-triggered: `npm run deploy:dev`
+(testing) and `npm run deploy:prod` (stable; follow
+`RELEASE_PROCEDURE.md` — every promotion archives the outgoing
+version). The full suite gates every deploy.
 
-1. **Synchronous CPU core.** `cpu.step()` never awaits, never throws across the async boundary. Every opcode handler is a plain function. This keeps the CPU deterministic, testable, and trivial to reason about.
-
-2. **All memory is always resident.** No page-fault path. The Map is the working set; pages never evict. Given our address spaces (1 MiB for 8086, 16 MiB for 286-real) this fits comfortably in any browser tab. The async machinery is reserved for *persistence*, not memory pressure.
-
-3. **Persistence is write-behind.** Dirty pages accumulate in a Set. A background async task drains them to the `PageStore` on an interval. The "clear-before-snapshot" pattern makes this race-free even with interleaving CPU writes.
-
-4. **The framework, not the machine.** `CPU8086` knows nothing about PC hardware — no BIOS, no video, no disk. A future `Machine` composes CPU + memory + devices for specific systems (IBM PC, embedded 286 board, headless test harness). Multiple machine configs can share one CPU core.
-
-## Memory model in one diagram
+## Architecture
 
 ```
-CPU                Memory (PagedMemory)              PageStore
- │                    │                                  │
- │ readByte(0x1234)   │                                  │
- │ ─────────────────> │  pageId = 0x1234 >> 12           │
- │                    │  slab = pages.get(pageId)        │
- │                    │        or materialise zero       │
- │                    │  return slab.data[off]           │
- │ <───────────────── │                                  │
- │                                                       │
- │ writeByte(0x1234, v)                                  │
- │ ─────────────────> │  slab.data[off] = v              │
- │                    │  dirty.add(pageId)               │
- │                                                       │
-                 ... some time later, background loop ...
-                      │                                  │
-                      │  batch = [...dirty]              │
-                      │  dirty.clear()                   │
-                      │  for each pageId in batch:       │
-                      │    snapshot = slab.data.slice()  │
-                      │    await store.save(──────────>  │  persists
-                      │                                  │
+web/                    browser main thread: settings, image library (IDB),
+                        drive forks, overlay store, editor panel, show relay
+src/browser/            the worker: WorkerHost (boot/run/protocol), pacing,
+                        bootopts patch, per-boot image stamps
+src/machine/            IBMPCMachine — composes everything below
+src/cpu8086/ src/core/  the CPU: sync step(), full 8086 opcode set
+src/memory/             PagedMemory — sync, never faults
+src/devices/ src/io/    PIT, PIC, UART, 8042, RTC, NE2000, IO bus
+src/bios/               TS BIOS behind a trap registry (INT 10/13/16/19/1A…)
+src/disk/               disks, the COW overlay engine, minix-fs (read/write)
+src/net/                switch, gateway, DNS/DoH, TCP, HTTP gateway, TAN, control
+src/interrupts/ src/timing/ src/host-clock/ src/runtime/ src/diagnostics/
+tools/elks*/            CLI boot + image build/fetch scripts
+tests/                  unit / integration / sst (the corpus harness) / probe
+reference/              8086tiny + ELKS submodules (source-of-truth reading)
 ```
 
-## Adding a new opcode
+## Design principles (unchanged since v0)
 
-The one-file pattern. Open `src/cpu8086/opcodes.ts`:
+1. **Synchronous CPU core.** `cpu.step()` never awaits and memory
+   never faults. All async lives at the edges: the worker's paced
+   loop, boot-time image work, main-thread persistence.
+2. **All memory resident.** 1 MiB fits in any tab; the async
+   machinery is for persistence, not memory pressure.
+3. **The worker never persists.** Disk deltas sweep to the main
+   thread as messages; main owns all IndexedDB. Reads on the hot
+   path never leave RAM.
+4. **The counterparty is the contract.** Devices are written against
+   what the guest's source actually does, verified in the ELKS
+   submodule — the datasheet doesn't boot.
 
-```ts
-// Example: ADD AL, imm8 (0x04)
-OPCODE_TABLE[0x04] = (cpu) => {
-  const a = cpu.regs.AL;
-  const b = cpu.fetchByte();             // reads next byte, advances IP
-  const result = a + b;                  // KEEP UNMASKED for carry detection
-  flagsAdd8(cpu.flags, a, b, result);
-  cpu.regs.AL = result & 0xFF;
-};
-```
+## Testing
 
-Steps:
+Unit and integration tests run everywhere (`npx vitest run`);
+integration boots real ELKS images end-to-end through the same
+message protocol the browser uses. The CPU answers to an external
+oracle: the [SingleStepTests/8088](https://github.com/SingleStepTests/8088)
+corpus (fetch it and symlink its `v2/` at `tests/sst/data/` when
+touching opcode semantics — it is the correctness backbone).
 
-1. Look the opcode up in the Intel 8086 Family User's Manual (or [Felix Cloutier's reference](https://www.felixcloutier.com/x86/)).
-2. Write the handler with the `(cpu) => {}` signature. Use `cpu.fetchByte()` / `cpu.fetchWord()` to consume any following bytes (ModR/M, displacement, immediate); they advance IP.
-3. For ALU ops, use the `flagsXxx8` / `flagsXxx16` helpers (or add one if your op is new). The convention: pass the unmasked full-precision result so carry-out is visible; the helper handles masking before computing ZF/SF.
-4. Write opcode tests in `tests/unit/opcodes.test.ts` covering:
-   - The obvious case (normal inputs, expected output).
-   - Every flag this opcode should affect (ZF, CF, OF, SF, AF, PF each have subtle cases — look at the ADD tests for the pattern).
-   - Any edge (max value, boundary carry, zero result, sign flip).
-5. Cross-check against the real corpus once we wire up SingleStepTests — that's where subtle errors surface.
+## How work happens here
 
-## Adding a new flag-computation helper
+Brief → implement → report, every phase. The briefs
+(`emu86-phase*-brief.md`) set scope before code; the reports
+(`*_REPORT.md`) are the project's memory — findings, measurements,
+and explicitly what was *not* done. Agents start at `CLAUDE.md`.
 
-`src/cpu8086/flag-helpers.ts` has one helper per `(operation, width)` pair. The split avoids an inner branch on the hot path.
+## Credits
 
-The idiom (from 8086 documentation, battle-tested in every 8086 emulator):
-- **CF**: bit above the width in the unmasked result (`result & 0x100` for byte, `& 0x10000` for word).
-- **PF**: parity of low byte via `PARITY_TABLE`.
-- **AF**: `(a ^ b ^ result) & 0x10`.
-- **ZF**: `(result & mask) === 0`.
-- **SF**: top bit of masked result.
-- **OF (ADD)**: `(a ^ result) & (b ^ result) & sign_bit` — operands same sign, result differs.
-- **OF (SUB)**: `(a ^ b) & (a ^ result) & sign_bit` — operands different sign, result sign differs from `a`.
+Built on the shoulders of [ELKS](https://github.com/ghaerr/elks)
+(Greg Haerr and contributors),
+[8086tiny](https://github.com/adriancable/8086tiny) (Adrian Cable —
+the original correctness reference),
+[SingleStepTests](https://github.com/SingleStepTests/8088), and
+[xterm.js](https://xtermjs.org).
 
-## Async run loop
-
-```ts
-import { CPU8086, PagedMemory, RunLoop, InMemoryPageStore } from 'emu86';
-
-const memory = new PagedMemory({ store: new InMemoryPageStore() });
-await memory.hydrate();                    // load persisted pages, if any
-memory.startWriteBack({ intervalMs: 500 }); // start async write-behind
-
-const cpu = new CPU8086(memory);
-cpu.reset();
-
-const loop = new RunLoop(cpu);
-const result = await loop.run({ batchSize: 10_000 });
-
-await memory.stopWriteBack();               // graceful drain before exit
-console.log(`ran ${result.executed} instructions (${result.reason})`);
-```
-
-## Testing strategy
-
-**Unit tests** (`tests/unit/`) cover each component in isolation — Registers, Flags, PagedMemory, CPU basics, each opcode, the run loop.
-
-**SST harness** (`tests/sst/`) is the accuracy backbone. Every implemented opcode will eventually be validated against thousands of JSON test cases from [SingleStepTests/8088](https://github.com/SingleStepTests/8088). The harness is in place; wiring up the real corpus is a one-time symlink + loader write (see `tests/sst/README.md`).
-
-## File map
-
-```
-src/
-├── core/
-│   ├── types.ts           numeric types, address helpers, sign-extension
-│   ├── flags.ts           FLAGS register + reserved-bit enforcement
-│   ├── registers.ts       GP/segment regs with AX/AH/AL aliasing
-│   └── io.ts              IOBus interface + NullIOBus stub
-├── memory/
-│   ├── memory.ts          CPU-facing Memory contract
-│   ├── page-store.ts      pluggable persistence (InMemoryPageStore for now)
-│   └── paged-memory.ts    Map-backed sync cache + async write-behind
-├── cpu8086/
-│   ├── parity.ts          precomputed PF table
-│   ├── flag-helpers.ts    per-op flag calculators (ADD8/ADD16 so far)
-│   ├── errors.ts          InvalidOpcodeError
-│   ├── cpu.ts             CPU8086 class, fetch path, step dispatch
-│   └── opcodes.ts         opcode table + handlers
-├── runtime/
-│   └── run-loop.ts        async batched loop around cpu.step()
-└── index.ts               public exports
-
-tests/
-├── unit/                  per-component tests
-└── sst/                   SingleStepTests harness + hand-crafted cases
-```
-
-## Roadmap from here
-
-Next likely commits, in rough order:
-
-1. Broaden opcode coverage. MOV with ModR/M (0x88–0x8E), the rest of the ALU family (SUB, CMP, AND, OR, XOR, INC, DEC, NEG, NOT), shift/rotate, PUSH/POP, more jumps, CALL/RET, string ops with REP prefix.
-2. ModR/M decode helper (shared across most ALU / MOV variants). This is the one significant shared-decode helper we haven't needed yet.
-3. Interrupt queue + `INT` / `IRET` opcodes + pending-interrupt check in the run loop. This is where `cpu.snapshot()/restore()` finally starts earning its keep.
-4. IndexedDBPageStore. Simple once the `PageStore` interface is proven.
-5. Wire up the SingleStepTests corpus. Will surface flag-calculation bugs aggressively.
-6. 80286 real mode CPU extending CPU8086 (new opcodes, corrected flag behaviors for 286).
-7. First `Machine` config — probably minimal "BIOS + bootsector loader" targeting 8086tiny's bundled ROM.
-8. Browser UI (Vite-served, separate package).
+© 2026 Jonathan Annett · built with Claude

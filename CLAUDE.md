@@ -2,8 +2,9 @@
 
 Written 2026-07-13, when the project was consolidated onto `claude-dev-box` from
 three machines; **updated 2026-07-14** after Phase 14 landed (facts below
-re-verified then — §§1, 2, 4, 6 changed). Read this before `README.md`.
-**`README.md` is stale and will actively mislead you** — see §1.
+re-verified then — §§1, 2, 4, 6 changed). Read this before `README.md` —
+this file is the agent orientation; the README (rewritten 2026-07-16,
+current as of then) is the human-facing overview.
 
 ## 0. What this project is
 
@@ -24,7 +25,7 @@ The repo accumulated 29 `*-brief.md` / `*_REPORT.md` pairs — one per phase —
 
 | Doc | Claims | Reality |
 |---|---|---|
-| `README.md` | "v0. 6-opcode slice. 103 tests. No interrupts, devices, machine, UI." | **Wildly stale.** All of that exists now. |
+| `README.md` | Current overview (rewritten 2026-07-16 on Jonathan's ask). | **Current as of the rewrite** — trust newer reports over it as it ages. (History: it spent 11 weeks claiming "v0, 6 opcodes, 103 tests" — this table existed because of it.) |
 | `SESSION_REPORT.md` | "353 tests. v0→v1 complete." | Stale — that was ~Phase 2. |
 | `emu86-agent-brief.md` | "Extend from the 6-opcode v0 slice." | Stale — it's the *first* brief. |
 
