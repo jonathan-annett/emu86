@@ -313,19 +313,71 @@ once proven we can investigate the captured state idea."
   (what does "mouse" resolve to from inside mouse — hairpin NAT or
   loopback; ping rev 6's self-ping-is-loopback is the precedent).
 
-1. **Overlay default**: ON for all tabs (reset = escape hatch)? —
-   proposed YES.
+## 4. Open decisions — DECIDED 2026-07-15 ("agree to all", + §4.6)
+
+(Repair note: a same-day edit inserting §3.5 accidentally ate this
+section's heading; restored here together with the decisions.)
+
+1. **Overlay default**: ON for all tabs (reset = escape hatch) —
+   YES.
 2. **Chunk size / sweep throttle / forced-sweep threshold**:
-   32 KB / 5 s / 4 MB? — proposed, tunable constants, tuned later
-   from the existing telemetry.
+   32 KB / 5 s / 4 MB — YES; tunable constants, tuned later from
+   the existing telemetry.
 3. **Workshop migration**: hdb mounts at /home (not over /tmp);
-   seed script rev 3 drops its mount+ping lines (demo script
-   untouched)? — proposed YES; the ping restore moves into the
-   fork's `.profile`.
-4. **Autologin** (inittab respawns a shell; kills the typed
-   `root`): in or out? — no proposal, pure taste.
-5. **Panel file ownership** (only matters if user1 ever happens):
-   parked with user1 itself.
+   seed script rev 3 drops its mount+ping lines — YES; the ping
+   restore moves into the fork's `.profile`. (Jonathan,
+   post-promotion, on the never-completed save-ping-to-drive step:
+   "we will catch it in the next deploy which will have an
+   overlayed /bin/ping".)
+4. **Autologin** — YES, and bigger than proposed: see §4.6.
+5. **Panel file ownership**: still parked — but user1 is no longer
+   hypothetical (§4.6); the knob unparks whenever ownership starts
+   to matter in the field.
+
+### 4.6 Addendum A (Jonathan, 2026-07-15): nothing typed, ever
+
+His words: "if we can work towards the keyboard bootscript being a
+thing of the past. the one concession would be a checkbox that
+turns on autologin for either root or user1. default is boot to
+autologin user1, doing the first show (hello human) as a self
+deleting shell script."
+
+What this changes, recorded while fresh:
+
+- **The direction hardens.** §0 said the goal was making the typed
+  boot script unnecessary for the daily loop while the landing demo
+  kept riding keystroke injection. Now the SHOW retires from the
+  keyboard too: the end state has no keystroke injection at all,
+  and the boot-script system becomes removable in a later phase
+  once nothing ships on it.
+- **Autologin is a setting, not a patch**: a checkbox — off / root
+  / user1 — DEFAULT user1. Adding a settings field needs no key
+  bump (per-field-tolerant loader; the v2 era rule bites only on
+  SEMANTIC changes to existing fields — see
+  SETTINGS_VERSIONING_REPORT.md).
+- **user1 partially unparks — as a LOGIN TARGET only.** The §0
+  honesty stands: both accounts are passwordless, there is no
+  security boundary, and none is being pretended. The §1.4 stamp
+  set was designed around root and needs reshaping for a user1
+  default: the passwd home-field surgery targets user1 (whose
+  stock home is under /home — VERIFY the exact path against the
+  image with the M1 parser), and the blank-fork case needs care:
+  mount of /home fails quietly, so user1's home must still exist
+  on the base image or login must tolerate its absence — settle in
+  M3, against the real image.
+- **The first show becomes machine state.** hello-human runs as a
+  self-deleting shell script on first boot (hooked from user1's
+  autologin path), not as injected keystrokes. Self-deletion + the
+  overlay = the show runs ONCE per machine, like a fresh install;
+  factory reset resurrects it. Honest design note: the theatrical
+  @type/@turbo typing effects are HOST-side tricks a guest script
+  cannot do — either the show stops pretending to be typed, or the
+  host grows a way to render a guest-initiated performance. Settle
+  in M3; don't let it stall the milestone. (The demo's heredoc is
+  ~100 bytes — far under the ELKS sh ~6 KB heredoc heap limit.)
+- **M3's acceptance bar moves**: the field composition test becomes
+  "reload → personalized prompt, net up, /home mounted, NOTHING
+  typed" — not even `root`.
 
 ## 5. Hard-rule notes for the implementing session
 
