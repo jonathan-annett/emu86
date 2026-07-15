@@ -23,6 +23,7 @@ import type {
   HaltedMessage,
   ErrorMessage,
   MainToWorkerMessage,
+  OverlaySweepMessage,
   WorkerToMainMessage,
 } from '../../src/browser/protocol.js';
 
@@ -94,6 +95,25 @@ describe('browser protocol — message shapes', () => {
     };
     expect(m.config.geometry?.sectorsPerTrack).toBe(18);
   });
+
+  it('overlay-sweep chunks survive structured-clone round-trip (Phase 17 M1)', () => {
+    // Small payloads on purpose — clone semantics are what's under
+    // test, not throughput.
+    const original: OverlaySweepMessage = {
+      type: 'overlay-sweep',
+      epochId: 42,
+      chunkSizeBytes: 32 * 1024,
+      chunks: [
+        { chunkIndex: 3, bytes: new Uint8Array([1, 2, 3]) },
+        { chunkIndex: 9, bytes: new Uint8Array([9]) },
+      ],
+    };
+    const cloned = structuredClone(original);
+    expect(cloned.epochId).toBe(42);
+    expect(cloned.chunks.map((c) => c.chunkIndex)).toEqual([3, 9]);
+    expect(cloned.chunks[0]?.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(cloned.chunks[0]?.bytes ?? [])).toEqual([1, 2, 3]);
+  });
 });
 
 describe('browser protocol — exhaustiveness', () => {
@@ -109,6 +129,8 @@ describe('browser protocol — exhaustiveness', () => {
       case 'snapshot-secondary': return 'snapshot-secondary';
       case 'write-secondary': return 'write-secondary';
       case 'control-response': return 'control-response';
+      case 'overlay-swept': return 'overlay-swept';
+      case 'overlay-flush': return 'overlay-flush';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -127,6 +149,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'secondary-snapshot': return 'secondary-snapshot';
       case 'secondary-written': return 'secondary-written';
       case 'control-request': return 'control-request';
+      case 'overlay-sweep': return 'overlay-sweep';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -144,6 +167,12 @@ describe('browser protocol — exhaustiveness', () => {
       .toBe('snapshot-secondary');
     expect(describeMain({ type: 'write-secondary', bytes: new Uint8Array(512) }))
       .toBe('write-secondary');
+    // Phase 17 M1: the overlay engine's ack and forced flush.
+    expect(describeMain({ type: 'overlay-swept', epochId: 1, ok: true }))
+      .toBe('overlay-swept');
+    expect(describeMain({ type: 'overlay-swept', epochId: 2, ok: false, detail: 'idb' }))
+      .toBe('overlay-swept');
+    expect(describeMain({ type: 'overlay-flush' })).toBe('overlay-flush');
   });
 
   it('worker→main exhaustive switch covers every variant', () => {
@@ -166,5 +195,14 @@ describe('browser protocol — exhaustiveness', () => {
       .toBe('secondary-written');
     expect(describeWorker({ type: 'secondary-written', ok: false, detail: 'no drive' }))
       .toBe('secondary-written');
+    // Phase 17 M1: one swept overlay epoch.
+    expect(
+      describeWorker({
+        type: 'overlay-sweep',
+        epochId: 5,
+        chunkSizeBytes: 32 * 1024,
+        chunks: [{ chunkIndex: 0, bytes: new Uint8Array(8) }],
+      }),
+    ).toBe('overlay-sweep');
   });
 });

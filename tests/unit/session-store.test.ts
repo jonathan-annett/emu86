@@ -63,6 +63,15 @@ describe('session-store', () => {
     expect(s.tanHostOctet).toBe(7);
     expect(s.driveForkId).toBeNull();
     expect(s.pendingBlankKb).toBeNull();
+    expect(s.overlayId).toBeNull(); // pre-Phase-17 sessions too
+  });
+
+  it('overlayId round-trips beside the drive fields (Phase 17 M1)', () => {
+    saveSession({ driveForkId: 'row-1' });
+    saveSession({ overlayId: 'ov-1' });
+    const s = loadSession();
+    expect(s.overlayId).toBe('ov-1');
+    expect(s.driveForkId).toBe('row-1'); // patches stay independent
   });
 
   it('saveSession patches one field and preserves the rest', () => {

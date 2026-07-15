@@ -29,6 +29,13 @@ const post = (msg: WorkerToMainMessage): void => {
     self.postMessage(msg, [msg.bytes.buffer]);
     return;
   }
+  // Same deal for overlay chunks (Phase 17 M1): each chunk's buffer is
+  // freshly allocated at sweep time and referenced nowhere else in the
+  // worker — transferring dodges a structured-clone copy per chunk.
+  if (msg.type === 'overlay-sweep') {
+    self.postMessage(msg, msg.chunks.map((c) => c.bytes.buffer));
+    return;
+  }
   self.postMessage(msg);
 };
 

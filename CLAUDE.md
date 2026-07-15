@@ -39,23 +39,27 @@ The repo accumulated 29 `*-brief.md` / `*_REPORT.md` pairs — one per phase —
    `ARTIFACT_EXTRACTION`, `HELLO_WORLD_COMPILE`).
 3. `EMU86_AUDIT_REPORT.md` — 2026-07-13 ground truth for the whole repo.
 
-**Where you are:** Phase 14 is essentially complete — in-VM compile +
-extraction, browser HD sessions, agent bridge, NE2000 + switch + gateway,
-the TAN (tabs telnet each other), DNS-over-DoH at 10.0.2.3, boot scripts,
-sticky per-tab IPs. **The project is deployed: https://8086-tab.net**
-(Cloudflare Worker `emu86`; `wrangler.jsonc` at repo root; deploy needs
-`~/cf-token.env`, and the deploy command is permission-gated for agents —
-Jonathan runs it). **Next on the books:** the pacing/throughput milestone
-(host-time-driven PIT — games currently run slow, and a DNS-resolve stall
-workaround papers over one symptom), then M3d (TCP termination for
-arbitrary destinations + HTTP gateway, growing from `src/net/tcp.ts`).
+**Where you are (updated 2026-07-15):** Phases 14–16 are DONE and
+field-accepted — pacing, HTTP gateway, virtual drives, the .tabs
+namespace, per-tab drive forks, host-side minix-fs read/write, the
+/dev/hdb editor panel. **Stable (8086-tab.net) was PROMOTED
+2026-07-15** to the fork-aware line; the outgoing version is archived
+at /9728bb6-dirty/ per `RELEASE_PROCEDURE.md` (read it before any
+promotion; settings are key-versioned per semantic era —
+`SETTINGS_VERSIONING_REPORT.md`). Deploys: `npm run deploy:dev` (test
+tier), `npm run deploy:prod` (stable); needs `~/cf-token.env`; the
+FULL suite gates every deploy. **The living plan is
+`emu86-phase17-brief.md`** — boot-disk COW overlay + load-time stamps
++ the un-typed boot (autologin user1, self-deleting first-boot show);
+its §4 decisions are made, M1 (overlay engine) is next. The old list
+below stands as history.
 
 ## 2. Test baseline — read this before you think you broke something
 
 ```
 npm install
 npm run build      # tsc --noEmit (typecheck; `npm run typecheck` covers all configs)
-npx vitest run     # → 1,251 passed, 114 files, 1 skipped (as of 2026-07-15, Phase 16 M1)
+npx vitest run     # → 1,308 passed, 120 files, 1 skipped (as of 2026-07-15, post-Phase-17-M1)
 ```
 
 The one **skipped** file is `tests/sst/corpus.test.ts`: it needs the

@@ -32,6 +32,11 @@
  *     boot, which replaces the fork with a fresh blank of this size.
  *     Session-scoped on purpose: it must only ever swap THIS tab's
  *     drive, never the shared base image.
+ *   - `overlayId` — Phase 17 M1: the key this tab's boot-disk overlay
+ *     chunks live under in `emu86-overlays`. PROVISIONAL identity in
+ *     M1 (minted on first sweep): M2 adds the Web-Lock duplication
+ *     handling and GC — until then a duplicated tab shares its
+ *     parent's id, the known octet-lease caveat above.
  *
  * Fail-open like settings.ts: no sessionStorage (sandboxed iframe,
  * exotic privacy mode) degrades to fresh ephemeral values per load.
@@ -46,6 +51,8 @@ export interface SessionState {
   driveForkId: string | null;
   /** Queued `?mkdrive` swap (KB), consumed at next boot; null when none. */
   pendingBlankKb: number | null;
+  /** This tab's boot-disk overlay key (Phase 17 M1), or null before the first sweep. */
+  overlayId: string | null;
 }
 
 const STORAGE_KEY = 'emu86.session.v1';
@@ -59,6 +66,7 @@ function freshState(): SessionState {
     tanHostOctet: null,
     driveForkId: null,
     pendingBlankKb: null,
+    overlayId: null,
   };
 }
 
@@ -84,6 +92,7 @@ export function loadSession(): SessionState {
           tanHostOctet?: unknown;
           driveForkId?: unknown;
           pendingBlankKb?: unknown;
+          overlayId?: unknown;
         };
         if (typeof obj.sessionId === 'string' && obj.sessionId.length > 0) {
           state = {
@@ -99,6 +108,10 @@ export function loadSession(): SessionState {
             pendingBlankKb:
               typeof obj.pendingBlankKb === 'number' && Number.isInteger(obj.pendingBlankKb)
                 ? obj.pendingBlankKb
+                : null,
+            overlayId:
+              typeof obj.overlayId === 'string' && obj.overlayId.length > 0
+                ? obj.overlayId
                 : null,
           };
         }

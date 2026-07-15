@@ -151,6 +151,7 @@ function makeSession(initial?: Partial<SessionState>): {
     tanHostOctet: null,
     driveForkId: null,
     pendingBlankKb: null,
+    overlayId: null,
     ...initial,
   };
   return {

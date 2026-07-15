@@ -60,6 +60,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
+import { OverlayStore } from './overlay-store.js';
 import { mountEditorPanel } from './editor-panel.js';
 import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, reconcileSeededScripts } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
@@ -258,6 +259,27 @@ async function init(): Promise<void> {
     });
   }
 
+  // Boot-disk overlay persistence (Phase 17 M1). The worker sweeps
+  // coalesced chunk epochs at its own cadence (5 s throttle / 4 MB
+  // forced); this side persists each epoch in ONE IndexedDB
+  // transaction and acks with the same epoch id — a nack (or silence)
+  // folds the epoch back into the worker's hot map for retry, so a
+  // failed IDB write loses nothing. Identity is PROVISIONAL in M1: a
+  // per-tab overlayId minted on first sweep, no fingerprint, no
+  // duplication lock, no GC — that whole lifecycle is M2, and until
+  // then nothing reads these chunks back at boot.
+  const overlayStore = new OverlayStore();
+  function ensureOverlayId(): string {
+    const session = loadSession();
+    if (session.overlayId !== null) return session.overlayId;
+    const id =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `o-${Math.random().toString(36).slice(2)}`;
+    saveSession({ overlayId: id });
+    return id;
+  }
+
   const AUTO_PERSIST_MS = 5_000;
   let persistInFlight = false;
   let lastPersistAt = 0;
@@ -280,10 +302,14 @@ async function init(): Promise<void> {
       });
   }
   // Tab going to the background is the best predictor we get of a
-  // close/reload — flush regardless of the throttle window.
+  // close/reload — flush regardless of the throttle window. The
+  // overlay flush is unconditional: the worker no-ops on a clean hot
+  // map, and main doesn't track the hot count.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && latestDirtySectors > 0) {
-      maybeAutoPersist(true);
+    if (document.visibilityState === 'hidden') {
+      if (latestDirtySectors > 0) maybeAutoPersist(true);
+      const flush: MainToWorkerMessage = { type: 'overlay-flush' };
+      worker.postMessage(flush);
     }
   });
 
@@ -360,6 +386,39 @@ async function init(): Promise<void> {
       } else {
         console.warn('[emu86] unsolicited secondary-written ack:', msg);
       }
+      return;
+    }
+    if (msg.type === 'overlay-sweep') {
+      // Phase 17 M1: persist the epoch — one transaction — then ack
+      // with the same id. On failure, nack honestly: the worker folds
+      // the epoch back and retries, so an IDB hiccup costs latency,
+      // not data. baseFingerprint stays null until M2 stamps identity.
+      const overlayId = ensureOverlayId();
+      overlayStore
+        .putChunks(overlayId, msg.chunks, {
+          chunkSizeBytes: msg.chunkSizeBytes,
+          baseFingerprint: null,
+        })
+        .then(
+          () => {
+            const ack: MainToWorkerMessage = {
+              type: 'overlay-swept',
+              epochId: msg.epochId,
+              ok: true,
+            };
+            worker.postMessage(ack);
+          },
+          (err: unknown) => {
+            console.warn('[emu86] overlay sweep persist failed:', err);
+            const nack: MainToWorkerMessage = {
+              type: 'overlay-swept',
+              epochId: msg.epochId,
+              ok: false,
+              detail: String(err),
+            };
+            worker.postMessage(nack);
+          },
+        );
       return;
     }
     if (msg.type === 'control-request') {

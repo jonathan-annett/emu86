@@ -13,8 +13,9 @@
  */
 
 import type { CpuSpeedMode } from './pacing.js';
+import type { OverlayChunk } from '../disk/overlay.js';
 
-export type { CpuSpeedMode };
+export type { CpuSpeedMode, OverlayChunk };
 
 /**
  * CHS geometries we recognise when inferring from image size. Mirrors
@@ -165,6 +166,31 @@ export interface ControlResponseMessage {
   text: string;
 }
 
+/**
+ * Phase 17 M1: ack/nack for one boot-disk overlay sweep epoch. `ok:
+ * false` (the main thread's IDB write failed) — like the worker's own
+ * ack timeout — folds the epoch back into the hot map, where newer
+ * writes win, and a later tick retries. Stale epoch ids (a reply that
+ * outlived a reset) are ignored by the worker.
+ */
+export interface OverlaySweptMessage {
+  type: 'overlay-swept';
+  epochId: number;
+  ok: boolean;
+  detail?: string;
+}
+
+/**
+ * Phase 17 M1: sweep the boot-disk hot map NOW, past the throttle —
+ * the main thread sends it on visibilitychange-hidden (the best
+ * predictor of a close/reload we get). If an epoch is already in
+ * flight the worker sweeps the remainder the moment that epoch
+ * settles. No-op when the hot map is clean.
+ */
+export interface OverlayFlushMessage {
+  type: 'overlay-flush';
+}
+
 export type MainToWorkerMessage =
   | BootMessage
   | RxMessage
@@ -172,7 +198,9 @@ export type MainToWorkerMessage =
   | SetSpeedMessage
   | SnapshotSecondaryMessage
   | WriteSecondaryMessage
-  | ControlResponseMessage;
+  | ControlResponseMessage
+  | OverlaySweptMessage
+  | OverlayFlushMessage;
 
 // ============================================================
 // Worker → Main
@@ -234,6 +262,13 @@ export interface StatsMessage {
    * mounted; drives the main thread's "unsaved changes" indicator.
    */
   secondaryDirtySectors?: number;
+  /**
+   * Distinct boot-disk sectors currently in the overlay hot map —
+   * written but not yet swept (Phase 17 M1). Tuning telemetry for the
+   * chunk-size / throttle / threshold constants (§4.2: retune from
+   * data, not taste). Present whenever the overlay engine is attached.
+   */
+  overlayHotSectors?: number;
 }
 
 /**
@@ -274,6 +309,25 @@ export interface SecondaryWrittenMessage {
   detail?: string;
 }
 
+/**
+ * Phase 17 M1: one epoch of boot-disk overlay writes, coalesced into
+ * aligned chunks. The worker never persists (Phase 15 rule) — the
+ * main thread writes all chunks in ONE IndexedDB transaction and
+ * answers with {@link OverlaySweptMessage} carrying the same epochId.
+ * Chunk records are idempotent (a chunkIndex overwrites its prior
+ * stored version) and self-contained (each carries its full aligned
+ * span, RAM-filled at sweep time; the tail chunk may be short). Chunk
+ * buffers are freshly allocated per sweep — the worker entry transfers
+ * them.
+ */
+export interface OverlaySweepMessage {
+  type: 'overlay-sweep';
+  epochId: number;
+  /** The engine's aligned span (§4.2: 32 KB) — recorded in the store's meta row. */
+  chunkSizeBytes: number;
+  chunks: OverlayChunk[];
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -283,4 +337,5 @@ export type WorkerToMainMessage =
   | StatsMessage
   | SecondarySnapshotMessage
   | SecondaryWrittenMessage
-  | ControlRequestMessage;
+  | ControlRequestMessage
+  | OverlaySweepMessage;

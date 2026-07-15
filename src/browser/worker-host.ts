@@ -47,6 +47,7 @@ import type {
 import { BrowserConsole } from './browser-console.js';
 import { IBMPCMachine } from '../machine/ibm-pc.js';
 import { InMemoryDisk, WriteTrackingDisk } from '../disk/disk.js';
+import { FORCED_SWEEP_BYTES, OverlayDisk } from '../disk/overlay.js';
 import { NodeHostClock } from '../host-clock/host-clock.js';
 import {
   installCGAMirror,
@@ -205,6 +206,15 @@ export interface RunResult {
     | 'error';
 }
 
+/**
+ * Overlay sweep cadence (Phase 17 M1, §4.2 decisions): sweeps ride the
+ * 1 Hz stats heartbeat, throttled to one per ~5 s — same rhythm as the
+ * main thread's fork auto-persist. An epoch the main thread never
+ * answers is nacked after 10 s so its writes fold back and retry.
+ */
+const OVERLAY_SWEEP_THROTTLE_MS = 5_000;
+const OVERLAY_ACK_TIMEOUT_MS = 10_000;
+
 export class WorkerHost {
   readonly #post: (msg: WorkerToMainMessage) => void;
   readonly #fetchImage: ((url: string) => Promise<Uint8Array>) | undefined;
@@ -228,6 +238,20 @@ export class WorkerHost {
   #httpGateway: HttpGatewayHost | null = null;
   /** Secondary disk write tracker (Phase 15 M2 — virtual drives). */
   #secondaryDisk: WriteTrackingDisk | null = null;
+  // ---- Boot-disk overlay engine (Phase 17 M1) ----
+  #overlayDisk: OverlayDisk | null = null;
+  /**
+   * Epoch ids are host-owned and survive machine teardown, so a late
+   * `overlay-swept` from before a reset can never match a fresh
+   * machine's in-flight epoch.
+   */
+  #overlayEpochSeq = 1;
+  /** Pacer-time when the in-flight epoch was posted (ack timeout). */
+  #overlayPendingSince = 0;
+  /** Pacer-time of the last sweep post (the ~5 s throttle). */
+  #overlayLastSweepAt = 0;
+  /** An overlay-flush arrived while an epoch was pending. */
+  #overlayFlushWanted = false;
   #tanConfig: { channel: FrameChannel; hostOctet?: number } | null = null;
   #tan: TabAreaNetwork | null = null;
   #stopping = false;
@@ -292,6 +316,11 @@ export class WorkerHost {
   /** The Tab Area Network membership (M3-tabs), if configured. */
   get tan(): TabAreaNetwork | null {
     return this.#tan;
+  }
+
+  /** The boot disk's overlay engine (Phase 17 M1). Null before boot. */
+  get overlayDisk(): OverlayDisk | null {
+    return this.#overlayDisk;
   }
 
   /**
@@ -363,8 +392,46 @@ export class WorkerHost {
       }
       return;
     }
+    if (msg.type === 'overlay-swept') {
+      // Phase 17 M1: the main thread's answer to an overlay-sweep.
+      // Late replies — after a reset tore the engine down, or after
+      // our own ack timeout already nacked the epoch — miss the id
+      // and no-op inside the engine.
+      const overlay = this.#overlayDisk;
+      if (overlay !== null) {
+        if (msg.ok) overlay.ackSweep(msg.epochId);
+        else overlay.nackSweep(msg.epochId);
+        if (this.#overlayFlushWanted) {
+          this.#overlayFlushWanted = false;
+          this.#emitOverlaySweep(this.#pacerNow());
+        }
+      }
+      return;
+    }
+    if (msg.type === 'overlay-flush') {
+      // Phase 17 M1: sweep NOW, past the throttle (visibilitychange-
+      // hidden). With an epoch in flight, the remainder sweeps the
+      // moment that epoch settles (see overlay-swept above).
+      const overlay = this.#overlayDisk;
+      if (overlay === null) return;
+      if (overlay.sweepPending) {
+        this.#overlayFlushWanted = true;
+        return;
+      }
+      this.#emitOverlaySweep(this.#pacerNow());
+      return;
+    }
     if (msg.type === 'reset') {
       this.#stopping = true;
+      // Phase 17 M1: teardown must not eat an epoch — post whatever
+      // the overlay holds before the machine dies. A pending epoch
+      // folds back first (its sectors merge under any newer ones) so
+      // the final sweep is complete; if the main thread also persists
+      // the folded epoch, chunk records are idempotent and arrive in
+      // post order, so the newer transaction lands last. No more
+      // instructions run after this handler: the paced loop re-checks
+      // #stopping before its next turn.
+      this.#overlayFlushNow();
       // The reset semantics for v0: ask the current run to bail; the next
       // boot reconstructs. The IDB page store is preserved across reset
       // because we don't touch the store; reloading the page yields the
@@ -598,6 +665,18 @@ export class WorkerHost {
       this.#statsInstructions += turn.executed;
       this.#statsCycles += cycles;
       const now = this.#pacerNow();
+
+      // Phase 17 M1: forced sweep — checked every turn (cheap integer
+      // compare) so a guest dd'ing the whole disk can't balloon the
+      // hot map past the threshold while waiting for the heartbeat.
+      if (
+        this.#overlayDisk !== null &&
+        !this.#overlayDisk.sweepPending &&
+        this.#overlayDisk.hotByteCount >= FORCED_SWEEP_BYTES
+      ) {
+        this.#emitOverlaySweep(now);
+      }
+
       const windowMs = now - this.#statsWindowStart;
       if (windowMs >= 1000) {
         const instrPerSec = Math.round((this.#statsInstructions / windowMs) * 1000);
@@ -611,7 +690,14 @@ export class WorkerHost {
           ...(this.#secondaryDisk !== null
             ? { secondaryDirtySectors: this.#secondaryDisk.dirtySectorCount }
             : {}),
+          ...(this.#overlayDisk !== null
+            ? { overlayHotSectors: this.#overlayDisk.hotSectorCount }
+            : {}),
         });
+        // Overlay upkeep rides the same heartbeat: nack a timed-out
+        // epoch (its writes fold back, newer wins), then sweep under
+        // the ~5 s throttle if there is anything to sweep.
+        this.#overlayMaintenance(now);
         this.#statsWindowStart = now;
         this.#statsInstructions = 0;
         this.#statsCycles = 0;
@@ -793,8 +879,17 @@ export class WorkerHost {
     const trackedSecondary = secondary !== null ? new WriteTrackingDisk(secondary.disk) : null;
     this.#secondaryDisk = trackedSecondary;
 
+    // Phase 17 M1: the PRIMARY rides behind the overlay engine — every
+    // guest write is captured (bytes copied at write time) and swept
+    // to the main thread as coalesced chunks; reads never leave RAM.
+    // Always on (§4.1: overlay defaults ON; main-side factory reset is
+    // the escape hatch). The secondary keeps its Phase 15 tracker —
+    // the field-accepted M0 fork system stays untouched (brief §0).
+    const overlayPrimary = new OverlayDisk(primary.disk);
+    this.#overlayDisk = overlayPrimary;
+
     const machine = new IBMPCMachine({
-      disk: primary.disk,
+      disk: overlayPrimary,
       diskClass: primary.diskClass,
       ...(secondary && trackedSecondary
         ? {
@@ -914,6 +1009,59 @@ export class WorkerHost {
     this.#post({ type: 'tx', bytes });
   }
 
+  // ============================================================
+  // Boot-disk overlay sweeps (Phase 17 M1)
+  // ============================================================
+
+  /**
+   * Begin an epoch and post it. No-op when the engine is absent, an
+   * epoch is already in flight, or the hot map is clean.
+   */
+  #emitOverlaySweep(now: number): void {
+    const overlay = this.#overlayDisk;
+    if (overlay === null || overlay.sweepPending || overlay.hotSectorCount === 0) return;
+    const epochId = this.#overlayEpochSeq++;
+    const chunks = overlay.beginSweep(epochId);
+    if (chunks === null) return;
+    this.#overlayLastSweepAt = now;
+    this.#overlayPendingSince = now;
+    this.#post({
+      type: 'overlay-sweep',
+      epochId,
+      chunkSizeBytes: overlay.chunkBytes,
+      chunks,
+    });
+  }
+
+  /** Heartbeat upkeep: ack-timeout nack, then the throttled sweep. */
+  #overlayMaintenance(now: number): void {
+    const overlay = this.#overlayDisk;
+    if (overlay === null) return;
+    const pendingId = overlay.pendingEpochId;
+    if (pendingId !== null && now - this.#overlayPendingSince >= OVERLAY_ACK_TIMEOUT_MS) {
+      overlay.nackSweep(pendingId);
+    }
+    if (
+      !overlay.sweepPending &&
+      overlay.hotSectorCount > 0 &&
+      now - this.#overlayLastSweepAt >= OVERLAY_SWEEP_THROTTLE_MS
+    ) {
+      this.#emitOverlaySweep(now);
+    }
+  }
+
+  /**
+   * Immediate, complete flush (the reset path): fold any pending epoch
+   * back under the hot map and sweep everything in one final epoch.
+   */
+  #overlayFlushNow(): void {
+    const overlay = this.#overlayDisk;
+    if (overlay === null) return;
+    const pendingId = overlay.pendingEpochId;
+    if (pendingId !== null) overlay.nackSweep(pendingId);
+    this.#emitOverlaySweep(this.#pacerNow());
+  }
+
   #postError(err: unknown): void {
     if (err instanceof Error) {
       this.#post({
@@ -949,6 +1097,11 @@ export class WorkerHost {
     // Unsaved secondary writes die with the machine — save is explicit
     // by design (the settings UI says so before the user reloads).
     this.#secondaryDisk = null;
+    // The overlay engine dies with the machine; the reset handler
+    // already posted a final sweep before chaining this teardown.
+    // (#overlayEpochSeq survives on purpose — see its declaration.)
+    this.#overlayDisk = null;
+    this.#overlayFlushWanted = false;
     if (this.#dns) {
       this.#dns.detach();
       this.#dns = null;
