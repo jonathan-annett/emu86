@@ -93,7 +93,8 @@ describe('applyImageStamps on the real image', () => {
     const home = readText(bytes, '/etc/home.sh');
     expect(home).toContain('mkfs /dev/hdb 8086');
     expect(home).toContain('cp /etc/skel.profile /home/user1/.profile');
-    expect(home).toContain('chmod 4755 /bin/passwd'); // user1 can set its own password
+    // user1 can set its own password; setuid login is ELKS's su.
+    expect(home).toContain('chmod 4755 /bin/passwd /bin/login');
     const cfg = readText(bytes, '/etc/mount.cfg');
     expect(cfg).toContain('test -f /etc/home.sh && sh /etc/home.sh');
 

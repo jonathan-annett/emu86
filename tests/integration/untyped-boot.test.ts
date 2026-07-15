@@ -130,6 +130,11 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       // home.sh made passwd setuid (field: user1 couldn't set its own
       // password). 'rws' in the owner triad is the guest-visible proof.
       expect(shell(s1, 'ls -l /bin/passwd', USER_PROMPT)).toContain('rws');
+      // Setuid login IS su (field: nested login died on fchown/setgid
+      // twice). Passwordless root → straight in; exit returns to user1.
+      expect(shell(s1, 'login root', ROOT_PROMPT)).toContain('#');
+      expect(shell(s1, 'echo NESTED=$USER', ROOT_PROMPT)).toContain('NESTED=root');
+      shell(s1, 'exit', USER_PROMPT);
       // The show boot must NOT have net staged (640K vs the compile).
       // Behavioral probe: rc.sys's `net start` announces itself at
       // sysinit. (`cat /bootopts` CANNOT see the stamp: the patch is
