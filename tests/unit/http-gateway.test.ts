@@ -294,13 +294,31 @@ describe('HttpGatewayHost — request path', () => {
   });
 
   it('answers 502 when the fetch rejects', async () => {
-    const rig = makeRig({ reject: new Error('TypeError: Failed to fetch') });
+    const rig = makeRig({ reject: new Error('connection reset by peer') });
     rig.peer.connect(WEB_IP, 80);
     rig.peer.sendTcp(WEB_IP, 80, TCP_PSH | TCP_ACK, latin1Bytes('GET / HTTP/1.0\r\nHost: a.b\r\n\r\n'));
     await flush();
     const response = latin1(rig.peer.readResponseAndClose(WEB_IP, 80));
     expect(response).toMatch(/^HTTP\/1\.0 502 Bad Gateway\r\n/);
     expect(response).toContain('emu86 gateway:');
+    // A non-TypeError passes through verbatim, no CORS speculation.
+    expect(response).toContain('connection reset by peer');
+    expect(response).not.toContain('CORS');
+    expect(rig.host.fetchErrors).toBe(1);
+  });
+
+  it("a TypeError 502 explains the browser's likely-CORS refusal", async () => {
+    // The browser's fetch rejects with a bare TypeError when CORS
+    // blocks the response — the guest deserves better than
+    // "Failed to fetch" (field: ipinfo.io/ vs ipinfo.io/json).
+    const rig = makeRig({ reject: new TypeError('Failed to fetch') });
+    rig.peer.connect(WEB_IP, 80);
+    rig.peer.sendTcp(WEB_IP, 80, TCP_PSH | TCP_ACK, latin1Bytes('GET / HTTP/1.0\r\nHost: a.b\r\n\r\n'));
+    await flush();
+    const response = latin1(rig.peer.readResponseAndClose(WEB_IP, 80));
+    expect(response).toMatch(/^HTTP\/1\.0 502 Bad Gateway\r\n/);
+    expect(response).toContain('likely CORS');
+    expect(response).toContain('Access-Control-Allow-Origin');
     expect(rig.host.fetchErrors).toBe(1);
   });
 

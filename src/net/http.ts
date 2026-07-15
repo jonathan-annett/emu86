@@ -308,11 +308,24 @@ export class HttpGatewayHost {
     } catch (err) {
       this.#onError(err);
       this.fetchErrors++;
+      // "TypeError: Failed to fetch" is the browser's maximally
+      // unhelpful refusal, and in this gateway's life it is almost
+      // always CORS: the target sent no Access-Control-Allow-Origin,
+      // so the browser blocked the response before we saw a byte.
+      // Say so (field ask, 2026-07-15 — ipinfo.io/ failed while
+      // ipinfo.io/json worked, and the raw TypeError explained
+      // nothing). Other errors pass through verbatim.
+      const detail =
+        err instanceof TypeError
+          ? `${String(err)} — blocked by the browser, likely CORS: the ` +
+            `target sent no Access-Control-Allow-Origin header. API ` +
+            `endpoints usually do; HTML pages usually don't.`
+          : String(err);
       response = {
         status: 502,
         statusText: 'Bad Gateway',
         headers: [['content-type', 'text/plain']],
-        body: latin1Bytes(`emu86 gateway: ${String(err)}\n`),
+        body: latin1Bytes(`emu86 gateway: ${detail}\n`),
       };
     } finally {
       this.#pendingFetches--;
