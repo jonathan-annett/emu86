@@ -435,19 +435,19 @@ failure):**
    /dev/hdb as /home and on first boot add /home/root (empty) and
    /home/user1 with .profile … hello.sh"): mount-or-mkfs, then
    populate-once. Runs as root at sysinit:
-   `mount /dev/hdb /home 2>/dev/null || { mkfs /dev/hdb <blocks> &&
-   mount /dev/hdb /home; }` (blocks baked per-boot from the
-   secondary's actual size), then `test -d /home/user1 || { mkdir
-   /home/root /home/user1; cp /etc/skel.profile
-   /home/user1/.profile; cp /etc/skel.hello /home/user1/hello.sh;
-   touch /home/user1/.welcome; chown/chmod user1 …; }`. This
+   the marker-guarded append is ONE size-free line —
+   `test -f /etc/home.sh && sh /etc/home.sh` — and the real work
+   lives in **/etc/home.sh, a per-boot stamp (ours, regenerated
+   every boot like the bootopts block)**: mount-or-mkfs with the
+   CURRENT secondary's block count baked (stale-size edge
+   eliminated — matters now that ?mkdrive is THE resize path, per
+   D5), then populate-once (`test -d /home/user1 ||` → mkdir
+   /home/root /home/user1, cp /etc/skel.profile → .profile, cp
+   /etc/skel.hello → hello.sh, touch .welcome, chown user1). This
    RETIRES the chmod-777 hack (real ownership instead), retires
    "the user formats it once" (a fresh tab boots into a working
    home), and the M0 auto-persist already saves the formatted+
-   populated fork. Recorded edge: the baked mkfs size can go stale
-   in the marker-guarded block if a later ?mkdrive swaps a
-   DIFFERENT-size blank in — mkfs then fails harmlessly and the
-   mkdrive reply already tells the user the manual command.
+   populated fork.
    **Consequence: the passwd surgery RETURNS, both users** — root →
    /home/root, user1 → /home/user1 (login's chdir falls back to /
    when unmounted, so the degraded case still boots).
@@ -493,10 +493,13 @@ minus the mount (quiet failure), $HOME=/home writable.
   perms no longer needed (mkfs runs as root at sysinit).
 - D4. superseded by items 4–5 above: fork-layout seeding + the
   typing relay without sound fx ("sure, why not").
-- D5. blank-drive button: NO VERDICT — stays OUT of M3. The button
-  keeps its size-knob role; only its hint text updates for the
-  /home mount point. The dropdown idea stays on record here for
-  whenever he calls it.
+- D5. blank-drive button: **KILL IT ENTIRELY** (Jonathan: "it can
+  happen on the cli (eg use urlget elk api to make bigger drive and
+  mkfs to format)"). Resize = `urlget http://10.0.2.2/?mkdrive=KB`
+  + reload; M3's auto-mkfs formats the fresh blank at next sysinit,
+  so even mkfs is optional now. New-tab default size changes ride
+  promote (mkdrive → auto-format → "Save as default"). The
+  settings-modal create-blank row goes away in M3.
 
 ## 5. Hard-rule notes for the implementing session
 
