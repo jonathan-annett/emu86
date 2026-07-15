@@ -52,10 +52,16 @@ async function fetchBytes(path) {
 const text = (bytes) => new TextDecoder().decode(bytes);
 
 function rewrite(source, stamp) {
+  // Only ABSOLUTE paths get the archive prefix. Relative refs
+  // (./assets/…, sourceMappingURL, worker new URL()) already resolve
+  // inside the archive and must be left alone: a blind replaceAll
+  // matched the /assets/ inside ./assets/, and a page served AT
+  // /<stamp>/ resolved the result to /<stamp>/<stamp>/… — the 404s
+  // Jonathan field-hit on the first archive (2026-07-15).
   return source
-    .replaceAll('/assets/', `/${stamp}/assets/`)
-    .replaceAll('/elks-serial.img', `/${stamp}/elks-serial.img`)
-    .replaceAll('/version-history.json', `/${stamp}/version-history.json`);
+    .replace(/(?<!\.)\/assets\//g, `/${stamp}/assets/`)
+    .replace(/(?<!\.)\/elks-serial\.img/g, `/${stamp}/elks-serial.img`)
+    .replace(/(?<!\.)\/version-history\.json/g, `/${stamp}/version-history.json`);
 }
 
 const indexBytes = await fetchBytes('/');
@@ -129,6 +135,22 @@ try {
   console.log('(no /elks-serial.img on the live site — skipping)');
 }
 
+// Builds from 168e0c4 on fetch /version-history.json for the header
+// link; rewrite() points that at /<stamp>/version-history.json, so the
+// manifest AS THE LIVE SITE SERVED IT must be frozen into the archive —
+// otherwise the archived header silently loses its previous-version
+// link (main.ts is deliberately best-effort). Older builds never fetch
+// it; no live manifest just means nothing to freeze. Stored verbatim:
+// its /<oldstamp>/ paths point at root-level archives, which is correct
+// from anywhere.
+let liveManifest = null;
+try {
+  liveManifest = await fetchBytes('/version-history.json');
+  console.log('fetched /version-history.json (frozen into the archive)');
+} catch {
+  console.log('(no /version-history.json on the live site — pre-history build, nothing to freeze)');
+}
+
 const archiveDir = resolve(PUBLIC_DIR, stampToken);
 if (existsSync(archiveDir) && !FORCE) {
   throw new Error(`${archiveDir} already exists — rerun with --force to overwrite`);
@@ -142,6 +164,9 @@ for (const [relPath, bytes] of files) {
   const out = resolve(archiveDir, relPath);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, isText(relPath) ? rewrite(text(bytes), stampToken) : bytes);
+}
+if (liveManifest !== null) {
+  writeFileSync(resolve(archiveDir, 'version-history.json'), liveManifest);
 }
 
 // Manifest: newest first. main.ts renders entry [0] as the subtle link.
