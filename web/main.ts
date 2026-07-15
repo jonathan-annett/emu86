@@ -202,8 +202,21 @@ async function init(): Promise<void> {
   const activeScript = settings.bootScripts.find(
     (s) => s.id === settings.activeBootScriptId,
   );
+  // Phase 17 M3: the seeded scripts open by typing `root` at a login
+  // prompt that no longer exists under autologin — and the demo is
+  // the native show's job now. Seeded scripts are skipped while
+  // autologin is on (settings untouched — flip autologin off and
+  // they run again); a user-authored script is the user's business.
+  const scriptSuppressed =
+    activeScript !== undefined &&
+    settings.autologin !== 'off' &&
+    (activeScript.id === SEED_DEMO_SCRIPT.id || activeScript.id === SEED_BOOT_SCRIPT.id);
   if (activeScript !== undefined) {
-    term.writeln(`Boot script: ${activeScript.name}`);
+    term.writeln(
+      scriptSuppressed
+        ? `Boot script: ${activeScript.name} (skipped — autologin is on)`
+        : `Boot script: ${activeScript.name}`,
+    );
   }
   term.writeln('Booting...');
   term.writeln('');
@@ -229,7 +242,7 @@ async function init(): Promise<void> {
   // touched).
   const txDecoder = new TextDecoder();
   const keyClick = createKeyClick();
-  const autoexec = activeScript !== undefined
+  const autoexec = activeScript !== undefined && !scriptSuppressed
     ? new AutoexecRunner({
         script: activeScript.text,
         send: (text) => {
@@ -813,17 +826,17 @@ async function init(): Promise<void> {
         imageId = await library.addImage('hd32-minix.img', bytes, 'github', 'likely-works');
       }
 
-      // Stage the show — but re-check: the user may have chosen a
-      // machine (or a script) while the download ran; their choice wins.
+      // Stage the machine — but re-check: the user may have chosen a
+      // machine while the download ran; their choice wins. Phase 17
+      // M3 (field, Jonathan spotting the old runner): the showcase no
+      // longer stages the keyboard demo script — the HD image's own
+      // first boot performs hello-human natively (seeded .profile →
+      // typing relay), so staging the typed show would double-bill
+      // the act and type `root` into an autologin'd user1 shell.
       if (settings.imageSource.kind !== 'bundled') { status.hide(); return; }
-      const nextScript =
-        settings.activeBootScriptId === null
-          ? SEED_DEMO_SCRIPT.id
-          : settings.activeBootScriptId;
       settings = {
         ...settings,
         imageSource: { kind: 'library', id: imageId },
-        activeBootScriptId: nextScript,
       };
       saveSettings(settings);
       status.breakingNews();
