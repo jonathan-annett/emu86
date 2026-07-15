@@ -276,7 +276,42 @@ record). The Phase 16 M5 handover doc (EMBEDDING.md) remains parked
 until called — but this phase's reports should be written knowing
 they feed it.
 
-## 4. Open decisions (Jonathan — defaults proposed, one line each)
+## 3.5 Back-burner (recorded 2026-07-15)
+
+Jonathan's ordering, in his words: "the overlay comes first, then
+once proven we can investigate the captured state idea."
+
+- **Whole-machine state capture.** The pure-TS bet makes it
+  tractable: RAM ~1 MB of enumerable bytes, CPU a few dozen numbers,
+  devices plain TS fields — but every device needs an explicit
+  serialize/restore pair, and every async host seam (DNS stall,
+  gateway TCP) must be resolved deliberately at restore (fail the
+  DNS, drop the sockets — laptop-resume semantics). Two shapes, same
+  machinery: tab-duplicate resumes the parent's exact state (live
+  BroadcastChannel handshake at duplicate-detect — exact, no
+  staleness window), and reload-resume/save-states in the SAME tab
+  (no identity problem; subsumes the old "golden boot overlays"
+  instant-on idea). Would live beside emu86-overlays as the next
+  tenant; the overlay engine's sweep/fingerprint/lifecycle patterns
+  are its enablers.
+- **TAN redesign: per-tab virtual NAT** (Jonathan's sketch, solves
+  the snapshot-clone identity problem at the guest level). Every
+  guest sees the SAME address (slirp-style fixed 10.0.2.15; gateway
+  and DNS fixed too), and the fabric gives each tab a 1:1 NAT onto an
+  intranet subnet (10.0.3.x) where the other tabs live. A guest's
+  own address then never changes across restart or duplication —
+  LOCALIP stops being per-tab (stamp becomes a constant); HOSTNAME
+  stays per-tab. 1:1 (stateless) address-rewrite NAT keeps inbound
+  telnet/ftpd working with no conntrack and no port rules. The
+  "two copies of the same PC" worry mostly self-resolves at the
+  protocol layer: the clone leases a fresh intranet address, so its
+  cloned TCP state emits from an address its peers never spoke to —
+  they RST, the clone's ghost connections die cleanly, the parent's
+  survive untouched. What remains is HUMAN-level: the clone's in-RAM
+  hostname/prompt says "mouse" until a reboot re-stamps (or a
+  substrate ?whoami nudge); and self-reference needs a decision
+  (what does "mouse" resolve to from inside mouse — hairpin NAT or
+  loopback; ping rev 6's self-ping-is-loopback is the precedent).
 
 1. **Overlay default**: ON for all tabs (reset = escape hatch)? —
    proposed YES.
