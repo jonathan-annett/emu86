@@ -92,3 +92,39 @@ including anything a hotfix deploy changed outside git.
   ITS header has no link onward/back. Every version from the next
   promotion on carries the link it shipped with, frozen — walking the
   chain backward works from then on.
+
+## Incident, 2026-07-16: the shadow pipeline (READ BEFORE TRUSTING A DEPLOY)
+
+A Cloudflare **Workers Builds** git integration had been attached to
+the `emu86` (prod) Worker since ~July 13 — its bot branch predated
+the repo going public. Consequence: **every push to `main` built and
+deployed to STABLE**, racing the CLI procedure. `b72851d` (a proper,
+gated, captured promotion) was silently replaced ~4 hours later by a
+git build of an unceremonied docs commit (`05fb7ed`). The next
+capture then archived `05fb7ed` honestly — correct behavior against
+a wrong reality — and the `b72851d` archive had to be reconstructed
+from git afterwards (its manifest entry says so; the trick: serve
+the promotion commit's committed dist-web locally and run
+release-capture with `CAPTURE_ORIGIN=http://localhost:<port>`).
+
+Rules extracted, in blood:
+
+1. **Never connect Workers Builds (or any push-deploy CI) to the
+   `emu86` prod service.** If a git pipeline is ever wanted, point it
+   at a dedicated `release` branch that is only fast-forwarded at
+   promotion time — that is a procedure CHANGE and gets its own brief
+   first. (Jonathan disconnected the integration in the dashboard,
+   2026-07-16; the GitHub app remains installed for his other repos,
+   so an accidental dashboard re-connect stays possible — check the
+   Worker's Settings → Build panel if deploys ever look haunted.)
+2. **`No targets deployed for emu86` from wrangler is NOISE** — the
+   upload happened (the version list proves it). Do not diagnose from
+   that line in either direction.
+3. **Verify a deploy by CONTENT AND SOURCE, not reachability**: the
+   live bundle's build stamp must match the commit you deployed, and
+   the Worker's active deployment should say "Wrangler", not a git
+   build. Tonight's lesson: it is possible to "verify" someone else's
+   deploy and credit your own.
+4. **Verify the capture too**: before `release:capture`, confirm the
+   live stamp IS the promotion you think is outgoing. The capture
+   tool archives whatever reality serves it.
