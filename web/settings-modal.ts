@@ -439,7 +439,14 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
       const resetBtn = document.createElement('button');
       resetBtn.type = 'button';
       resetBtn.className = 'emu86-button';
-      resetBtn.textContent = 'Reset machine state…';
+      // Name WHOSE state resets (field ask, M2 pass). The tab title is
+      // already `<name>.tabs — emu86` once the TAN lease settles
+      // (Jonathan: "the name can come from the tab title") — no
+      // plumbing, and solo machines fall back to the plain label.
+      const tabsTitle = /^([a-z0-9-]+)\.tabs /.exec(document.title);
+      resetBtn.textContent = tabsTitle !== null
+        ? `Reset '${tabsTitle[1] ?? ''}' machine state…`
+        : 'Reset machine state…';
       resetBtn.addEventListener('click', () => {
         ms.onFactoryReset();
         resetBtn.textContent = 'Reset queued — reload to apply';

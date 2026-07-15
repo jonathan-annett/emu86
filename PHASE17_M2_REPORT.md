@@ -159,6 +159,12 @@ and a wrong fingerprint leaves the base untouched.
   write-only contract, observed working before M2 changed it. His
   focus ask (terminal focus after refresh) shipped separately
   (6b5076a).
+- **M2 FIELD PASS (Jonathan, 2026-07-15, dev tier @ 12a2f5b): all
+  five behaviors check out** — persistent rm across reload, queued
+  factory reset, duplicate-then-diverge, base-switch mismatch notice
+  + discard, terminal focus. One suggestion, applied same session:
+  the reset button names WHOSE state it resets ("Reset 'mouse'
+  machine state…" — the tab's .tabs name at render time).
 
 ## 5. Pointer for M3
 
