@@ -91,6 +91,21 @@ ld -0 -i -L/usr/lib -o hello hello.o -lc86
 ./hello
 `;
 
+/** /bin/resync (per-boot stamp, Jonathan's ask): the panel-coherence
+ *  remount as one word. It cannot free the CALLER's cwd (any process
+ *  sitting on /home keeps the fs busy), so on EBUSY it teaches the
+ *  incantation instead of failing cryptically. */
+export const RESYNC_SH = `# /bin/resync -- remount the home drive to pick up host-side edits
+cd /
+if umount /home 2>/dev/null; then
+\tmount /dev/hdb /home && echo "resync: /home remounted"
+else
+\techo "resync: /home is busy (your shell is probably sitting in it)"
+\techo "run:  cd /; resync; cd"
+\texit 1
+fi
+`;
+
 export const SKEL_PROFILE = `# seeded by emu86 to your home drive -- edit freely, it's yours
 if test -f $HOME/.welcome; then
 \trm -f $HOME/.welcome
@@ -121,14 +136,17 @@ export function homeShText(secondaryBlocks: number | null): string {
 # the binary already restricts non-root to its own password), and
 # setuid login is ELKS's su -- there is no other path to root from a
 # user1 autologin session, and non-setuid nested login dies on
-# fchown/setgid (and SysV chown-giveaway leaves tty debris). /dev/null
-# world-writable is plain unix correctness (a 644 null broke net
-# stop's redirect for user1); ping is stamped fresh each boot and
-# needs its execute bit. Before the mount line so all of this applies
-# no matter what state the drive is in.
-chmod 4755 /bin/passwd /bin/login
+# fchown/setgid (and SysV chown-giveaway leaves tty debris). mount +
+# umount join them (field: user1 couldn't do the panel's remount
+# dance — the kernel's suser gate reads euid, and neither binary
+# second-guesses in userland). /dev/null world-writable is plain
+# unix correctness (a 644 null broke net stop's redirect for user1);
+# ping is stamped fresh each boot and needs its execute bit. Before
+# the mount line so all of this applies no matter what state the
+# drive is in.
+chmod 4755 /bin/passwd /bin/login /bin/mount /bin/umount
 chmod 666 /dev/null /dev/ne0
-chmod 755 /bin/ping
+chmod 755 /bin/ping /bin/resync
 ${mountLine}
 test -d /home/user1 || {
 \tmkdir /home/root
@@ -227,6 +245,7 @@ export function applyImageStamps(
     ['skel.profile', '/etc/skel.profile', SKEL_PROFILE],
     ['skel.hello', '/etc/skel.hello', HELLO_SH],
     ['home.sh', '/etc/home.sh', homeShText(opts.secondaryBlocks)],
+    ['resync', '/bin/resync', RESYNC_SH],
   ] as const) {
     const w = fs.writeFile(path, encoder.encode(text));
     if (w.ok) applied.push(name);

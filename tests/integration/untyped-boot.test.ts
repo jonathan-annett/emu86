@@ -168,6 +168,13 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       // Still writable after the round trip (per-boot chown healing).
       expect(shell(s2, 'echo probe-2 > $HOME/w2 && cat $HOME/w2', USER_PROMPT))
         .toContain('probe-2');
+      // The panel's remount dance, as user1, via the stamped /bin/resync
+      // (field: umount was root-gated AND $HOME-busy — setuid
+      // mount/umount plus the cd-off-the-fs step make it work). First
+      // the honest busy case from inside $HOME, then the real thing.
+      expect(shell(s2, 'resync', USER_PROMPT)).toContain('busy');
+      expect(shell(s2, 'cd /; resync && cd && echo REMOUNT-OK', USER_PROMPT))
+        .toContain('REMOUNT-OK');
       // The quietly-stamped /bin/ping is present and executable — its
       // usage line proves a runnable a.out. (A LIVE ping still needs
       // ping.c's historical net-stop dance: it opens /dev/ne0 raw and

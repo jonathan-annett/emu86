@@ -281,9 +281,10 @@ export function mountEditorPanel(deps: EditorPanelDeps): EditorPanelHandle {
             return;
           }
           say(
-            `written ✓ — in the guest: umount/mount /dev/hdb to see it ` +
-              `(the guest owns the fs while mounted). To make this the base for ` +
-              `new tabs, use "Save as default".`,
+            `written ✓ — in the guest: cd /; resync; cd (the cd matters — ` +
+              `$HOME lives on the mounted fs, so umount is busy until you ` +
+              `step off it). To make this the base for new tabs, use ` +
+              `"Save as default".`,
           );
         } finally {
           write.disabled = false;

@@ -98,10 +98,14 @@ describe('applyImageStamps on the real image', () => {
     // re-asserts every boot (field: a drive escaped root-owned once).
     expect(home).toMatch(/\}\nchown user1 \/home\/user1/);
     // user1 can set its own password; setuid login is ELKS's su;
+    // setuid mount/umount = the panel's remount dance works as user1;
     // /dev/null is world-writable; the stamped ping is executable.
-    expect(home).toContain('chmod 4755 /bin/passwd /bin/login');
+    expect(home).toContain('chmod 4755 /bin/passwd /bin/login /bin/mount /bin/umount');
     expect(home).toContain('chmod 666 /dev/null /dev/ne0');
-    expect(home).toContain('chmod 755 /bin/ping');
+    expect(home).toContain('chmod 755 /bin/ping /bin/resync');
+    // /bin/resync stamped and honest about the caller's-cwd busy case.
+    expect(readText(bytes, '/bin/resync')).toContain('umount /home');
+    expect(readText(bytes, '/bin/resync')).toContain('cd /; resync; cd');
     const cfg = readText(bytes, '/etc/mount.cfg');
     expect(cfg).toContain('test -f /etc/home.sh && sh /etc/home.sh');
 
