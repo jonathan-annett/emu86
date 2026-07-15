@@ -454,7 +454,14 @@ async function init(): Promise<void> {
 
   const encoder = new TextEncoder();
   term.onData((data: string) => {
-    const bytes = encoder.encode(data);
+    // Backspace: xterm.js emits DEL (0x7F), but the ELKS line editor
+    // binds 0x7F to delete-FORWARD and 0x08 (Ctrl-H) to backspace —
+    // field-diagnosed 2026-07-15 (brief Addendum B; Jonathan's Ctrl-H
+    // probe confirmed 0x08 behaves). Map it here, at the one seam
+    // between the human keyboard and the guest; scripted input
+    // (autoexec, agent bridge) never contains 0x7F.
+    const mapped = data.includes('\x7f') ? data.replaceAll('\x7f', '\b') : data;
+    const bytes = encoder.encode(mapped);
     const msg: MainToWorkerMessage = { type: 'rx', bytes };
     worker.postMessage(msg);
   });

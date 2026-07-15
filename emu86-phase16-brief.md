@@ -262,15 +262,16 @@ Backspace acts as delete-forward; insertion and the cursor agree.
 simpler erase path there — or because deleting forward at EOL has
 nothing to eat and the observed delete came from that simpler path.)
 
-NOT diagnosed yet. With the refinement, ONE suspect dominates:
-1. **DEL vs BS**: xterm.js sends 0x7F for Backspace; many editors
-   (and ELKS's shell line editor, plausibly) bind 0x7F to
-   DELETE-FORWARD and 0x08 (Ctrl-H) to backspace. Everything Jonathan
-   sees fits: mid-line Backspace eats the character AHEAD, insertion
-   is untouched, EOL "works" via the simpler erase path. Quick
-   guest-side probe: does Ctrl-H mid-line delete backwards correctly?
-   If yes, the fix could even be OUR side — an xterm.js option or a
-   key handler mapping Backspace to 0x08 for this guest.
+DIAGNOSED AND FIXED same night:
+1. **DEL vs BS — CONFIRMED**: xterm.js sends 0x7F for Backspace; the
+   ELKS line editor binds 0x7F to DELETE-FORWARD and 0x08 (Ctrl-H) to
+   backspace. Jonathan ran the probe ("yes ctrl-h seems to work") and
+   asked for the fix now ("it will help with my tests in the
+   browser"). Fix is host-side, one line at the single seam between
+   the human keyboard and the guest: `term.onData` maps 0x7F → 0x08
+   (web/main.ts). Scripted input (autoexec, agent bridge) never
+   carries 0x7F; guest-to-guest telnet never touches this path.
+   Field verification rides the M4 deploy.
 2. ~~CSI parser off-by-one drifting the insert point~~ — mooted by
    the refinement: the insert point is correct.
 3. ~~Prompt-length assumption (the `cat# ` HOSTNAME prompt)~~ —
