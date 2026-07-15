@@ -702,30 +702,37 @@ header code {
 /* System-level editor panel (Phase 16 M4)                            */
 /* ------------------------------------------------------------------ */
 
-#editor-toggle {
-  position: fixed;
-  left: 0.75rem;
-  bottom: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  background: #16202b;
-  color: #cfe3f5;
-  border: 1px solid #3d7bb5;
-  border-radius: 999px;
+/* The drawer handle (field design, 2026-07-15): a tab that sticks out
+   of the RIGHT screen edge just below the settings gear — the
+   original bottom-left pill sat on the console's entry line — and
+   slides out WITH the panel, like a drawer you pulled open. Child of
+   the panel, hanging off its left edge; gear palette so they read as
+   one control group. `visibility: visible` beats the closed panel's
+   visibility:hidden (visibility un-inherits, unlike display). */
+.editor-handle {
+  position: absolute;
+  left: -2rem;
+  top: 3rem;
+  width: 2rem;
+  padding: 0.7rem 0.3rem;
+  writing-mode: vertical-rl;
+  background: #1c1c1c;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-right: none;
+  border-radius: 6px 0 0 6px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
   cursor: pointer;
-  z-index: 30;
+  visibility: visible;
 }
 
-#editor-toggle:hover,
-#editor-toggle:focus-visible {
-  background: #1d2d3e;
-  outline: 2px solid #3d7bb5;
+.editor-handle:hover,
+.editor-handle:focus-visible {
+  background: #2a2a2a;
+  outline: 2px solid #4a90e2;
   outline-offset: 1px;
-}
-
-#editor-panel[hidden] {
-  display: none;
 }
 
 #editor-panel {
@@ -741,6 +748,18 @@ header code {
   box-shadow: -6px 0 24px rgba(0, 0, 0, 0.5);
   z-index: 40;
   font-size: 0.85rem;
+  /* Closed = slid off-screen; the handle (absolute, left of the box)
+     stays out. overflow must stay visible for it to show. */
+  overflow: visible;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.22s ease, visibility 0s linear 0.22s;
+}
+
+#editor-panel.is-open {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform 0.22s ease;
 }
 
 .editor-header {

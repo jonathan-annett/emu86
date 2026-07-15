@@ -81,6 +81,27 @@ to stay as a permanent diagnostic fallback.
   `cat` → panel's edit visible; reload the tab → edit survived (fork
   row); duplicate the tab → edit rode along.
 
+## 2b. Field results (2026-07-15, dev e4358843)
+
+Jonathan ran the §2 script: **steps 2–5 pass as expected** — including
+an unprompted boundary probe: he skipped a `sync` and observed the
+expected NO data update, then `echo >> /mnt/test` + `sync` let the
+editor pick up the new copy. That is floppy-passing semantics
+field-verified in both directions.
+
+Two observations from the same pass:
+- He saw no UI banner notifying that the drive changed ("but i may
+  have not waited a full 5 seconds"). The pill appears on the 1 Hz
+  dirty heartbeat and flips to auto-saved within ~5 s; WATCH this —
+  if the next pass still sees nothing, the pill's post-M0 states may
+  be too quiet.
+- **The `/mnt files` badge sat on the console's entry line**
+  (bottom-left strikes again — the same corner that forced the drive
+  pill to go draggable in Phase 15). His design, implemented same
+  night: the badge becomes a skeuomorphic DRAWER HANDLE on the right
+  screen edge, above console height, attached to the panel and
+  sliding out with it.
+
 ## 3. Where this leaves Phase 16
 
 M0–M4 built. M5 (EMBEDDING.md, the huxley/lite handover doc) stays

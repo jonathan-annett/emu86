@@ -50,17 +50,23 @@ export interface EditorPanelDeps {
 }
 
 export function mountEditorPanel(deps: EditorPanelDeps): void {
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.id = 'editor-toggle';
-  toggle.textContent = '/mnt files';
-  toggle.title = "Edit files on this tab's /dev/hdb";
-  document.body.appendChild(toggle);
-
   const panel = document.createElement('aside');
   panel.id = 'editor-panel';
-  panel.hidden = true;
   document.body.appendChild(panel);
+
+  // The toggle is a drawer HANDLE on the panel's left edge (Jonathan's
+  // design, field 2026-07-15): it sticks out of the right side of the
+  // screen above console height — the original bottom-left pill sat
+  // exactly on the console's entry line, the same corner that forced
+  // the drive pill to go draggable in Phase 15 — and it slides out
+  // WITH the panel, like a tab you dragged out of the screen edge.
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'editor-handle';
+  toggle.textContent = '/mnt files';
+  toggle.title = "Edit files on this tab's /dev/hdb";
+  toggle.setAttribute('aria-expanded', 'false');
+  panel.appendChild(toggle);
 
   const header = document.createElement('div');
   header.className = 'editor-header';
@@ -87,15 +93,14 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
   };
 
   let open = false;
-  toggle.addEventListener('click', () => {
-    open = !open;
-    panel.hidden = !open;
+  const setOpen = (next: boolean): void => {
+    open = next;
+    panel.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
     if (open) void showList();
-  });
-  close.addEventListener('click', () => {
-    open = false;
-    panel.hidden = true;
-  });
+  };
+  toggle.addEventListener('click', () => setOpen(!open));
+  close.addEventListener('click', () => setOpen(false));
 
   /** Peek + parse, with the panel's honest empty states. */
   async function openDrive(): Promise<MinixFileSystem | null> {
