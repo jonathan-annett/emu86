@@ -112,7 +112,11 @@ export function homeShText(secondaryBlocks: number | null): string {
     : 'mount /dev/hdb /home 2>/dev/null || exit 0';
   return `# /etc/home.sh -- emu86 per-boot stamp; regenerated every boot, edits do not survive
 # Mounts the tab's home drive (formatting a fresh blank on first use)
-# and seeds /home/root + /home/user1 once per drive.
+# and seeds /home/root + /home/user1 once per drive. Ownership of the
+# seeded artifacts re-asserts EVERY boot: a field drive escaped with
+# root-owned homes once (user1 couldn't create files in its own
+# $HOME) -- ownership is config, not state, so heal it, don't
+# archaeology it. User-created files are never touched.
 # passwd was always MEANT to be setuid (passwd.c line 7's own todo;
 # the binary already restricts non-root to its own password), and
 # setuid login is ELKS's su -- there is no other path to root from a
@@ -126,13 +130,16 @@ chmod 4755 /bin/passwd /bin/login
 chmod 666 /dev/null /dev/ne0
 chmod 755 /bin/ping
 ${mountLine}
-test -d /home/user1 && exit 0
-mkdir /home/root
-mkdir /home/user1
-cp /etc/skel.profile /home/user1/.profile
-cp /etc/skel.hello /home/user1/hello.sh
-touch /home/user1/.welcome
-chown user1 /home/user1 /home/user1/.profile /home/user1/hello.sh /home/user1/.welcome
+test -d /home/user1 || {
+\tmkdir /home/root
+\tmkdir /home/user1
+\tcp /etc/skel.profile /home/user1/.profile
+\tcp /etc/skel.hello /home/user1/hello.sh
+\ttouch /home/user1/.welcome
+}
+chown user1 /home/user1 /home/user1/.profile /home/user1/hello.sh 2>/dev/null
+chown user1 /home/user1/.welcome 2>/dev/null
+sync
 `;
 }
 

@@ -127,6 +127,11 @@ describe('the un-typed boot (Phase 17 M3)', () => {
 
       expect(shell(s1, 'echo HOME=$HOME USER=$USER', USER_PROMPT))
         .toContain('HOME=/home/user1 USER=user1');
+      // user1 can CREATE files in its own home — the assertion the
+      // field taught us to make (unlink succeeding proved nothing:
+      // a root-owned dir still let .welcome go, but creates fail).
+      expect(shell(s1, 'echo probe-1 > $HOME/w1 && cat $HOME/w1', USER_PROMPT))
+        .toContain('probe-1');
       // home.sh made passwd setuid (field: user1 couldn't set its own
       // password). 'rws' in the owner triad is the guest-visible proof.
       expect(shell(s1, 'ls -l /bin/passwd', USER_PROMPT)).toContain('rws');
@@ -160,6 +165,9 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       expect(s2.txText()).toContain('Starting networking');
       expect(shell(s2, 'test -f /home/user1/hello.sh && echo HOME-OK', USER_PROMPT))
         .toContain('HOME-OK');
+      // Still writable after the round trip (per-boot chown healing).
+      expect(shell(s2, 'echo probe-2 > $HOME/w2 && cat $HOME/w2', USER_PROMPT))
+        .toContain('probe-2');
       // The quietly-stamped /bin/ping is present and executable — its
       // usage line proves a runnable a.out. (A LIVE ping still needs
       // ping.c's historical net-stop dance: it opens /dev/ne0 raw and

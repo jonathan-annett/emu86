@@ -94,6 +94,9 @@ describe('applyImageStamps on the real image', () => {
     const home = readText(bytes, '/etc/home.sh');
     expect(home).toContain('mkfs /dev/hdb 8086');
     expect(home).toContain('cp /etc/skel.profile /home/user1/.profile');
+    // The chown lives OUTSIDE the populate-once guard — ownership
+    // re-asserts every boot (field: a drive escaped root-owned once).
+    expect(home).toMatch(/\}\nchown user1 \/home\/user1/);
     // user1 can set its own password; setuid login is ELKS's su;
     // /dev/null is world-writable; the stamped ping is executable.
     expect(home).toContain('chmod 4755 /bin/passwd /bin/login');
