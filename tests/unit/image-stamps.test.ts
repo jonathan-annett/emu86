@@ -93,6 +93,7 @@ describe('applyImageStamps on the real image', () => {
     const home = readText(bytes, '/etc/home.sh');
     expect(home).toContain('mkfs /dev/hdb 8086');
     expect(home).toContain('cp /etc/skel.profile /home/user1/.profile');
+    expect(home).toContain('chmod 4755 /bin/passwd'); // user1 can set its own password
     const cfg = readText(bytes, '/etc/mount.cfg');
     expect(cfg).toContain('test -f /etc/home.sh && sh /etc/home.sh');
 
@@ -126,6 +127,8 @@ describe('applyImageStamps on the real image', () => {
     const text = homeShText(null);
     expect(text).not.toContain('mkfs');
     expect(text).toContain('mount /dev/hdb /home');
+    // The setuid-passwd line rides BOTH variants, ahead of the mount.
+    expect(text.indexOf('chmod 4755 /bin/passwd')).toBeLessThan(text.indexOf('mount /dev/hdb'));
   });
 
   it('the skel profile emits the marker exactly once, guarded by .welcome', () => {

@@ -105,6 +105,11 @@ export function homeShText(secondaryBlocks: number | null): string {
   return `# /etc/home.sh -- emu86 per-boot stamp; regenerated every boot, edits do not survive
 # Mounts the tab's home drive (formatting a fresh blank on first use)
 # and seeds /home/root + /home/user1 once per drive.
+# passwd was always MEANT to be setuid (passwd.c line 7's own todo;
+# the binary already restricts non-root to its own password) -- the
+# stock image just never set the bit. Before the mount line so it
+# applies no matter what state the drive is in.
+chmod 4755 /bin/passwd
 ${mountLine}
 test -d /home/user1 && exit 0
 mkdir /home/root

@@ -127,6 +127,9 @@ describe('the un-typed boot (Phase 17 M3)', () => {
 
       expect(shell(s1, 'echo HOME=$HOME USER=$USER', USER_PROMPT))
         .toContain('HOME=/home/user1 USER=user1');
+      // home.sh made passwd setuid (field: user1 couldn't set its own
+      // password). 'rws' in the owner triad is the guest-visible proof.
+      expect(shell(s1, 'ls -l /bin/passwd', USER_PROMPT)).toContain('rws');
       // The show boot must NOT have net staged (640K vs the compile).
       // Behavioral probe: rc.sys's `net start` announces itself at
       // sysinit. (`cat /bootopts` CANNOT see the stamp: the patch is
