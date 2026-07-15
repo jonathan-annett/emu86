@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>emu86 — ELKS in the browser</title>
+    <!-- Inline SVG favicon: a green block cursor on black, which is
+         what the page mostly is. A data URI needs no asset route and
+         no extra request (the 404 on /favicon.ico was field-reported,
+         2026-07-14). -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230c0c0c'/%3E%3Crect x='3' y='3' width='7' height='10' fill='%2333ff66'/%3E%3C/svg%3E"
+    />
+    <!-- xterm.css is imported from main.ts. A bare package path in a
+         link tag is NOT resolved by Vite — dev served the SPA-fallback
+         HTML for it (MIME-rejected as a stylesheet), leaving xterm
+         unstyled since Phase 9: visible helper textarea, unstyled
+         scrollback viewport. Found by Jonathan, Phase 14. -->
+    <script type="module" crossorigin src="./assets/index-nty3l4LR.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-PhMaEtl_.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>emu86</h1>
+        <p>ELKS over a 16550A serial console, running in a Web Worker. Type into the terminal once the <code>#</code> prompt appears. <a class="about-link" href="/about/">About this machine →</a></p>
+      </header>
+      <div id="terminal"></div>
+    </main>
+    <button id="settings-gear" type="button" aria-label="Open settings">⚙</button>
+    <div id="settings-modal-root"></div>
+  </body>
+</html>
