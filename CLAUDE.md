@@ -165,7 +165,9 @@ built against it.)
   the npm scripts; don't hand-edit.
 - Root is littered with `corpus-baseline*.txt`, `diag-out*.txt` — scratch artifacts
   from old phases, not inputs.
-- Remote is `github.com/jonathan-annett/emu86` (**private**), branch `main`.
+- Remote is `github.com/jonathan-annett/emu86` (**PUBLIC as of
+  2026-07-16** — MIT licensed, secret-swept before the flip; everything
+  you commit here is world-readable, including commit messages), branch `main`.
   Deployment is two-tier and NOT git-triggered (see `wrangler.jsonc`):
   `npm run deploy:dev` → emu86-dev.jonathan-max-annett.workers.dev (testing);
   `npm run deploy:prod` → https://8086-tab.net (stable — promote only after
