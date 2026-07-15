@@ -116,7 +116,10 @@ Rules extracted, in blood:
    first. (Jonathan disconnected the integration in the dashboard,
    2026-07-16; the GitHub app remains installed for his other repos,
    so an accidental dashboard re-connect stays possible — check the
-   Worker's Settings → Build panel if deploys ever look haunted.)
+   Worker's Settings → Build panel if deploys ever look haunted.
+   Likely origin, per Jonathan: the connect-a-repo step is a DEFAULT
+   in the dashboard's Worker-creation flow — so any future Worker
+   created there should have its Build panel checked on day one.)
 2. **`No targets deployed for emu86` from wrangler is NOISE** — the
    upload happened (the version list proves it). Do not diagnose from
    that line in either direction.
