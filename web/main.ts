@@ -91,6 +91,9 @@ async function init(): Promise<void> {
   term.loadAddon(fit);
   term.open(container);
   fit.fit();
+  // Focus the terminal immediately (field ask, 2026-07-15): Ctrl-R,
+  // wait, keep typing — the keyboard jockeys never touch the mouse.
+  term.focus();
   window.addEventListener('resize', () => {
     try { fit.fit(); } catch { /* ignore — first paint can race resize */ }
   });
