@@ -102,8 +102,9 @@
 <main>
   <h1>emu86</h1>
   <p class="tagline">A 1980s PC written in TypeScript, booting a real
-  Unix in your browser tab — where duplicating the tab plugs a second
-  machine into the network, and one tab can telnet into the other.</p>
+  Unix in your browser tab — a machine that keeps its own state, where
+  duplicating the tab plugs a second machine into the network, and one
+  tab can telnet into the other.</p>
 
   <p><a href="/">← back to the machine</a></p>
 
@@ -126,14 +127,19 @@
     readable source is worth more than raw speed, and that the speed
     would turn out to be enough. The project's stated principle from
     day one: <em>understandable first, fast second</em>. (The verdict,
-    measured: about half the speed of a real 4.77&nbsp;MHz IBM XT on
-    genuine kernel workloads, before anyone has tried to make it
-    fast. It turns out half an XT is plenty.)
+    measured: on genuine kernel workloads it sustains about half of a
+    4.77&nbsp;MHz cycle budget under the strictest accounting there is
+    — one instruction per cycle, a standard no real 8086 ever met. A
+    real XT spent four to twelve cycles per instruction, so in
+    instructions actually delivered this is <em>several</em> XTs —
+    which is why the machine ships with an authenticity governor, not
+    a speed boost: uncapped, Tetris is unplayably fast. Speed was
+    never the problem.)
   </p>
 
   <div class="numbers">
-    <div><b>1,119</b><span>tests in the always-on suite (plus the SingleStepTests 8088 corpus as the opcode oracle)</span></div>
-    <div><b>41</b><span>phase reports — the project's real memory, negative results included</span></div>
+    <div><b>1,342</b><span>tests in the always-on suite (plus the SingleStepTests 8088 corpus as the opcode oracle)</span></div>
+    <div><b>59</b><span>phase reports — the project's real memory, negative results included</span></div>
     <div><b>~4 months</b><span>March to July 2026, three machines, one consolidation</span></div>
     <div><b>0</b><span>lines of WASM, C, or hand-written assembly in the emulator</span></div>
   </div>
@@ -197,6 +203,23 @@
     machine stopped believing it was October&nbsp;21,&nbsp;1991.</p>
   </div>
 
+  <div class="milestone"><span class="date">JULY 15–16</span>
+    <p>The machine grew a memory, and then it grew manners. A
+    block-level copy-on-write overlay made the boot disk durable —
+    what the guest writes, reloads keep, keyed to the base image by
+    SHA-256 so a wrong overlay is refused rather than folded. Every
+    tab got its own private <code>/dev/hdb</code> that survives with
+    it, an editor drawer over that drive (read and written through
+    the project's own MINIX filesystem module), and finally the
+    <em>un-typed boot</em>: a fresh machine formats its own home
+    drive, seeds it, logs itself in, and performs its first-boot
+    show — writing and compiling a C program with its own toolchain —
+    exactly once per drive, with nothing typed, ever. One long day of
+    field-testing later, the whole line was promoted; the previous
+    version is archived one click away, as every outgoing version now
+    is.</p>
+  </div>
+
   <h2>Things learned the hard way</h2>
   <ul>
     <li><strong>ELKS speaks DNS over TCP.</strong> Its network stack
@@ -228,6 +251,19 @@
     actually does — ktcp's checksum quirks, the clock utility's
     weekday-plus-three convention — not against the datasheet. The
     datasheet doesn't boot.</li>
+    <li><strong><code>cat /bootopts</code> lies.</strong> The boot
+    options are patched by a raw block write the kernel reads whole —
+    but the file's inode still says 692 bytes, so any filesystem read
+    shows only the pristine prefix. It had been quietly lying since
+    the patch shipped; an hour of ghost-hunting later, the rule is
+    written down: probe behavior, not files.</li>
+    <li><strong>The buffer cache bites twice.</strong> A guest
+    <code>rm</code> that hasn't <code>sync</code>ed is invisible to
+    the host's snapshots — which replayed the first-boot show after a
+    quick refresh, and separately stranded a home directory owned by
+    the wrong user. Same seam, two costumes; the fix each time was a
+    well-placed <code>sync</code> and refusing to treat cached truth
+    as disk truth.</li>
   </ul>
 
   <h2>How it's built</h2>
@@ -254,43 +290,62 @@
 
   <h2>Try it</h2>
   <ul>
-    <li><a href="/">Boot the machine</a> — it starts an ELKS floppy
-    automatically; the gear menu offers full hard-disk images
-    (fetched straight from the ELKS project's releases).</li>
-    <li>Log in as <code>root</code>, then <code>net start ne0</code> —
-    or pick the seeded boot script in settings and it types itself.</li>
-    <li>Duplicate the tab. Note the new machine's address in its boot
-    banner, then <code>telnet 10.0.2.&lt;it&gt;</code> from the first
-    tab. You are now remotely logged into a computer that lives one
-    tab to the right.</li>
-    <li><code>nslookup example.com</code> — real answers, resolved
-    over DNS-over-HTTPS without the kernel suspecting a thing.</li>
+    <li><a href="/">Boot the machine</a> — a first visit starts an
+    ELKS floppy while quietly fetching itself a full hard disk
+    (three megabytes over the wire; it unpacks to thirty-one), then
+    stages the real machine for your next reload.</li>
+    <li>Touch nothing. The machine formats its own home drive, logs
+    itself in as <code>user1</code>, and — once per drive, the first
+    time it meets you — types out a C program, compiles it with the
+    toolchain on its own disk, runs it, and says hello. After that
+    first show, every boot comes up with the network already on.</li>
+    <li>Duplicate the tab. The boot banner names the new machine
+    (<code>cat.tabs</code>, say), and its drive is a fork of the
+    original's. Then <code>telnet cat.tabs</code> from the first tab
+    — you are now remotely logged into a computer that lives one tab
+    to the right.</li>
+    <li><code>rm</code> a file. Reload. It's still gone — the machine
+    keeps its own state now, per tab, and Settings → Machine state →
+    Reset is the way back to factory. Set a password with
+    <code>passwd</code> and it will demand it forever after, which is
+    both a feature and a warning.</li>
+    <li><code>ping elk</code>, <code>nslookup example.com</code>,
+    <code>urlget http://ipinfo.io/json</code> — the gateway answers,
+    real names resolve over DNS-over-HTTPS, and real HTTP flows
+    through a kernel too old to imagine any of it.</li>
     <li><code>date</code> — correct, thanks to a CMOS chip younger
     than the operating system reading it.</li>
     <li>Playing games? Settings → CPU speed → Turbo. An authentic
     4.77&nbsp;MHz 8086 pushing full-screen redraws down a serial line
     is authentically slow; the Turbo button is period-correct.</li>
-    <li>Or just watch. On a first visit the machine quietly downloads
-    itself a hard disk, then offers to reboot and — typing every
-    character itself, with the clatter of a keyboard it doesn't have —
-    write a C program, compile it with the toolchain on its own disk,
-    and run it. It says hello.</li>
+    <li>Slide out the <code>/mnt files</code> drawer: a host-side
+    editor over the tab's own drive. Edit a file, and
+    <code>resync</code> in the guest picks it up; edit in the guest,
+    and the drawer follows along — telling you, never overwriting
+    you, when the file you have open changed underneath.</li>
   </ul>
 
   <h2>Honest limits</h2>
   <ul>
     <li>Outbound network magic is bounded by the browser: DNS works
     (DoH is HTTPS), guest-to-guest TCP works (it's real ktcp on both
-    ends), but arbitrary internet TCP awaits a gateway milestone — and
-    HTTPS from the guest is structurally impossible without tricks
-    we've declined to play.</li>
+    ends), and the guest's <code>urlget</code> reaches the real
+    internet through a gateway that re-issues requests as browser
+    fetches — which means CORS applies (API endpoints usually work;
+    HTML pages usually don't, and the gateway now says so instead of
+    muttering). HTTPS from the guest itself remains structurally
+    impossible without tricks we've declined to play.</li>
     <li>No inbound connections from the real internet. The TAN is
     same-origin, same browser.</li>
-    <li>The CPU delivers about half an XT under authentic pacing on a
-    desktop; heavy full-screen terminal games want the Turbo switch.</li>
-    <li>Guest writes don't persist yet — every boot is a fresh
-    machine. (Persistent virtual drives are on the wish list, and the
-    wish list is in the repository.)</li>
+    <li>Under authentic pacing the engine sustains about half its
+    one-instruction-per-cycle budget on heavy kernel work — still more
+    delivered instructions than a real XT managed, but full-screen
+    terminal redraws down a serial line can drag; that's what the
+    Turbo switch is for.</li>
+    <li>Persistence is honest, not miraculous: the machine's state
+    sweeps to storage on a heartbeat, so a tab killed mid-keystroke
+    can lose its last few seconds — the same class of loss as yanking
+    a floppy. <code>sync</code> in the guest, then breathe.</li>
   </ul>
 
   <h2>Family</h2>
@@ -343,11 +398,12 @@
   </p>
 
   <p class="closing">
-    And now there is a PC in your browser tab. It boots a real Unix,
-    joins a network that exists only between your own tabs, resolves
-    real names through a resolver its kernel is too old to imagine,
-    keeps honest time from a clock chip it never shipped with, and
-    lets you telnet into its twin — a computer created, in full working
+    And now there is a PC in your browser tab. It boots a real Unix
+    and logs itself in, joins a network that exists only between your
+    own tabs, resolves real names through a resolver its kernel is
+    too old to imagine, keeps honest time from a clock chip it never
+    shipped with, remembers what you did to it yesterday, and lets
+    you telnet into its twin — a computer created, in full working
     order, by pressing "Duplicate Tab."
   </p>
 
