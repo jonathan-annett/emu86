@@ -21,6 +21,7 @@ import {
   showPending,
 } from '../../src/browser/image-stamps.js';
 import { openMinixImage } from '../../src/disk/minix-fs.js';
+import { pingBinaryBytes } from '../../src/browser/ping-binary.js';
 
 const HD32 = resolve('reference/elks-images-hd', 'hd32-minix.img');
 const FIXTURE = resolve('tests/fixtures', 'minix-v1-2048.img');
@@ -93,10 +94,22 @@ describe('applyImageStamps on the real image', () => {
     const home = readText(bytes, '/etc/home.sh');
     expect(home).toContain('mkfs /dev/hdb 8086');
     expect(home).toContain('cp /etc/skel.profile /home/user1/.profile');
-    // user1 can set its own password; setuid login is ELKS's su.
+    // user1 can set its own password; setuid login is ELKS's su;
+    // /dev/null is world-writable; the stamped ping is executable.
     expect(home).toContain('chmod 4755 /bin/passwd /bin/login');
+    expect(home).toContain('chmod 666 /dev/null /dev/ne0');
+    expect(home).toContain('chmod 755 /bin/ping');
     const cfg = readText(bytes, '/etc/mount.cfg');
     expect(cfg).toContain('test -f /etc/home.sh && sh /etc/home.sh');
+
+    // The quietly-present executable: /bin/ping stamped byte-exact.
+    const open = openMinixImage(bytes);
+    if (!open.ok) throw new Error('not minix');
+    const stampedPing = open.fs.readFile('/bin/ping');
+    if (!stampedPing.ok) throw new Error('no stamped ping');
+    const expected = pingBinaryBytes();
+    expect(stampedPing.value.length).toBe(expected.length);
+    expect(sameBytes(stampedPing.value, expected)).toBe(true);
 
     // Second boot, different drive size: home.sh refreshes (per-boot,
     // ours), mount.cfg does NOT gain a second marker (guest-owned).

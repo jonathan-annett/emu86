@@ -160,6 +160,14 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       expect(s2.txText()).toContain('Starting networking');
       expect(shell(s2, 'test -f /home/user1/hello.sh && echo HOME-OK', USER_PROMPT))
         .toContain('HOME-OK');
+      // The quietly-stamped /bin/ping is present and executable — its
+      // usage line proves a runnable a.out. (A LIVE ping still needs
+      // ping.c's historical net-stop dance: it opens /dev/ne0 raw and
+      // contends with ktcp — its own diagnostic says so. Field flow,
+      // unchanged; not this test's fight.)
+      const pong = shell(s2, 'ping', USER_PROMPT);
+      expect(pong).not.toContain('not found');
+      expect(pong).toContain('[count]');
       shell(s2, 'sync', USER_PROMPT);
       const drive2 = snapshotSecondary(s2);
 

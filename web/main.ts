@@ -70,7 +70,12 @@ import {
   type OverlaySession,
 } from './overlay-session.js';
 import { mountEditorPanel } from './editor-panel.js';
-import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, reconcileSeededScripts } from './settings.js';
+import {
+  SEED_BOOT_SCRIPT,
+  SEED_DEMO_SCRIPT,
+  SEED_PING_SCRIPT,
+  reconcileSeededScripts,
+} from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
@@ -210,7 +215,9 @@ async function init(): Promise<void> {
   const scriptSuppressed =
     activeScript !== undefined &&
     settings.autologin !== 'off' &&
-    (activeScript.id === SEED_DEMO_SCRIPT.id || activeScript.id === SEED_BOOT_SCRIPT.id);
+    (activeScript.id === SEED_DEMO_SCRIPT.id ||
+      activeScript.id === SEED_BOOT_SCRIPT.id ||
+      activeScript.id === SEED_PING_SCRIPT.id);
   if (activeScript !== undefined) {
     term.writeln(
       scriptSuppressed

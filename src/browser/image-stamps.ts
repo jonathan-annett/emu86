@@ -44,6 +44,7 @@
  */
 
 import { openMinixImage } from '../disk/minix-fs.js';
+import { pingBinaryBytes } from './ping-binary.js';
 
 /** The line skel.profile emits exactly once per drive — main.ts
  *  watches the TX stream for it and starts the show relay. */
@@ -116,9 +117,14 @@ export function homeShText(secondaryBlocks: number | null): string {
 # the binary already restricts non-root to its own password), and
 # setuid login is ELKS's su -- there is no other path to root from a
 # user1 autologin session, and non-setuid nested login dies on
-# fchown/setgid (and SysV chown-giveaway leaves tty debris). Before
-# the mount line so this applies no matter what state the drive is in.
+# fchown/setgid (and SysV chown-giveaway leaves tty debris). /dev/null
+# world-writable is plain unix correctness (a 644 null broke net
+# stop's redirect for user1); ping is stamped fresh each boot and
+# needs its execute bit. Before the mount line so all of this applies
+# no matter what state the drive is in.
 chmod 4755 /bin/passwd /bin/login
+chmod 666 /dev/null /dev/ne0
+chmod 755 /bin/ping
 ${mountLine}
 test -d /home/user1 && exit 0
 mkdir /home/root
@@ -219,6 +225,16 @@ export function applyImageStamps(
     if (w.ok) applied.push(name);
     else skipped.push(`${name}: write ${w.kind}`);
   }
+
+  // ---- /bin/ping: the quietly-present executable (M4, Jonathan:
+  // "just quietly add the executable to the overlay"). Compiled once
+  // IN-VM by our own generator (see ping-binary.ts provenance),
+  // stamped per-boot like everything ours; home.sh restores its
+  // execute bit. Present even after factory reset — part of the
+  // machine, like the serial console.
+  const ping = fs.writeFile('/bin/ping', pingBinaryBytes());
+  if (ping.ok) applied.push('ping');
+  else skipped.push(`ping: write ${ping.kind}`);
 
   // ---- mount.cfg: marker-guarded append (guest edits win) ----
   const mountCfg = fs.readFile('/etc/mount.cfg');
