@@ -127,9 +127,14 @@
     readable source is worth more than raw speed, and that the speed
     would turn out to be enough. The project's stated principle from
     day one: <em>understandable first, fast second</em>. (The verdict,
-    measured: about half the speed of a real 4.77&nbsp;MHz IBM XT on
-    genuine kernel workloads, before anyone has tried to make it
-    fast. It turns out half an XT is plenty.)
+    measured: on genuine kernel workloads it sustains about half of a
+    4.77&nbsp;MHz cycle budget under the strictest accounting there is
+    — one instruction per cycle, a standard no real 8086 ever met. A
+    real XT spent four to twelve cycles per instruction, so in
+    instructions actually delivered this is <em>several</em> XTs —
+    which is why the machine ships with an authenticity governor, not
+    a speed boost: uncapped, Tetris is unplayably fast. Speed was
+    never the problem.)
   </p>
 
   <div class="numbers">
@@ -332,8 +337,11 @@
     impossible without tricks we've declined to play.</li>
     <li>No inbound connections from the real internet. The TAN is
     same-origin, same browser.</li>
-    <li>The CPU delivers about half an XT under authentic pacing on a
-    desktop; heavy full-screen terminal games want the Turbo switch.</li>
+    <li>Under authentic pacing the engine sustains about half its
+    one-instruction-per-cycle budget on heavy kernel work — still more
+    delivered instructions than a real XT managed, but full-screen
+    terminal redraws down a serial line can drag; that's what the
+    Turbo switch is for.</li>
     <li>Persistence is honest, not miraculous: the machine's state
     sweeps to storage on a heartbeat, so a tab killed mid-keystroke
     can lose its last few seconds — the same class of loss as yanking

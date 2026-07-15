@@ -14,9 +14,12 @@ every open tab's machine on a shared network. There's an
 It exists to answer a question for a different project: a browser
 code editor needed an 8086 emulator, and the choice was pure
 TypeScript versus C-compiled-to-WASM. This repo is the pure-TS arm
-of that bet. Measured verdict so far: ~half the speed of a real
-4.77 MHz IBM XT on genuine kernel workloads, before any serious
-optimization — and half an XT turns out to be plenty.
+of that bet. Measured verdict so far: on genuine kernel workloads it
+sustains ~half of a 4.77 MHz cycle budget under one-instruction-per-
+cycle accounting — a standard no real 8086 met (a real XT was
+~0.3–1 MIPS), so in delivered instructions it outruns the machine it
+imitates; the authentic pacing mode exists to slow it DOWN to period
+feel. Speed was never the problem.
 
 ## Status (2026-07-16)
 
