@@ -45,7 +45,11 @@ function makeStorageShim(): StorageShim {
   return shim;
 }
 
-const STORAGE_KEY = 'emu86.settings.v1';
+const STORAGE_KEY = 'emu86.settings.v2';
+// The v1 key belongs to the pre-key-versioning era (its live reader is the
+// archived 9728bb6 build — see RELEASE_PROCEDURE.md, "Settings are
+// key-versioned per semantic era").
+const LEGACY_STORAGE_KEY = 'emu86.settings.v1';
 
 let originalLocalStorage: Storage | undefined;
 let originalDocument: Document | undefined;
@@ -295,6 +299,73 @@ describe('settings', () => {
 
     storage.setItem(STORAGE_KEY, JSON.stringify(null));
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe('v1 → v2 migration — archives own the old key (RELEASE_PROCEDURE.md)', () => {
+  it('adopts v1 once, and defuses v1 secondary so the 9728bb6 archive attaches nothing', () => {
+    storage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({
+        fontSize: 22,
+        themeName: 'solarized-light',
+        secondaryImageSource: { kind: 'library', id: 'fork-template' },
+        someFutureField: 'must survive in v1', // unknown to BOTH eras' loaders
+      }),
+    );
+
+    const s = loadSettings();
+    // The adopted values are this load's values…
+    expect(s.fontSize).toBe(22);
+    expect(s.themeName).toBe('solarized-light');
+    expect(s.secondaryImageSource).toEqual({ kind: 'library', id: 'fork-template' });
+    // …and are now persisted under v2.
+    const v2 = JSON.parse(storage.getItem(STORAGE_KEY)!);
+    expect(v2.secondaryImageSource).toEqual({ kind: 'library', id: 'fork-template' });
+
+    // v1 keeps everything AS STORED — unknown fields included — except the
+    // secondary, which is nulled so the archived build boots without one.
+    const v1 = JSON.parse(storage.getItem(LEGACY_STORAGE_KEY)!);
+    expect(v1.secondaryImageSource).toBeNull();
+    expect(v1.fontSize).toBe(22);
+    expect(v1.someFutureField).toBe('must survive in v1');
+  });
+
+  it('is one-shot: once v2 exists, v1 is the archive era\'s and is never read or touched', () => {
+    storage.setItem(STORAGE_KEY, JSON.stringify({ fontSize: 18 }));
+    const v1Blob = JSON.stringify({
+      fontSize: 30,
+      secondaryImageSource: { kind: 'library', id: 'set-inside-the-archive' },
+    });
+    storage.setItem(LEGACY_STORAGE_KEY, v1Blob);
+
+    const s = loadSettings();
+    expect(s.fontSize).toBe(18); // v2 wins
+    expect(s.secondaryImageSource).toBeNull(); // v1's choice is invisible here
+    expect(storage.getItem(LEGACY_STORAGE_KEY)).toBe(v1Blob); // byte-untouched
+  });
+
+  it('saves land only in v2; v1 never learns the new era\'s values', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, fontSize: 20 });
+    expect(JSON.parse(storage.getItem(STORAGE_KEY)!).fontSize).toBe(20);
+    expect(storage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+  });
+
+  it('unusable v1 (garbage, non-object) migrates nothing and does not throw', () => {
+    storage.setItem(LEGACY_STORAGE_KEY, 'not-json{');
+    expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+    expect(storage.getItem(LEGACY_STORAGE_KEY)).toBe('not-json{'); // left alone
+
+    storage.setItem(LEGACY_STORAGE_KEY, JSON.stringify('a string'));
+    expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('neither key present: defaults, and nothing is written', () => {
+    expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+    expect(storage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
 });
 

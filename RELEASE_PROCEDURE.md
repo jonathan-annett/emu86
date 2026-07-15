@@ -63,6 +63,21 @@ including anything a hotfix deploy changed outside git.
   ignores fields it never knew (the settings loader is per-field
   tolerant by design), but this is the known sharp edge: archives are
   a familiarity fallback, not a time machine for stored state.
+- **Settings are key-versioned per semantic era** (2026-07-15, the
+  edge's first field instance): Phase 16 M0 changed what
+  `secondaryImageSource` MEANS (attach-directly → fork template)
+  without changing its name or shape, so the archived 9728bb6 build
+  read the current value and attached the fork TEMPLATE directly as
+  its /dev/hdb (read-only-in-effect — that era had no write-back —
+  but wrong, and its settings saves would bleed back). Fix: the
+  current build reads/writes `emu86.settings.v2`, one-shot migrated
+  from v1, and the migration nulls v1's `secondaryImageSource` so
+  the archive attaches nothing. THE RULE GOING FORWARD: changing the
+  semantics of any persisted settings field bumps the storage key;
+  each archive era then owns its key. IDB stays shared — an archive
+  can still SEE fork rows in its picker; attaching one is harmless
+  in the 9728bb6 era and coherent (just another tab) in fork-aware
+  eras.
 
 ## Known limits, recorded honestly
 

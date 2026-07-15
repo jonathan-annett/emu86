@@ -220,7 +220,19 @@ export const DEFAULT_SETTINGS: Settings = {
   cpuSpeed: 'authentic',
 };
 
-const STORAGE_KEY = 'emu86.settings.v1';
+/**
+ * Key-versioned per SEMANTIC era (RELEASE_PROCEDURE.md, 2026-07-15).
+ * Archived versions run on this same origin and read this same
+ * localStorage, so a field whose MEANING changes under an unchanged
+ * name poisons every archive that predates the change — field-hit the
+ * day archives shipped: the 9728bb6 archive read the current
+ * `secondaryImageSource` (a fork TEMPLATE since Phase 16 M0) and
+ * attached it directly as its /dev/hdb (its era's semantics). The rule:
+ * change what a persisted field means → bump this key. Each era then
+ * owns its key; `migrateLegacyV1` below adopts v1 once and defuses it.
+ */
+const STORAGE_KEY = 'emu86.settings.v2';
+const LEGACY_STORAGE_KEY = 'emu86.settings.v1';
 
 /** Custom DOM event name for live-updates. Detail carries the new Settings. */
 export const SETTINGS_CHANGED_EVENT = 'emu86:settings-changed';
@@ -315,6 +327,7 @@ export function loadSettings(): Settings {
     // localStorage may throw in private modes / sandboxed iframes. Fail open.
     return { ...DEFAULT_SETTINGS };
   }
+  if (raw === null) raw = migrateLegacyV1();
   if (raw === null) return { ...DEFAULT_SETTINGS };
 
   let parsed: unknown;
@@ -366,6 +379,35 @@ export function loadSettings(): Settings {
     activeBootScriptId,
     cpuSpeed,
   };
+}
+
+/**
+ * One-shot adoption of the v1 settings blob, run only when v2 is absent.
+ * Copies the v1 JSON to the v2 key verbatim (per-field validation happens
+ * on parse regardless), then rewrites v1 IN PLACE with
+ * `secondaryImageSource: null` — every other field preserved as stored,
+ * unknown fields included — so the archived 9728bb6-era build boots with
+ * no secondary instead of directly attaching the fork template. From then
+ * on each era owns its key: settings edits made inside an archive land in
+ * v1 and are invisible here, and vice versa. Returns the adopted raw JSON,
+ * or null if there is nothing usable to migrate (fail open, like every
+ * other storage path in this module).
+ */
+function migrateLegacyV1(): string | null {
+  try {
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw === null) return null;
+    const legacy: unknown = JSON.parse(legacyRaw);
+    if (legacy === null || typeof legacy !== 'object') return null;
+    localStorage.setItem(STORAGE_KEY, legacyRaw);
+    (legacy as Record<string, unknown>).secondaryImageSource = null;
+    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(legacy));
+    return legacyRaw;
+  } catch {
+    // Unparseable v1, or storage refused the writes (quota, private
+    // mode). Nothing adopted this load; a later load may retry.
+    return null;
+  }
 }
 
 /**
