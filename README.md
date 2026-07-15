@@ -133,4 +133,4 @@ the original correctness reference),
 [SingleStepTests](https://github.com/SingleStepTests/8088), and
 [xterm.js](https://xtermjs.org).
 
-© 2026 Jonathan Annett · built with Claude
+MIT licensed (see `LICENSE`). © 2026 Jonathan Annett · built with Claude
