@@ -107,6 +107,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'reset': return 'reset';
       case 'set-speed': return 'set-speed';
       case 'snapshot-secondary': return 'snapshot-secondary';
+      case 'write-secondary': return 'write-secondary';
       case 'control-response': return 'control-response';
       default: {
         const _exhaustive: never = m;
@@ -124,6 +125,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'tan-identity': return 'tan-identity';
       case 'stats': return 'stats';
       case 'secondary-snapshot': return 'secondary-snapshot';
+      case 'secondary-written': return 'secondary-written';
       case 'control-request': return 'control-request';
       default: {
         const _exhaustive: never = m;
@@ -137,6 +139,11 @@ describe('browser protocol — exhaustiveness', () => {
     expect(describeMain({ type: 'rx', bytes: new Uint8Array() })).toBe('rx');
     expect(describeMain({ type: 'boot', config: {} })).toBe('boot');
     expect(describeMain({ type: 'set-speed', mode: 'turbo' })).toBe('set-speed');
+    // Phase 16 M3: the peek flag and the editor's wholesale write.
+    expect(describeMain({ type: 'snapshot-secondary', keepDirty: true }))
+      .toBe('snapshot-secondary');
+    expect(describeMain({ type: 'write-secondary', bytes: new Uint8Array(512) }))
+      .toBe('write-secondary');
   });
 
   it('worker→main exhaustive switch covers every variant', () => {
@@ -155,5 +162,9 @@ describe('browser protocol — exhaustiveness', () => {
         batch: 5000,
       }),
     ).toBe('stats');
+    expect(describeWorker({ type: 'secondary-written', ok: true }))
+      .toBe('secondary-written');
+    expect(describeWorker({ type: 'secondary-written', ok: false, detail: 'no drive' }))
+      .toBe('secondary-written');
   });
 });

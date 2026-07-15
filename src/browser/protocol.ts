@@ -132,6 +132,27 @@ export interface SetSpeedMessage {
  */
 export interface SnapshotSecondaryMessage {
   type: 'snapshot-secondary';
+  /**
+   * Phase 16 M3: when true this is a PEEK — the snapshot does NOT
+   * mark the disk clean. The editor panel's read path must use it:
+   * a clean-marking read would zero the dirty counter and starve the
+   * M0 auto-persist that keeps the tab's fork reload-safe. Absent /
+   * false = Phase 15 semantics (Save and auto-persist mark clean).
+   */
+  keepDirty?: boolean;
+}
+
+/**
+ * Phase 16 M3: replace the RUNNING secondary's bytes wholesale — the
+ * editor panel's write. The machine keeps running; coherence is
+ * floppy-passing (brief §1): the guest must (re)mount to see the new
+ * bytes, and we cannot detect mounts, so the UI shows a notice, not a
+ * guard. Reply is {@link SecondaryWrittenMessage}. `bytes` must match
+ * the drive's size exactly — anything else is a caller bug and nacks.
+ */
+export interface WriteSecondaryMessage {
+  type: 'write-secondary';
+  bytes: Uint8Array;
 }
 
 /**
@@ -150,6 +171,7 @@ export type MainToWorkerMessage =
   | ResetMessage
   | SetSpeedMessage
   | SnapshotSecondaryMessage
+  | WriteSecondaryMessage
   | ControlResponseMessage;
 
 // ============================================================
@@ -242,6 +264,16 @@ export interface ControlRequestMessage {
   kb: number;
 }
 
+/**
+ * Reply to {@link WriteSecondaryMessage}. `ok: false` carries the
+ * reason (no drive attached; size mismatch) — the panel surfaces it.
+ */
+export interface SecondaryWrittenMessage {
+  type: 'secondary-written';
+  ok: boolean;
+  detail?: string;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -250,4 +282,5 @@ export type WorkerToMainMessage =
   | TanIdentityMessage
   | StatsMessage
   | SecondarySnapshotMessage
+  | SecondaryWrittenMessage
   | ControlRequestMessage;

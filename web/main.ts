@@ -233,13 +233,22 @@ async function init(): Promise<void> {
   //     already open keep their forks (floppy-passing, not sync).
   const driveBanner = ensureDriveBanner(() => { void promoteToBase(); });
   const snapshotSinks: Array<(bytes: Uint8Array | null) => void> = [];
-  function requestSnapshot(): Promise<Uint8Array | null> {
+  function requestSnapshot(keepDirty = false): Promise<Uint8Array | null> {
     return new Promise((resolve) => {
       snapshotSinks.push(resolve);
-      const msg: MainToWorkerMessage = { type: 'snapshot-secondary' };
+      // keepDirty (Phase 16 M3): a PEEK for the editor's read path —
+      // must not mark clean, or the auto-persist trigger starves.
+      const msg: MainToWorkerMessage = keepDirty
+        ? { type: 'snapshot-secondary', keepDirty: true }
+        : { type: 'snapshot-secondary' };
       worker.postMessage(msg);
     });
   }
+
+  // write-secondary acks (Phase 16 M3), FIFO like snapshotSinks. The
+  // panel (M4) is the pusher; the branch in the message handler is the
+  // shifter. An ack with no waiter means a protocol bug — warn loudly.
+  const secondaryWriteAcks: Array<(r: { ok: boolean; detail?: string }) => void> = [];
 
   const AUTO_PERSIST_MS = 5_000;
   let persistInFlight = false;
@@ -331,9 +340,18 @@ async function init(): Promise<void> {
     }
     if (msg.type === 'secondary-snapshot') {
       // Hand the bytes to whichever requester is next in line (auto-
-      // persist or promote) — see the FIFO note above requestSnapshot.
+      // persist, promote, or an editor peek) — FIFO, see requestSnapshot.
       const sink = snapshotSinks.shift();
       if (sink !== undefined) sink(msg.bytes);
+      return;
+    }
+    if (msg.type === 'secondary-written') {
+      const ack = secondaryWriteAcks.shift();
+      if (ack !== undefined) {
+        ack({ ok: msg.ok, ...(msg.detail !== undefined ? { detail: msg.detail } : {}) });
+      } else {
+        console.warn('[emu86] unsolicited secondary-written ack:', msg);
+      }
       return;
     }
     if (msg.type === 'control-request') {

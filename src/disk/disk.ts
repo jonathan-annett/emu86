@@ -219,6 +219,32 @@ export class WriteTrackingDisk implements Disk {
   markClean(): void {
     this.#dirty.clear();
   }
+
+  /**
+   * Replace the whole disk content in one motion (Phase 16 M3 — the
+   * editor panel's `write-secondary`). Goes through the inner disk's
+   * own writeSector so any wrapped implementation keeps its
+   * invariants. Marks the disk CLEAN: the caller (main thread) is
+   * handing over bytes it already persisted, so RAM and the fork row
+   * agree by construction. Size must match exactly — a mismatched
+   * buffer is a caller bug (the drive's geometry is its identity),
+   * not a resize request.
+   */
+  replaceContents(bytes: Uint8Array): void {
+    const want = this.sectorCount * SECTOR_SIZE;
+    if (bytes.byteLength !== want) {
+      throw new Error(
+        `WriteTrackingDisk: replaceContents size mismatch (disk ${want} B, got ${bytes.byteLength} B)`,
+      );
+    }
+    for (let lba = 0; lba < this.sectorCount; lba++) {
+      this.#inner.writeSector(
+        lba,
+        bytes.subarray(lba * SECTOR_SIZE, (lba + 1) * SECTOR_SIZE),
+      );
+    }
+    this.#dirty.clear();
+  }
 }
 
 // ============================================================

@@ -317,7 +317,9 @@ export class WorkerHost {
       // Synchronous with respect to the machine: messages land between
       // run batches, never mid-step. Taking the snapshot marks the disk
       // clean — persistence is the main thread's job from here; if its
-      // IDB write fails the user simply saves again.
+      // IDB write fails the user simply saves again. EXCEPT when
+      // keepDirty is set (Phase 16 M3): the editor's read is a PEEK,
+      // and marking clean here would starve the M0 auto-persist.
       const disk = this.#secondaryDisk;
       if (disk === null) {
         this.#post({ type: 'secondary-snapshot', bytes: null, dirtySectors: 0 });
@@ -325,8 +327,31 @@ export class WorkerHost {
       }
       const dirtySectors = disk.dirtySectorCount;
       const bytes = disk.snapshot();
-      disk.markClean();
+      if (msg.keepDirty !== true) disk.markClean();
       this.#post({ type: 'secondary-snapshot', bytes, dirtySectors });
+      return;
+    }
+    if (msg.type === 'write-secondary') {
+      // Phase 16 M3: the editor panel replaces the running drive's
+      // bytes wholesale. The machine keeps running — floppy-passing
+      // coherence: the guest must (re)mount to see this, and the main
+      // thread shows that notice. replaceContents marks the disk clean
+      // (the sender persisted these very bytes before posting).
+      const disk = this.#secondaryDisk;
+      if (disk === null) {
+        this.#post({
+          type: 'secondary-written',
+          ok: false,
+          detail: 'no secondary drive attached',
+        });
+        return;
+      }
+      try {
+        disk.replaceContents(msg.bytes);
+        this.#post({ type: 'secondary-written', ok: true });
+      } catch (err) {
+        this.#post({ type: 'secondary-written', ok: false, detail: String(err) });
+      }
       return;
     }
     if (msg.type === 'control-response') {
