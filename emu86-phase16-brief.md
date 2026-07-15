@@ -271,7 +271,8 @@ DIAGNOSED AND FIXED same night:
    the human keyboard and the guest: `term.onData` maps 0x7F → 0x08
    (web/main.ts). Scripted input (autoexec, agent bridge) never
    carries 0x7F; guest-to-guest telnet never touches this path.
-   Field verification rides the M4 deploy.
+   FIELD-ACCEPTED minutes after the M4 deploy (e4358843): Jonathan,
+   "#olfr backspace fix is perfect."
 2. ~~CSI parser off-by-one drifting the insert point~~ — mooted by
    the refinement: the insert point is correct.
 3. ~~Prompt-length assumption (the `cat# ` HOSTNAME prompt)~~ —
