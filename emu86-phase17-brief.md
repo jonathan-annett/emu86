@@ -379,6 +379,101 @@ What this changes, recorded while fresh:
   "reload → personalized prompt, net up, /home mounted, NOTHING
   typed" — not even `root`.
 
+## 4.7 Addendum B — M3 mechanics (drafted 2026-07-15 from in-tree
+ground truth, for Jonathan's approval before implementation)
+
+M1+M2 are DONE and field-accepted (all five M2 behaviors, dev tier
+12a2f5b). Recon for M3 read the image's /etc files with our own
+minix-fs module and the ELKS source for init/getty/login/ash. The
+findings reshape §1.4's stamp set — mostly by DELETING work:
+
+**Ground truth that changes the plan:**
+
+- `user1`'s home is **`/home` itself** (image /etc/passwd:
+  `user1::101:101:User 1:/home:/bin/sh`), and /home is an EMPTY
+  root-owned 0755 dir on the base image. So the hdb fork mounted at
+  /home IS user1's home — `.profile` at the fork's root is
+  `$HOME/.profile`. **The passwd home-field surgery is unnecessary
+  and is dropped.**
+- **Autologin is one inittab line** — no getty patch, no custom
+  binaries: init execs non-getty inittab commands via
+  `/bin/sh -c` on `/dev/console` (init.c:319-337), which IS ttyS0 on
+  our images (console=ttyS0 bootopts; ntty.c:103-105); `login user1`
+  takes the name as argv (login.c:119-123) and a passwordless
+  account gets NO prompt (login.c:150-152: `pw_passwd[0]==0` →
+  straight in); login execs `-/bin/sh` and ash's dash-argv[0] check
+  (ash/main.c:160-173) sources /etc/profile then $HOME/.profile.
+  There is no `sh -l` in ELKS ash — login IS the only login-shell
+  path.
+- **Permissions are the real blocker, not identity**: /home is
+  root-owned 0755, so uid-101 user1 can't write its own $HOME on a
+  blank-fork boot; a guest-mkfs'd fork root is also root-owned; and
+  /dev/hdb's node isn't writable by user1, so the format-once flow
+  would need root. §2.4 stands (no security boundary, none
+  pretended) — so the fix is honest permissiveness, stamped as root
+  at boot (see mount.cfg stamp below).
+
+**The M3 stamp set (all worker-side, on the folded image, order
+base → overlay → stamps; each idempotent; skip-with-warning on
+failure):**
+
+1. **bootopts**: existing block + `net=ne0` (rc.sys's `case "$net"`
+   runs `net start ne0` — read off the image). Gated by a new
+   settings toggle `autoNet` (default ON, additive field, no key
+   bump). Runlevel stays `3`.
+2. **inittab s0 line** (ours-per-boot, like the bootopts block):
+   per the autologin setting — `user1` (DEFAULT) →
+   `s0:2346:respawn:exec /bin/login user1`; `root` → same with
+   root; `off` → stock getty line restored. Constraint from
+   init.c's parser: no colons in the command (none needed).
+   Recorded edge: init disables respawn for a line that exits <3 s
+   after its FIRST spawn (init.c:457-486) — `exit` typed later
+   respawns a fresh login shell (nice); an instant first-exit kills
+   the console until reboot (theoretical; noted, not mitigated).
+3. **mount.cfg** (marker-guarded append, guest edits win
+   thereafter):
+   `# emu86: home drive` +
+   `mount /dev/hdb /home 2>/dev/null && chmod 777 /home` +
+   `chmod 666 /dev/hdb 2>/dev/null || true`
+   — runs as root at sysinit; makes $HOME writable in BOTH fork
+   states (mounted fork root / bare base /home) and lets user1 run
+   mkfs on /dev/hdb for the format-once flow.
+4. **hello-human first-boot show**: `/etc/hello-human.sh` +
+   a marker-guarded hook line in /etc/profile. **Stamped ONLY on a
+   virgin machine** (no overlay chunks folded this boot) — a
+   per-boot stamp would resurrect after the guest's self-delete
+   (fold applies the deletion, then the stamp would re-add it).
+   Self-deletion + overlay durability = once per machine; factory
+   reset resurrects. Presentation: plain script output (echo +
+   sleep pacing) — the show stops pretending to be typed (§4.6
+   anticipated this; keystroke theatrics remain the boot-script
+   system's, which stays untouched for the landing page this
+   phase).
+5. **Seed script rev 3**: drop the mount + ping lines (§4.3
+   executed); ping restore moves to the fork's .profile.
+
+**Acceptance (per §4.6):** reload → `mouse$ ` personalized prompt
+(stock PS1=$HOSTNAME$PS1 picks up the HOSTNAME stamp), net up,
+/home mounted rw for user1, NOTHING typed. Blank-fork tab: same
+minus the mount (quiet failure), $HOME=/home writable.
+
+**Decisions for Jonathan (everything above is proposal until his
+word):**
+
+- D1. Autologin control: settings 3-way (off / root / user1),
+  default user1 — per §4.6. OK?
+- D2. `autoNet` toggle default ON (bootopts gets net=ne0 → rc.sys
+  starts the NIC with nothing typed). OK?
+- D3. The chmod-777/666 honesty (permissive by stamp, as root, no
+  pretend security). OK?
+- D4. hello-human as plain-output guest script, first-boot-only
+  stamp. OK?
+- D5. (His own open question, raised in-field:) retire the "Create
+  blank drive" button in favor of a size dropdown on the base
+  picker's "None" row — new tabs get a fresh blank of chosen size;
+  blank library rows then only exist via upload/promote. In or out
+  of M3?
+
 ## 5. Hard-rule notes for the implementing session
 
 - Rule 1 is honored BY DESIGN: the runtime read path never leaves
