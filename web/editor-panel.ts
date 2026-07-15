@@ -49,7 +49,22 @@ export interface EditorPanelDeps {
   driveLabel: string;
 }
 
-export function mountEditorPanel(deps: EditorPanelDeps): void {
+/**
+ * Live-refresh handle (Phase 18-eve polish, Jonathan's ask): main
+ * calls `driveUpdated` with the bytes the fork auto-persist just
+ * wrote — which lands within ~5 s of any guest sync — so the drawer
+ * follows the machine with zero extra snapshot traffic. The panel
+ * ignores it when closed; refreshes the LIST in place; and for an
+ * open file reacts ONLY when the on-drive content actually differs
+ * from what the editor loaded ("ignore anything that is not
+ * actually an edit") — then offers a banner + Reload instead of
+ * ever silently replacing the buffer.
+ */
+export interface EditorPanelHandle {
+  driveUpdated(bytes: Uint8Array): void;
+}
+
+export function mountEditorPanel(deps: EditorPanelDeps): EditorPanelHandle {
   const panel = document.createElement('aside');
   panel.id = 'editor-panel';
   document.body.appendChild(panel);
@@ -102,13 +117,26 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
   toggle.addEventListener('click', () => setOpen(!open));
   close.addEventListener('click', () => setOpen(false));
 
-  /** Peek + parse, with the panel's honest empty states. */
-  async function openDrive(): Promise<MinixFileSystem | null> {
-    const bytes = await deps.peekDrive();
-    if (bytes === null) {
-      say('no drive is attached in the running machine.', true);
-      return null;
-    }
+  // Live-refresh state: which view is showing, which file is open,
+  // and the content the editor last loaded from (or wrote to) the
+  // drive — the baseline that decides what counts as "actually an
+  // edit". The user's unsaved buffer never enters that comparison.
+  let view: 'list' | 'file' = 'list';
+  let openPath: string | null = null;
+  let baseline: string | null = null;
+  let banner: HTMLDivElement | null = null;
+  let currentJar: { updateCode(code: string): void } | null = null;
+  /** Latest on-drive content behind an active banner (null = deleted). */
+  let pendingDriveContent: string | null = null;
+  /** A dismissed banner stays gone unless the drive changes AGAIN. */
+  let dismissedForContent: string | null = null;
+
+  function clearBanner(): void {
+    banner?.remove();
+    banner = null;
+  }
+
+  function parseDrive(bytes: Uint8Array): MinixFileSystem | null {
     const opened = openMinixImage(bytes);
     if (!opened.ok) {
       const blocks = Math.round(bytes.byteLength / 1024);
@@ -123,10 +151,26 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
     return opened.fs;
   }
 
-  async function showList(): Promise<void> {
+  /** Peek + parse, with the panel's honest empty states. */
+  async function openDrive(): Promise<MinixFileSystem | null> {
+    const bytes = await deps.peekDrive();
+    if (bytes === null) {
+      say('no drive is attached in the running machine.', true);
+      return null;
+    }
+    return parseDrive(bytes);
+  }
+
+  async function showList(fromBytes?: Uint8Array): Promise<void> {
+    view = 'list';
+    openPath = null;
+    baseline = null;
+    currentJar = null;
+    dismissedForContent = null;
+    clearBanner();
     body.innerHTML = '';
     say('reading drive…');
-    const fs = await openDrive();
+    const fs = fromBytes !== undefined ? parseDrive(fromBytes) : await openDrive();
     if (fs === null) return;
     const { files, skipped } = listEditableFiles(fs);
     say(
@@ -170,6 +214,11 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
       say(`${path}: ${read.kind} — ${read.detail}`, true);
       return;
     }
+    view = 'file';
+    openPath = path;
+    baseline = bytesToLatin1(read.value);
+    dismissedForContent = null;
+    clearBanner();
     body.innerHTML = '';
 
     const bar = document.createElement('div');
@@ -195,6 +244,7 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
     // "leave that for huxley/lite to decide" (brief §0).
     const jar = CodeJar(code, () => { /* no highlighter */ }, { tab: '    ' });
     jar.updateCode(bytesToLatin1(read.value));
+    currentJar = jar;
     say(`${path} — ${read.value.byteLength} B. Editing the panel's copy; the guest owns the fs while it has it mounted.`);
 
     write.addEventListener('click', () => {
@@ -219,6 +269,10 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
             say(`write failed: ${w.kind} — ${w.detail}`, true);
             return;
           }
+          // What we just wrote IS the drive's content now — the new
+          // baseline for change detection; any pending banner is moot.
+          baseline = jar.toString();
+          clearBanner();
           // Reload safety first (fork row), then the running machine.
           await deps.persistFork(bytes);
           const ack = await deps.writeDrive(bytes);
@@ -237,4 +291,70 @@ export function mountEditorPanel(deps: EditorPanelDeps): void {
       })();
     });
   }
+
+  /** Banner + Reload for "the machine edited the open file". Never
+   *  replaces the buffer silently (Jonathan's design). */
+  function showChangeBanner(): void {
+    if (banner !== null) return; // already showing; content updates ride pendingDriveContent
+    banner = document.createElement('div');
+    banner.className = 'editor-banner';
+    const text = document.createElement('span');
+    text.textContent =
+      pendingDriveContent === null
+        ? 'the machine removed this file from the drive.'
+        : 'the machine just edited this file.';
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.textContent = pendingDriveContent === null ? 'back to files' : 'reload';
+    reload.addEventListener('click', () => {
+      if (pendingDriveContent === null) {
+        void showList();
+        return;
+      }
+      currentJar?.updateCode(pendingDriveContent);
+      baseline = pendingDriveContent;
+      dismissedForContent = null;
+      clearBanner();
+      say(`${openPath ?? ''} — reloaded from the drive.`);
+    });
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => {
+      dismissedForContent = pendingDriveContent;
+      clearBanner();
+    });
+    banner.append(text, reload, dismiss);
+    const bar = body.querySelector('.editor-bar');
+    if (bar !== null) bar.after(banner);
+    else body.prepend(banner);
+  }
+
+  function driveUpdated(bytes: Uint8Array): void {
+    if (!open) return; // closed drawer re-peeks on open anyway
+    if (view === 'list') {
+      void showList(bytes);
+      return;
+    }
+    if (openPath === null || baseline === null) return;
+    const opened = openMinixImage(bytes);
+    if (!opened.ok) return; // next manual action reports it honestly
+    const read = opened.fs.readFile(openPath);
+    const onDrive = read.ok ? bytesToLatin1(read.value) : null;
+    if (onDrive === baseline) {
+      // Not actually an edit (the sync touched other files, or the
+      // guest wrote back what we loaded) — total silence.
+      clearBanner();
+      pendingDriveContent = null;
+      return;
+    }
+    if (dismissedForContent !== null && onDrive === dismissedForContent) {
+      return; // dismissed stays dismissed until the drive changes AGAIN
+    }
+    pendingDriveContent = onDrive;
+    showChangeBanner();
+  }
+
+  return { driveUpdated };
 }

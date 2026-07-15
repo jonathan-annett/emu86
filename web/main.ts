@@ -69,7 +69,7 @@ import {
   resolveOverlaySession,
   type OverlaySession,
 } from './overlay-session.js';
-import { mountEditorPanel } from './editor-panel.js';
+import { mountEditorPanel, type EditorPanelHandle } from './editor-panel.js';
 import {
   SEED_BOOT_SCRIPT,
   SEED_DEMO_SCRIPT,
@@ -342,6 +342,8 @@ async function init(): Promise<void> {
   let persistInFlight = false;
   let lastPersistAt = 0;
   let latestDirtySectors = 0;
+  /** The /mnt drawer's live-refresh handle (set at mount, below). */
+  let editorPanel: EditorPanelHandle | null = null;
   function maybeAutoPersist(force = false): void {
     if (drive === null || persistInFlight) return;
     if (!force && Date.now() - lastPersistAt < AUTO_PERSIST_MS) return;
@@ -352,6 +354,10 @@ async function init(): Promise<void> {
         if (bytes === null) return; // no secondary mounted in the worker
         await library.updateImageBytes(target.imageId, bytes);
         driveBanner.autoSaved();
+        // The drawer follows the machine for free: these are the
+        // freshest drive bytes there are, already in hand — a guest
+        // sync reaches the file list within one persist beat.
+        editorPanel?.driveUpdated(bytes);
       })
       .catch((err: unknown) => driveBanner.error(String(err)))
       .finally(() => {
@@ -770,7 +776,7 @@ async function init(): Promise<void> {
   // it to edit and its empty states would lie.
   if (drive !== null) {
     const activeDrive = drive;
-    mountEditorPanel({
+    editorPanel = mountEditorPanel({
       peekDrive: () => requestSnapshot(true),
       writeDrive: (bytes) => requestSecondaryWrite(bytes),
       persistFork: (bytes) => library.updateImageBytes(activeDrive.imageId, bytes),

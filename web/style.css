@@ -808,6 +808,33 @@ header code {
   color: #f0c674;
 }
 
+/* "the machine just edited this file" — banner + Reload, never a
+   silent buffer replace (Phase 18-eve polish). */
+.editor-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.8rem;
+  background: #2a2413;
+  color: #f0c674;
+  border-bottom: 1px solid #4a3f1c;
+}
+
+.editor-banner button {
+  background: none;
+  border: 1px solid #f0c674;
+  border-radius: 3px;
+  color: #f0c674;
+  cursor: pointer;
+  padding: 0.1rem 0.5rem;
+}
+
+.editor-banner button:last-child {
+  border: none;
+  margin-left: auto;
+  padding: 0 0.2rem;
+}
+
 .editor-body {
   flex: 1;
   display: flex;
