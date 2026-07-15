@@ -553,6 +553,19 @@ header code {
   text-decoration: underline;
 }
 
+/* The subtle way back (release procedure, 2026-07-15): each promotion
+   archives the outgoing build under /<stamp>/ and this link points at
+   the newest archive — so users can return to a version they know as
+   the site grows. Dimmer than the about link on purpose. */
+.prev-version-link {
+  color: #5c708a;
+  text-decoration: none;
+}
+.prev-version-link:hover {
+  color: #a0b8cc;
+  text-decoration: underline;
+}
+
 /* ------------------------------------------------------------------ */
 /* Landing showcase banner (2026-07-15)                                 */
 /* ------------------------------------------------------------------ */

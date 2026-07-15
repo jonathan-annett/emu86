@@ -548,6 +548,33 @@ async function init(): Promise<void> {
     });
   }
 
+  // Previous-version link (release procedure, 2026-07-15): every
+  // promotion archives the outgoing build under /<stamp>/ (see
+  // scripts/release-capture.mjs + RELEASE_PROCEDURE.md) and prepends
+  // it to /version-history.json. The newest entry gets a subtle header
+  // link so users can go back to a version they know as the site
+  // grows (Jonathan's ask). Best-effort: no manifest — dev server,
+  // offline — means no link, never an error.
+  void (async () => {
+    try {
+      const res = await fetch('/version-history.json');
+      if (!res.ok) return;
+      const history: unknown = await res.json();
+      if (!Array.isArray(history) || history.length === 0) return;
+      const latest = history[0] as { stamp?: unknown; path?: unknown };
+      if (typeof latest.stamp !== 'string' || typeof latest.path !== 'string') return;
+      const headerP = document.querySelector('header p');
+      if (headerP === null) return;
+      const link = document.createElement('a');
+      link.className = 'prev-version-link';
+      link.href = latest.path;
+      link.textContent = `previous version (${latest.stamp})`;
+      headerP.append(' · ', link);
+    } catch {
+      // Manifest unreachable — the link is a nicety, not a feature.
+    }
+  })();
+
   // Landing showcase (2026-07-15): while the bundled floppy runs,
   // stream the 32 MB HD image through /gh-assets into the library in
   // the background; when it lands, break the news and stage the next

@@ -1,0 +1,79 @@
+# Release procedure — promoting dev → stable (8086-tab.net)
+
+Formalized 2026-07-15 (Jonathan's ask: users should have a way back
+to a version they're familiar with as the site grows). Every
+promotion ARCHIVES the outgoing live version at `/<stamp>/` and the
+new version's header carries a subtle "previous version" link.
+Deploys remain permission-gated for agents — Jonathan runs steps 3–4.
+
+## The steps
+
+1. **Capture the outgoing version** (from the live site — see "why
+   capture" below):
+
+   ```
+   npm run release:capture
+   ```
+
+   This downloads everything 8086-tab.net currently serves
+   (index.html, both JS bundles + source maps, CSS, elks-serial.img),
+   extracts the build stamp from the live bundle (e.g.
+   `9728bb6-dirty`), rewrites the absolute paths so the copy is
+   self-contained, and writes it to `web/public/<stamp>/` — vite's
+   publicDir, so every future build carries all archives verbatim.
+   It also prepends the entry to `web/public/version-history.json`,
+   which the running app reads to render the header link. Refuses to
+   overwrite an existing archive without `--force`.
+
+2. **Build + verify**: `npm run build:browser`, confirm
+   `dist-web/<stamp>/index.html` exists and the full suite is green
+   (the cadence ruling: the full suite gates every deploy).
+
+3. **Deploy stable**: `npm run deploy:prod` (Jonathan;
+   `set -a; source ~/cf-token.env; set +a` first).
+
+4. **Field-check both**: the new version boots at `/`, the archived
+   one at `/<stamp>/`, and the header shows
+   `· previous version (<stamp>)`.
+
+5. **Commit** `web/public/<stamp>/`, the manifest, and dist-web —
+   the archive is part of the tree from then on.
+
+## Why capture-from-live, not rebuild-from-git
+
+The first stable build is stamped `9728bb6-dirty` — built from an
+uncommitted tree, unreproducible from any checkout. Downloading the
+served bytes is the only honest archival, and it stays the right
+method forever: what is archived is exactly what users were running,
+including anything a hotfix deploy changed outside git.
+
+## How the archive stays self-contained
+
+- Hashed assets never collide across versions; each archive keeps its
+  own copies under `/<stamp>/assets/`.
+- The capture rewrites absolute references in text files
+  (`/assets/…`, `/elks-serial.img`, `/version-history.json` →
+  `/<stamp>/…`). Relative references (the worker bundle, source maps)
+  need no rewriting — they resolve inside the archive by construction.
+- `/gh-assets/…` is deliberately NOT rewritten: the CORS proxy is
+  shared, version-neutral worker infrastructure.
+- Origin-scoped state (settings, image library, drive forks, TAN) is
+  SHARED between `/` and `/<stamp>/` — same origin. An old version
+  reads the same localStorage/IDB the new one writes. Old code
+  ignores fields it never knew (the settings loader is per-field
+  tolerant by design), but this is the known sharp edge: archives are
+  a familiarity fallback, not a time machine for stored state.
+
+## Known limits, recorded honestly
+
+- The archived app calls shared worker endpoints (`/gh-assets`). If
+  those routes ever change incompatibly, old archives degrade in
+  those features only (the emulator itself is fully client-side).
+- Archives add ~5–6 MB each to the repo and every deploy upload.
+  Acceptable at the current cadence; revisit if promotions become
+  frequent (e.g. keep the last N in publicDir and park older ones in
+  a release bucket).
+- The `9728bb6-dirty` archive predates the version-history code, so
+  ITS header has no link onward/back. Every version from the next
+  promotion on carries the link it shipped with, frozen — walking the
+  chain backward works from then on.
