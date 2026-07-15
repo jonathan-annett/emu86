@@ -49,16 +49,21 @@ at /9728bb6-dirty/ per `RELEASE_PROCEDURE.md` (read it before any
 promotion; settings are key-versioned per semantic era —
 `SETTINGS_VERSIONING_REPORT.md`). Deploys: `npm run deploy:dev` (test
 tier), `npm run deploy:prod` (stable); needs `~/cf-token.env`; the
-FULL suite gates every deploy. **PHASE 17 IS DONE AND FIELD-ACCEPTED (2026-07-15)** — boot-disk COW
+FULL suite gates every deploy. **PHASE 17 IS SHIPPED AND PROMOTED (2026-07-15/16)** — boot-disk COW
 overlay (M1), fold + SHA-256 identity + lifecycle (M2), the un-typed
 boot (M3: autologin user1, per-boot stamps, the native hello-human
-show), and the M4 field loop (setuid passwd/login, stamped /bin/ping,
-replay-proof show — `PHASE17_M4_REPORT.md` is the closing record; the
-brief's §4.7 Addendum B carries the settled M3 design). The dev tier
-carries the full line; **stable promotion is Jonathan's call** per
-RELEASE_PROCEDURE.md. Next-phase candidates (his call): EMBEDDING.md
-handover doc, §3.5 state capture, boot-script retirement. The old
-list below stands as history.
+show), the M4 field loop (`PHASE17_M4_REPORT.md` is the closing
+record), plus post-phase polish all field-accepted: live-following
+editor drawer, /bin/resync, setuid passwd/login/mount/umount,
+stamped /bin/ping, 3.3 MB gzipped HD delivery. Stable 8086-tab.net =
+the b683753 build; four archived versions chain back from it. **The
+repo is PUBLIC (MIT) as of 2026-07-16.** Read the incident section
+of `RELEASE_PROCEDURE.md` before trusting or running ANY deploy —
+a shadow CI once raced the CLI here. **The living plan is
+`emu86-phase18-brief.md`** ("frozen in amber" — whole-machine state
+capture); its §4 decisions D1-D6 await Jonathan, and the brief is
+self-contained (its recon detail is in §1-§2). The old list below
+stands as history.
 
 ## 2. Test baseline — read this before you think you broke something
 
