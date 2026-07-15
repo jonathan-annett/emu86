@@ -6,6 +6,13 @@
     "archivedAt": "2026-07-15T16:27:32.584Z"
   },
   {
+    "stamp": "b72851d",
+    "bootStamp": "b72851d · 2026-07-15 11:56Z",
+    "path": "/b72851d/",
+    "archivedAt": "2026-07-15T20:05:40.467Z",
+    "note": "reconstructed from git (b0a9efb dist-web served locally through release-capture) — the live capture window was preempted when a Workers Builds git integration deployed 05fb7ed over it; see RELEASE_PROCEDURE.md, incident 2026-07-16"
+  },
+  {
     "stamp": "c1f26b1-dirty",
     "bootStamp": "c1f26b1-dirty · 2026-07-15 03:55Z",
     "path": "/c1f26b1-dirty/",
