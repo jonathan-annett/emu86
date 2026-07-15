@@ -264,17 +264,16 @@ NOT diagnosed yet. Suspects, in rough order:
    if the guest's editor consumes one byte short, its internal column
    drifts one right of the real cursor — matching BOTH the
    insert-point offset and the arrows triggering it.
-3. **Prompt-length assumption**: PS1 grew from `# ` to `cat# ` with
-   the HOSTNAME stamp (API v1) — if the editor computes columns from
-   an assumed prompt width, the .tabs prompt would shift everything
-   (though the observed offset is 1, not the name's length —
-   weakest suspect).
+3. ~~Prompt-length assumption (the `cat# ` HOSTNAME prompt)~~ —
+   RULED OUT by Jonathan same night: "this off by one observation
+   predates cat# etc". The bug is older than the API v1 prompt.
 
-Diagnostics when picked up: reproduce with a solo machine (bare `# `
-prompt) to kill/confirm suspect 3; `stty` in the guest for the erase
-char; compare behavior over tab-to-tab telnet (different input path).
-May well be an UPSTREAM ELKS bug like the urlget overflow — diagnose
-before touching anything on our side.
+Diagnostics when picked up: `stty` in the guest for the erase char;
+compare behavior over tab-to-tab telnet (different input path);
+check whether it reproduces under other terminals against real ELKS
+(upstream issue tracker may already know). May well be an UPSTREAM
+ELKS bug like the urlget overflow — diagnose before touching
+anything on our side.
 
 ## 4. Hard-rule notes for the implementing session
 
