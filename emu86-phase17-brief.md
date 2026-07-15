@@ -431,25 +431,46 @@ failure):**
    respawns a fresh login shell (nice); an instant first-exit kills
    the console until reboot (theoretical; noted, not mitigated).
 3. **mount.cfg** (marker-guarded append, guest edits win
-   thereafter):
-   `# emu86: home drive` +
-   `mount /dev/hdb /home 2>/dev/null && chmod 777 /home` +
-   `chmod 666 /dev/hdb 2>/dev/null || true`
-   — runs as root at sysinit; makes $HOME writable in BOTH fork
-   states (mounted fork root / bare base /home) and lets user1 run
-   mkfs on /dev/hdb for the format-once flow.
-4. **hello-human first-boot show**: `/etc/hello-human.sh` +
-   a marker-guarded hook line in /etc/profile. **Stamped ONLY on a
-   virgin machine** (no overlay chunks folded this boot) — a
-   per-boot stamp would resurrect after the guest's self-delete
-   (fold applies the deletion, then the stamp would re-add it).
-   Self-deletion + overlay durability = once per machine; factory
-   reset resurrects. Presentation: plain script output (echo +
-   sleep pacing) — the show stops pretending to be typed (§4.6
-   anticipated this; keystroke theatrics remain the boot-script
-   system's, which stays untouched for the landing page this
-   phase).
-5. **Seed script rev 3**: drop the mount + ping lines (§4.3
+   thereafter) — REVISED per Jonathan's counter-design ("mount
+   /dev/hdb as /home and on first boot add /home/root (empty) and
+   /home/user1 with .profile … hello.sh"): mount-or-mkfs, then
+   populate-once. Runs as root at sysinit:
+   `mount /dev/hdb /home 2>/dev/null || { mkfs /dev/hdb <blocks> &&
+   mount /dev/hdb /home; }` (blocks baked per-boot from the
+   secondary's actual size), then `test -d /home/user1 || { mkdir
+   /home/root /home/user1; cp /etc/skel.profile
+   /home/user1/.profile; cp /etc/skel.hello /home/user1/hello.sh;
+   touch /home/user1/.welcome; chown/chmod user1 …; }`. This
+   RETIRES the chmod-777 hack (real ownership instead), retires
+   "the user formats it once" (a fresh tab boots into a working
+   home), and the M0 auto-persist already saves the formatted+
+   populated fork. Recorded edge: the baked mkfs size can go stale
+   in the marker-guarded block if a later ?mkdrive swaps a
+   DIFFERENT-size blank in — mkfs then fails harmlessly and the
+   mkdrive reply already tells the user the manual command.
+   **Consequence: the passwd surgery RETURNS, both users** — root →
+   /home/root, user1 → /home/user1 (login's chdir falls back to /
+   when unmounted, so the degraded case still boots).
+4. **/etc/skel.profile + /etc/skel.hello stamps** (per-boot, ours —
+   minix-fs writeFile creates them): the seeds the populate step
+   copies into the fork. The show trigger lives in the DRIVE:
+   `.profile` checks `$HOME/.welcome` (created by populate),
+   removes it, and announces the show — so the show runs once per
+   DRIVE (a fresh drive = a new user's first day; overlay factory
+   reset alone does NOT replay it — supersedes §4.6's "factory
+   reset resurrects", per the counter-design's placement).
+5. **The show: guest-initiated, host-rendered** (Jonathan: "the
+   typing relay minus the cheezy sound fx, sure") — §4.6's second
+   branch, chosen. `.profile`'s first-run block emits a marker line;
+   main.ts recognizes it in the TX stream and runs the show through
+   the EXISTING AutoexecRunner (prompt-aware typing relay) with the
+   key-click callback disabled. The performance types the Phase 14
+   ceremony for real: heredoc hello.c → `cpp → c86 → as → ld -lc86`
+   (the recipe on record in HELLO_WORLD_COMPILE_REPORT §3, toolchain
+   in-image) → `./hello` — leaving hello.c and the binary in
+   /home/user1 as artifacts beside the seeded re-runnable hello.sh.
+   No new protocol; no sound.
+6. **Seed script rev 3**: drop the mount + ping lines (§4.3
    executed); ping restore moves to the fork's .profile.
 
 **Acceptance (per §4.6):** reload → `mouse$ ` personalized prompt
@@ -457,22 +478,25 @@ failure):**
 /home mounted rw for user1, NOTHING typed. Blank-fork tab: same
 minus the mount (quiet failure), $HOME=/home writable.
 
-**Decisions for Jonathan (everything above is proposal until his
-word):**
+**Decisions — settled 2026-07-15 (in-session):**
 
-- D1. Autologin control: settings 3-way (off / root / user1),
-  default user1 — per §4.6. OK?
-- D2. `autoNet` toggle default ON (bootopts gets net=ne0 → rc.sys
-  starts the NIC with nothing typed). OK?
-- D3. The chmod-777/666 honesty (permissive by stamp, as root, no
-  pretend security). OK?
-- D4. hello-human as plain-output guest script, first-boot-only
-  stamp. OK?
-- D5. (His own open question, raised in-field:) retire the "Create
-  blank drive" button in favor of a size dropdown on the base
-  picker's "None" row — new tabs get a fresh blank of chosen size;
-  blank library rows then only exist via upload/promote. In or out
-  of M3?
+- D1. Autologin 3-way (off / root / user1), default user1 —
+  **"as speced", YES.**
+- D2. `autoNet` default ON — **YES, with his caveat honored**:
+  "unless that messes up build" is the RECORDED 640K constraint
+  (ktcp+telnetd+ftpd are the difference between c86 compiling and
+  not), and the show compiles — so `net=ne0` is SUPPRESSED on the
+  virgin boot only (worker knows: nothing folded); every later
+  boot has net up untyped.
+- D3. superseded — the counter-design's ownership model (populate
+  chowns real homes) retires the chmod-777 hack. /dev/hdb node
+  perms no longer needed (mkfs runs as root at sysinit).
+- D4. superseded by items 4–5 above: fork-layout seeding + the
+  typing relay without sound fx ("sure, why not").
+- D5. blank-drive button: NO VERDICT — stays OUT of M3. The button
+  keeps its size-knob role; only its hint text updates for the
+  /home mount point. The dropdown idea stays on record here for
+  whenever he calls it.
 
 ## 5. Hard-rule notes for the implementing session
 
