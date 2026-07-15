@@ -697,3 +697,182 @@ header code {
   overflow-x: auto;
   line-height: 1.5;
 }
+
+/* ------------------------------------------------------------------ */
+/* System-level editor panel (Phase 16 M4)                            */
+/* ------------------------------------------------------------------ */
+
+#editor-toggle {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  background: #16202b;
+  color: #cfe3f5;
+  border: 1px solid #3d7bb5;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  z-index: 30;
+}
+
+#editor-toggle:hover,
+#editor-toggle:focus-visible {
+  background: #1d2d3e;
+  outline: 2px solid #3d7bb5;
+  outline-offset: 1px;
+}
+
+#editor-panel[hidden] {
+  display: none;
+}
+
+#editor-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(30rem, 90vw);
+  display: flex;
+  flex-direction: column;
+  background: #10161d;
+  border-left: 1px solid #2a3b4d;
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.5);
+  z-index: 40;
+  font-size: 0.85rem;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid #2a3b4d;
+  color: #cfe3f5;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.editor-close {
+  background: transparent;
+  border: 0;
+  color: #8fb2d0;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+
+.editor-status {
+  padding: 0.4rem 0.8rem;
+  color: #a0b8cc;
+  border-bottom: 1px solid #1c2835;
+  min-height: 1.2em;
+}
+
+.editor-status.is-warning {
+  color: #f0c674;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.editor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0;
+}
+
+.editor-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.1rem 0.8rem;
+}
+
+.editor-list li button {
+  background: transparent;
+  border: 0;
+  color: #cfe3f5;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.15rem 0;
+  text-align: left;
+}
+
+.editor-list li button:hover,
+.editor-list li button:focus-visible {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.editor-list li span {
+  color: #5c708a;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.editor-list .editor-skip,
+.editor-list .editor-empty {
+  color: #5c708a;
+  font-style: italic;
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  border-bottom: 1px solid #1c2835;
+}
+
+.editor-bar button {
+  padding: 0.2rem 0.6rem;
+  background: #16202b;
+  color: #cfe3f5;
+  border: 1px solid #2a3b4d;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.editor-bar .editor-write {
+  margin-left: auto;
+  border-color: #3d7bb5;
+}
+
+.editor-bar button:hover,
+.editor-bar button:focus-visible {
+  background: #1d2d3e;
+}
+
+.editor-filename {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color: #8fb2d0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-code {
+  flex: 1;
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #e0e0e0;
+  background: #0c1117;
+  outline: none;
+  overflow: auto;
+  tab-size: 4;
+}

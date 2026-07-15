@@ -60,6 +60,7 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
+import { mountEditorPanel } from './editor-panel.js';
 import { SEED_BOOT_SCRIPT, SEED_DEMO_SCRIPT, reconcileSeededScripts } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
 
@@ -249,6 +250,13 @@ async function init(): Promise<void> {
   // panel (M4) is the pusher; the branch in the message handler is the
   // shifter. An ack with no waiter means a protocol bug — warn loudly.
   const secondaryWriteAcks: Array<(r: { ok: boolean; detail?: string }) => void> = [];
+  function requestSecondaryWrite(bytes: Uint8Array): Promise<{ ok: boolean; detail?: string }> {
+    return new Promise((resolve) => {
+      secondaryWriteAcks.push(resolve);
+      const msg: MainToWorkerMessage = { type: 'write-secondary', bytes };
+      worker.postMessage(msg);
+    });
+  }
 
   const AUTO_PERSIST_MS = 5_000;
   let persistInFlight = false;
@@ -517,6 +525,21 @@ async function init(): Promise<void> {
       worker.postMessage(msg);
     },
   });
+
+  // The system-level editor (Phase 16 M4): a panel over THIS tab's
+  // /dev/hdb — peek reads (never marking clean), whole-image writes
+  // through M3, fork-row persistence for reload safety. Not mounted
+  // in the no-drive degraded case (broken IDB): there is nothing for
+  // it to edit and its empty states would lie.
+  if (drive !== null) {
+    const activeDrive = drive;
+    mountEditorPanel({
+      peekDrive: () => requestSnapshot(true),
+      writeDrive: (bytes) => requestSecondaryWrite(bytes),
+      persistFork: (bytes) => library.updateImageBytes(activeDrive.imageId, bytes),
+      driveLabel: activeDrive.name,
+    });
+  }
 
   // Landing showcase (2026-07-15): while the bundled floppy runs,
   // stream the 32 MB HD image through /gh-assets into the library in
