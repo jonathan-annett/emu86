@@ -57,6 +57,7 @@ import {
   OverlayDisk,
   foldOverlay,
   sha256Hex,
+  type OverlayChunk,
 } from '../disk/overlay.js';
 import {
   applyImageStamps,
@@ -280,6 +281,50 @@ function snapshotDisk(disk: Disk): Uint8Array {
   return out;
 }
 
+/**
+ * Field fix #4: lay a carried overlay epoch over a disk snapshot.
+ * Returns false instead of throwing on malformed input (bad chunk
+ * span, out-of-range offset) — a corrupt slot row refuses the
+ * restore, it must never kill the boot.
+ */
+function applyCarriedChunks(
+  snap: Uint8Array,
+  carried: { chunkSizeBytes: number; chunks: readonly OverlayChunk[] },
+): boolean {
+  const span = carried.chunkSizeBytes;
+  if (!Number.isInteger(span) || span <= 0 || span % SECTOR_SIZE !== 0) return false;
+  for (const chunk of carried.chunks) {
+    const offset = chunk.chunkIndex * span;
+    if (
+      !Number.isInteger(offset) || offset < 0 ||
+      chunk.bytes.length % SECTOR_SIZE !== 0 ||
+      offset + chunk.bytes.length > snap.length
+    ) {
+      return false;
+    }
+    snap.set(chunk.bytes, offset);
+  }
+  return true;
+}
+
+/** Field fix #4: lay carried secondary sectors over a drive snapshot. */
+function applyCarriedSectors(
+  snap: Uint8Array,
+  carried: ReadonlyArray<{ lba: number; bytes: Uint8Array }>,
+): boolean {
+  for (const s of carried) {
+    if (
+      !Number.isInteger(s.lba) || s.lba < 0 ||
+      s.bytes.length !== SECTOR_SIZE ||
+      (s.lba + 1) * SECTOR_SIZE > snap.length
+    ) {
+      return false;
+    }
+    snap.set(s.bytes, s.lba * SECTOR_SIZE);
+  }
+  return true;
+}
+
 export class WorkerHost {
   readonly #post: (msg: WorkerToMainMessage) => void;
   readonly #fetchImage: ((url: string) => Promise<Uint8Array>) | undefined;
@@ -330,6 +375,12 @@ export class WorkerHost {
   #captureShaCache: { writesSeen: number; sha: string } | null = null;
   /** Pacer-time of the last 'reference' capture — gates maintenance sweeps. */
   #lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
+  /**
+   * Field fix #4: the capture whose secondary clean epoch awaits
+   * main's `secondary-persisted`. Only the latest counts — a newer
+   * capture unions the pending set and takes over the id.
+   */
+  #pendingCleanRequestId: number | null = null;
   /**
    * Whether a reference (base + fold) reconstruction can reproduce
    * this session's disk (field fix #3): false for embedded-restore
@@ -517,6 +568,21 @@ export class WorkerHost {
       // coherent (the snapshot-secondary precedent). Hashing + the
       // reply complete async over the copies; the machine keeps running.
       this.#captureState(msg);
+      return;
+    }
+    if (msg.type === 'secondary-persisted') {
+      // Field fix #4: main's fork-write confirmation. Only the latest
+      // clean epoch counts — a stale requestId (a newer capture has
+      // already unioned the pending set under its own id) is ignored
+      // and those sectors ride the next carried delta instead.
+      if (this.#pendingCleanRequestId === msg.requestId) {
+        this.#pendingCleanRequestId = null;
+        const disk = this.#secondaryDisk;
+        if (disk !== null) {
+          if (msg.ok) disk.ackClean();
+          else disk.nackClean();
+        }
+      }
       return;
     }
     if (msg.type === 'set-paused') {
@@ -984,6 +1050,14 @@ export class WorkerHost {
     const expected = config.restore?.expected;
     let primary: ResolvedSlot;
     let restoreRefusal: string | null = null;
+    // Field fix #4: the slot row's carried deltas, held here once the
+    // hash checks ACCEPT them — applied to the live disks only after
+    // the wrappers install (through them, so the bytes re-enter the
+    // hot map / dirty set and the next capture re-carries them into
+    // the store — a slot-committed/store-lost tear must not strand
+    // them outside every future reconstruction).
+    let acceptedCarried: { chunkSizeBytes: number; chunks: OverlayChunk[] } | null = null;
+    let acceptedCarriedSec: Array<{ lba: number; bytes: Uint8Array }> | null = null;
     if (embeddedRestore !== undefined) {
       primary = await this.#resolveSlot(
         'primary', primarySpec, [], undefined, undefined, /* verbatim: */ true,
@@ -992,14 +1066,42 @@ export class WorkerHost {
       primary = await this.#resolveSlot(
         'primary', primarySpec, [], config.overlay, undefined, /* verbatim: */ true,
       );
-      const primarySha = await sha256Hex(snapshotDisk(primary.disk));
-      if (primarySha !== expected.primarySha) {
-        restoreRefusal = 'boot disk reconstruction does not match the capture';
+      // Field fix #4: reconstruction = base → store fold → carried
+      // delta. The carried layers apply to SNAPSHOT copies for the
+      // hash checks, so a refusal falls back to a cold boot on
+      // untouched disks.
+      const carried = config.restore?.carriedPrimary ?? null;
+      const carriedSec = config.restore?.carriedSecondary ?? null;
+      if (carried !== null && carried.fingerprint !== primary.overlayFingerprint) {
+        restoreRefusal = 'machine state was carried against a different base image';
       } else {
-        const secondarySha =
-          secondary !== null ? await sha256Hex(snapshotDisk(secondary.disk)) : null;
-        if (secondarySha !== expected.secondarySha) {
-          restoreRefusal = 'secondary drive does not match the capture';
+        const primSnap = snapshotDisk(primary.disk);
+        if (carried !== null && !applyCarriedChunks(primSnap, carried)) {
+          restoreRefusal = 'saved machine state carried a corrupt boot-disk delta';
+        } else {
+          const primarySha = await sha256Hex(primSnap);
+          if (primarySha !== expected.primarySha) {
+            restoreRefusal = 'boot disk reconstruction does not match the capture';
+          } else {
+            let secondarySha: string | null = null;
+            let secOk = true;
+            if (secondary !== null) {
+              const secSnap = snapshotDisk(secondary.disk);
+              if (carriedSec !== null && !applyCarriedSectors(secSnap, carriedSec)) {
+                restoreRefusal = 'saved machine state carried a corrupt drive delta';
+                secOk = false;
+              } else {
+                secondarySha = await sha256Hex(secSnap);
+              }
+            }
+            if (secOk && secondarySha !== expected.secondarySha) {
+              restoreRefusal = 'secondary drive does not match the capture';
+            }
+            if (restoreRefusal === null) {
+              acceptedCarried = carried;
+              acceptedCarriedSec = carriedSec;
+            }
+          }
         }
       }
       if (restoreRefusal !== null) {
@@ -1180,6 +1282,30 @@ export class WorkerHost {
       } else {
         try {
           restoreMachineState(machine, config.restore.state);
+          // Field fix #4: the accepted carried deltas reach the LIVE
+          // disks only now — through the wrappers so the bytes enter
+          // the hot map / dirty set and the next capture re-carries
+          // them into the store — and only on a restore that actually
+          // succeeded (a failure cold-boots untouched disks). No
+          // instruction has run yet, so the restored RAM's buffer
+          // cache and the disk agree from the first step.
+          if (acceptedCarried !== null) {
+            const spc = acceptedCarried.chunkSizeBytes / SECTOR_SIZE;
+            for (const chunk of acceptedCarried.chunks) {
+              const firstLba = chunk.chunkIndex * spc;
+              for (let off = 0; off < chunk.bytes.length; off += SECTOR_SIZE) {
+                overlayPrimary.writeSector(
+                  firstLba + off / SECTOR_SIZE,
+                  chunk.bytes.subarray(off, off + SECTOR_SIZE),
+                );
+              }
+            }
+          }
+          if (acceptedCarriedSec !== null && trackedSecondary !== null) {
+            for (const s of acceptedCarriedSec) {
+              trackedSecondary.writeSector(s.lba, s.bytes);
+            }
+          }
           outcome = { ok: true };
         } catch (err) {
           machine.reset(); // back to the clean cold-boot baseline
@@ -1429,17 +1555,19 @@ export class WorkerHost {
   // ============================================================
 
   /**
-   * Capture the running machine (brief §1.4, two-phase): first flush
-   * the overlay hot map as one final epoch — the store plus that sweep
-   * then hold every boot-disk write up to this boundary, which is what
-   * makes the 'reference' reconstruction (base → fold → stamps) land on
-   * `primarySha` — then copy machine state + disk images synchronously.
-   * Hashes and the reply complete async over the copies.
+   * Capture the running machine (brief §1.4 revised by field fix #4):
+   * a 'reference' capture's final overlay epoch rides IN the reply —
+   * main writes it into the slot row BEFORE the overlay store, so the
+   * reconstruction (base → store fold → carried delta) lands on
+   * `primarySha` no matter which of those writes a teardown kills.
+   * Machine state + disk copies are synchronous at this message
+   * boundary; hashes and the reply complete async over the copies.
    *
-   * Secondary dirty-tracking: the snapshot here is a PEEK (keepDirty
-   * semantics) — main writes the fork row from these very bytes, but if
-   * that write loses a teardown race the dirty count must still drive
-   * the next auto-persist.
+   * Secondary dirty-tracking is two-phase for the same reason: the
+   * dirty set moves to pending at capture (its LBAs ride the reply as
+   * the carried drive delta) and only main's `secondary-persisted`
+   * confirmation — after the fork-row write commits — makes those
+   * sectors durable. A lost confirmation re-carries them next beat.
    */
   #captureState(msg: CaptureStateMessage): void {
     const machine = this.#machine;
@@ -1466,9 +1594,35 @@ export class WorkerHost {
       this.#lastReferenceCaptureAt = this.#pacerNow();
     }
     try {
-      // Phase 1: the final overlay sweep (a pending epoch folds back
-      // first so the sweep is complete — the reset-path precedent).
-      this.#overlayFlushNow();
+      // Phase 1 (field fix #4): a reference capture's final epoch is
+      // NOT posted as overlay-sweep — it rides in the reply, so main
+      // can write it into the slot row BEFORE the overlay store (the
+      // carried delta; whichever write a teardown kills, slot + store
+      // still reconstruct). A pending epoch folds back first so the
+      // epoch is complete (the reset-path precedent). The engine
+      // holds it pending until main's overlay-swept ack; the ack
+      // timeout self-heals an abandoned one. Embedded captures don't
+      // sweep at all: their bytes are self-contained, and a flush
+      // would only advance the store past the resume slot's hash —
+      // the same tear in miniature.
+      let overlayEpoch: {
+        epochId: number;
+        chunkSizeBytes: number;
+        chunks: OverlayChunk[];
+      } | null = null;
+      const overlay = this.#overlayDisk;
+      if (msg.disks === 'reference' && overlay !== null) {
+        const pendingId = overlay.pendingEpochId;
+        if (pendingId !== null) overlay.nackSweep(pendingId);
+        const epochId = this.#overlayEpochSeq++;
+        const chunks = overlay.beginSweep(epochId);
+        if (chunks !== null) {
+          const sweepNow = this.#pacerNow();
+          this.#overlayLastSweepAt = sweepNow;
+          this.#overlayPendingSince = sweepNow;
+          overlayEpoch = { epochId, chunkSizeBytes: overlay.chunkBytes, chunks };
+        }
+      }
 
       // Phase 2, synchronous copies at this message boundary. The
       // primary copy+hash is skipped when nothing wrote the boot disk
@@ -1489,11 +1643,15 @@ export class WorkerHost {
       const secondaryDisk = this.#secondaryDisk;
       const secondaryDirtySectors = secondaryDisk !== null ? secondaryDisk.dirtySectorCount : 0;
       const secondaryBytes = secondaryDisk !== null ? secondaryDisk.snapshot() : null;
+      let secondaryDirtyLbas: number[] | undefined;
       if (secondaryDisk !== null && msg.markSecondaryClean === true) {
         // This capture IS the persistence path (heartbeat resume) —
-        // snapshot-secondary semantics: main writes the fork row from
-        // these very bytes.
-        secondaryDisk.markClean();
+        // main writes the fork row from these very bytes. Field fix
+        // #4: two-phase — the dirty set moves to pending (its LBAs
+        // ride the reply as the carried delta) and only main's
+        // secondary-persisted confirmation makes them durable.
+        secondaryDirtyLbas = secondaryDisk.beginClean();
+        this.#pendingCleanRequestId = msg.requestId;
       }
       const secondaryGeometry = secondaryDisk !== null ? secondaryDisk.geometry : null;
       const baseFingerprint = this.#bootFingerprint;
@@ -1529,6 +1687,8 @@ export class WorkerHost {
             secondarySha,
             secondaryDirtySectors,
             referenceValid,
+            overlayEpoch,
+            ...(secondaryDirtyLbas !== undefined ? { secondaryDirtyLbas } : {}),
             ...(embedded && primaryBytes !== null
               ? {
                   primary: {
@@ -1548,6 +1708,7 @@ export class WorkerHost {
                 : null,
           });
         } catch (err) {
+          this.#foldBackCaptureEpochs(msg.requestId, overlayEpoch?.epochId ?? null);
           this.#post({
             type: 'state-captured',
             requestId: msg.requestId,
@@ -1563,6 +1724,19 @@ export class WorkerHost {
         ok: false,
         reason: String(err),
       });
+    }
+  }
+
+  /**
+   * Field fix #4: a capture that can't produce its reply must not
+   * strand the deltas it claimed — fold the overlay epoch and the
+   * secondary pending-clean back so the next capture re-carries them.
+   */
+  #foldBackCaptureEpochs(requestId: number, epochId: number | null): void {
+    if (epochId !== null) this.#overlayDisk?.nackSweep(epochId);
+    if (this.#pendingCleanRequestId === requestId) {
+      this.#pendingCleanRequestId = null;
+      this.#secondaryDisk?.nackClean();
     }
   }
 
@@ -1676,6 +1850,8 @@ export class WorkerHost {
     // Unsaved secondary writes die with the machine — save is explicit
     // by design (the settings UI says so before the user reloads).
     this.#secondaryDisk = null;
+    // A clean epoch pending against the dead disk can never confirm.
+    this.#pendingCleanRequestId = null;
     // The overlay engine dies with the machine; the reset handler
     // already posted a final sweep before chaining this teardown.
     // (#overlayEpochSeq survives on purpose — see its declaration.)

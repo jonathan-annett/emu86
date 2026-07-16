@@ -154,7 +154,7 @@ describe('WorkerHost — capture-state', () => {
     expect(tracked.dirtySectorCount).toBe(1);
   });
 
-  it('markSecondaryClean makes the capture the persistence path', async () => {
+  it('markSecondaryClean is two-phase: durable only on secondary-persisted (field fix #4)', async () => {
     const rig = await boot({
       imageBytes: haltImage(),
       secondary: { imageBytes: new Uint8Array(1474560) },
@@ -165,9 +165,27 @@ describe('WorkerHost — capture-state', () => {
       type: 'capture-state', requestId: 1, disks: 'reference', markSecondaryClean: true,
     });
     const reply = await awaitCaptured(rig);
-    expect(reply.secondaryDirtySectors).toBe(1); // count BEFORE the clean
+    expect(reply.secondaryDirtySectors).toBe(1);
+    // The reply names the unconfirmed sectors — the slot's carried delta.
+    expect(reply.secondaryDirtyLbas).toEqual([3]);
     const tracked = rig.host.machine?.secondaryDisk;
     if (!(tracked instanceof WriteTrackingDisk)) throw new Error('no tracked secondary');
+    // Still unconfirmed: the fork write hasn't been acknowledged.
+    expect(tracked.dirtySectorCount).toBe(1);
+    // A nack folds back — the next capture re-carries.
+    rig.host.handleMessage({ type: 'secondary-persisted', requestId: 1, ok: false });
+    expect(tracked.dirtySectorCount).toBe(1);
+    rig.messages.length = 0;
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 2, disks: 'reference', markSecondaryClean: true,
+    });
+    const second = await awaitCaptured(rig);
+    expect(second.secondaryDirtyLbas).toEqual([3]);
+    // The ack (fork write committed) makes it durable.
+    rig.host.handleMessage({ type: 'secondary-persisted', requestId: 2, ok: true });
+    expect(tracked.dirtySectorCount).toBe(0);
+    // A stale confirmation for an old capture is ignored.
+    rig.host.handleMessage({ type: 'secondary-persisted', requestId: 1, ok: true });
     expect(tracked.dirtySectorCount).toBe(0);
   });
 
@@ -268,7 +286,7 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     expect(compareHosts(a.host, b.host)).toEqual([]);
   });
 
-  it('reference: base + collected sweeps reconstruct, verify, restore', async () => {
+  it('reference: base + store chunks reconstruct, verify, restore', async () => {
     const image = haltImage();
     const a = await boot({ imageBytes: new Uint8Array(image) });
     workTheMachine(a);
@@ -281,15 +299,18 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
       throw new Error('reference capture reply incomplete');
     }
 
-    // Main's role, simulated: the store accumulated every sweep.
-    const chunks = collectedChunks(a);
-    expect(chunks.length).toBeGreaterThan(0);
+    // Field fix #4: the capture posts NO overlay-sweep — its final
+    // epoch rides the reply, for main to store slot-first.
+    expect(collectedChunks(a)).toEqual([]);
+    if (reply.overlayEpoch == null) throw new Error('no overlayEpoch in reply');
+    expect(reply.overlayEpoch.chunks.length).toBeGreaterThan(0);
 
+    // Main's happy path, simulated: the epoch reached the store.
     const b = await boot({
       imageBytes: new Uint8Array(image), // the pristine base, as a reload would fetch
       overlay: {
-        chunks,
-        chunkSizeBytes: a.host.overlayDisk?.chunkBytes ?? 32 * 1024,
+        chunks: reply.overlayEpoch.chunks,
+        chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
         fingerprint: bootFingerprint(a),
       },
       restore: {
@@ -365,6 +386,202 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     });
     const result = restoreResult(b);
     expect(result.ok).toBe(false);
+    expect(b.host.machine).not.toBeNull();
+  });
+});
+
+describe('WorkerHost — the torn resume pair (field fix #4)', () => {
+  it('slot committed, store lost: the carried epoch reconstructs and re-enters the hot map', async () => {
+    const image = haltImage();
+    const a = await boot({ imageBytes: new Uint8Array(image) });
+    const fingerprint = bootFingerprint(a);
+    workTheMachine(a);
+
+    // Capture 1: its epoch reaches the store (main acks after commit).
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const first = await awaitCaptured(a);
+    if (first.overlayEpoch == null) throw new Error('capture 1 carried no epoch');
+    const storeChunks = first.overlayEpoch.chunks;
+    a.host.handleMessage({
+      type: 'overlay-swept', epochId: first.overlayEpoch.epochId, ok: true,
+    });
+
+    // More guest writes, then capture 2 — the F5 kills the store write
+    // but the slot row (carrying epoch 2) committed.
+    a.host.overlayDisk?.writeSector(300, sector(0xd1));
+    a.host.overlayDisk?.writeSector(2500, sector(0xd2));
+    a.messages.length = 0;
+    a.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
+    const second = await awaitCaptured(a);
+    if (second.state === undefined || second.capturedAt === undefined ||
+        second.primarySha === undefined || second.overlayEpoch == null) {
+      throw new Error('capture 2 reply incomplete');
+    }
+
+    const b = await boot({
+      imageBytes: new Uint8Array(image),
+      overlay: {
+        chunks: storeChunks, // the store never saw epoch 2
+        chunkSizeBytes: first.overlayEpoch.chunkSizeBytes,
+        fingerprint,
+      },
+      restore: {
+        state: second.state,
+        capturedAt: second.capturedAt,
+        expected: {
+          primarySha: second.primarySha,
+          secondarySha: second.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: second.overlayEpoch.chunkSizeBytes,
+          fingerprint,
+          chunks: second.overlayEpoch.chunks,
+        },
+      },
+    });
+    expect(restoreResult(b)).toMatchObject({ ok: true });
+    expect(compareHosts(a.host, b.host)).toEqual([]);
+    // The seeding rule: the carried sectors are hot again, so the next
+    // capture re-carries them toward the store — a lost store write
+    // must not strand them outside future reconstructions.
+    expect(b.host.overlayDisk?.hotSectorCount ?? 0).toBeGreaterThan(0);
+
+    a.host.runUntil(300);
+    b.host.runUntil(300);
+    expect(compareHosts(a.host, b.host)).toEqual([]);
+  });
+
+  it('fork row stale, slot committed: the carried drive sectors reconstruct and stay dirty', async () => {
+    const forkBytes = new Uint8Array(1474560).fill(0x11);
+    const a = await boot({
+      imageBytes: haltImage(),
+      secondary: { imageBytes: new Uint8Array(forkBytes) },
+    });
+    a.host.runUntil(300);
+    a.host.machine?.secondaryDisk?.writeSector(7, sector(0x70));
+    a.host.machine?.secondaryDisk?.writeSector(2048, sector(0x71));
+
+    a.host.handleMessage({
+      type: 'capture-state', requestId: 1, disks: 'reference', markSecondaryClean: true,
+    });
+    const reply = await awaitCaptured(a);
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.primarySha === undefined || reply.secondary == null ||
+        reply.secondaryDirtyLbas === undefined) {
+      throw new Error('capture reply incomplete');
+    }
+    expect(reply.secondaryDirtyLbas).toEqual([7, 2048]);
+
+    // Main's slot row: carried sectors sliced from the capture's own
+    // snapshot. The fork write never committed — boot B gets the OLD
+    // fork bytes.
+    const carriedSecondary = reply.secondaryDirtyLbas.map((lba) => ({
+      lba,
+      bytes: reply.secondary!.bytes.slice(lba * SECTOR_SIZE, (lba + 1) * SECTOR_SIZE),
+    }));
+    const overlay = reply.overlayEpoch != null
+      ? {
+          chunks: reply.overlayEpoch.chunks,
+          chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+          fingerprint: bootFingerprint(a),
+        }
+      : undefined;
+    const b = await boot({
+      imageBytes: haltImage(),
+      secondary: { imageBytes: new Uint8Array(forkBytes) }, // stale fork
+      ...(overlay !== undefined ? { overlay } : {}),
+      restore: {
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        expected: {
+          primarySha: reply.primarySha,
+          secondarySha: reply.secondarySha ?? null,
+        },
+        ...(reply.overlayEpoch != null
+          ? {
+              carriedPrimary: {
+                chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+                fingerprint: bootFingerprint(a),
+                chunks: reply.overlayEpoch.chunks,
+              },
+            }
+          : {}),
+        carriedSecondary,
+      },
+    });
+    expect(restoreResult(b)).toMatchObject({ ok: true });
+    // The carried sectors are on the restored drive…
+    expect(b.host.machine?.secondaryDisk?.readSector(7)[0]).toBe(0x70);
+    expect(b.host.machine?.secondaryDisk?.readSector(2048)[0]).toBe(0x71);
+    // …and STILL dirty, so the next confirmed persist writes them to
+    // the fork row this reconstruction had to work around.
+    const tracked = b.host.machine?.secondaryDisk;
+    if (!(tracked instanceof WriteTrackingDisk)) throw new Error('no tracked secondary');
+    expect(tracked.dirtySectorCount).toBe(2);
+  });
+
+  it('a corrupt carried delta refuses and cold-boots', async () => {
+    const image = haltImage();
+    const a = await boot({ imageBytes: new Uint8Array(image) });
+    workTheMachine(a);
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const reply = await awaitCaptured(a);
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.primarySha === undefined) {
+      throw new Error('capture reply incomplete');
+    }
+    const b = await boot({
+      imageBytes: new Uint8Array(image),
+      restore: {
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        expected: {
+          primarySha: reply.primarySha,
+          secondarySha: reply.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: 32 * 1024,
+          fingerprint: bootFingerprint(a),
+          chunks: [{ chunkIndex: 1_000_000, bytes: sector(0xff) }], // far past the disk
+        },
+      },
+    });
+    const result = restoreResult(b);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/corrupt/);
+    expect(b.host.machine).not.toBeNull();
+    expect(b.host.runUntil(200).reason).not.toBe('error');
+  });
+
+  it('a carried delta against a different base refuses', async () => {
+    const image = haltImage();
+    const a = await boot({ imageBytes: new Uint8Array(image) });
+    workTheMachine(a);
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const reply = await awaitCaptured(a);
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.primarySha === undefined || reply.overlayEpoch == null) {
+      throw new Error('capture reply incomplete');
+    }
+    const b = await boot({
+      imageBytes: new Uint8Array(image),
+      restore: {
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        expected: {
+          primarySha: reply.primarySha,
+          secondarySha: reply.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+          fingerprint: 'f'.repeat(64), // not this base
+          chunks: reply.overlayEpoch.chunks,
+        },
+      },
+    });
+    const result = restoreResult(b);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/different base image/);
     expect(b.host.machine).not.toBeNull();
   });
 });

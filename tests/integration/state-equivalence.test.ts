@@ -373,8 +373,10 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
       }
       expect(reply.referenceValid).toBe(true);
 
-      // Main's role: the store accumulated every sweep (boot deltas
-      // seeded at boot + guest writes, all flushed by the capture).
+      // Main's role: the store accumulated every maintenance sweep,
+      // and (field fix #4) the capture's own final epoch rides the
+      // REPLY — main persists it after the slot row. Fold both here,
+      // reply last (it is the newest).
       const chunkMap = new Map<number, { chunkIndex: number; bytes: Uint8Array }>();
       let chunkSizeBytes = 32 * 1024;
       let fingerprint = '';
@@ -384,6 +386,10 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
           for (const c of m.chunks) chunkMap.set(c.chunkIndex, c);
         }
         if (m.type === 'overlay-identity') fingerprint = m.fingerprint;
+      }
+      if (reply.overlayEpoch != null) {
+        chunkSizeBytes = reply.overlayEpoch.chunkSizeBytes;
+        for (const c of reply.overlayEpoch.chunks) chunkMap.set(c.chunkIndex, c);
       }
       expect(chunkMap.size).toBeGreaterThan(0); // the stamps at minimum
 

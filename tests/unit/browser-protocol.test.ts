@@ -149,6 +149,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'overlay-swept': return 'overlay-swept';
       case 'overlay-flush': return 'overlay-flush';
       case 'capture-state': return 'capture-state';
+      case 'secondary-persisted': return 'secondary-persisted';
       case 'set-paused': return 'set-paused';
       case 'inspect-machine': return 'inspect-machine';
       default: {

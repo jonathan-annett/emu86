@@ -174,7 +174,14 @@ export class InMemoryDisk implements Disk {
  */
 export class WriteTrackingDisk implements Disk {
   readonly #inner: Disk;
-  readonly #dirty = new Set<number>();
+  #dirty = new Set<number>();
+  /**
+   * Phase 18 field fix #4 — sectors handed to a persist-in-flight
+   * (between beginClean and ack/nack). They are still UNCONFIRMED:
+   * `dirtySectorCount` includes them, and a nack merges them back.
+   * Mirrors OverlayDisk's epoch pattern; ids live with the caller.
+   */
+  #pendingClean: Set<number> | null = null;
 
   constructor(inner: Disk) {
     this.#inner = inner;
@@ -192,9 +199,13 @@ export class WriteTrackingDisk implements Disk {
     return this.#inner.sectorCount;
   }
 
-  /** Distinct sectors written since construction or the last markClean(). */
+  /**
+   * Distinct UNCONFIRMED sectors: written since the last confirmed
+   * persist (ackClean) or markClean(). Includes any pending-clean
+   * set — those bytes are persist-in-flight, not yet durable.
+   */
   get dirtySectorCount(): number {
-    return this.#dirty.size;
+    return this.#dirty.size + (this.#pendingClean?.size ?? 0);
   }
 
   readSector(lba: number): Uint8Array {
@@ -215,9 +226,46 @@ export class WriteTrackingDisk implements Disk {
     return out;
   }
 
-  /** Reset the dirty count — call when a snapshot has been persisted. */
+  /** Reset the dirty count — call when a snapshot has been persisted.
+   *  Legacy one-shot path (manual Save / degraded auto-persist);
+   *  clears any pending-clean set too — the caller is asserting the
+   *  snapshot it just took covers everything. */
   markClean(): void {
     this.#dirty.clear();
+    this.#pendingClean = null;
+  }
+
+  /**
+   * Phase 18 field fix #4 — begin a two-phase clean: return every
+   * unconfirmed sector's LBA and move them to pending-clean. New
+   * writes land in a fresh dirty set. An existing pending set (a
+   * persist whose confirmation never arrived) is UNIONED in — the
+   * carried delta must stay a superset of "differs from the last
+   * COMMITTED persist"; over-carrying is idempotent, under-carrying
+   * loses writes.
+   */
+  beginClean(): number[] {
+    if (this.#pendingClean !== null) {
+      for (const lba of this.#dirty) this.#pendingClean.add(lba);
+    } else {
+      this.#pendingClean = this.#dirty;
+    }
+    this.#dirty = new Set();
+    return [...this.#pendingClean].sort((a, b) => a - b);
+  }
+
+  /** The persist COMMITTED — drop the pending set. No-op when none. */
+  ackClean(): void {
+    this.#pendingClean = null;
+  }
+
+  /** The persist failed or was abandoned — the pending sectors are
+   *  still unconfirmed; merge them back (union — only LBAs are
+   *  tracked, so there is no newer-wins question). */
+  nackClean(): void {
+    if (this.#pendingClean === null) return;
+    for (const lba of this.#pendingClean) this.#dirty.add(lba);
+    this.#pendingClean = null;
   }
 
   /**
@@ -244,6 +292,7 @@ export class WriteTrackingDisk implements Disk {
       );
     }
     this.#dirty.clear();
+    this.#pendingClean = null;
   }
 }
 

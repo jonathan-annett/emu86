@@ -88,6 +88,25 @@ export interface MachineStatePayload {
    * rows from before this field; restore just skips the replay.
    */
   terminal?: { tail: Uint8Array; viewportY: number } | null;
+  /**
+   * Field fix #4 (the torn resume pair), resume slots only: the
+   * capture's final overlay epoch — every boot-disk write since the
+   * last acked sweep. The slot row commits BEFORE the overlay store,
+   * so whichever write a teardown kills, base + store + this delta
+   * reconstructs to `primarySha`. Absent on pre-fix rows (store-only
+   * reconstruction, exactly the old semantics).
+   */
+  carriedPrimary?: {
+    chunkSizeBytes: number;
+    chunks: Array<{ chunkIndex: number; bytes: Uint8Array }>;
+  } | null;
+  /**
+   * Field fix #4, resume slots only: the drive sectors unconfirmed
+   * against the fork row at capture, bytes sliced from the capture's
+   * own snapshot — the same superset-of-difference law as
+   * `carriedPrimary`, against `secondarySha`.
+   */
+  carriedSecondary?: Array<{ lba: number; bytes: Uint8Array }> | null;
 }
 
 export interface MachineStateRecord {

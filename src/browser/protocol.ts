@@ -195,6 +195,30 @@ export interface RestoreSpec {
     /** null = no secondary was attached at capture. */
     secondarySha: string | null;
   };
+  /**
+   * Field fix #4 (the torn resume pair) — the slot row's carried
+   * primary delta: the final overlay epoch of the capture that wrote
+   * the slot, folded AFTER the store's chunks (base → store fold →
+   * carried). Whatever half of the capture's IDB writes survived a
+   * teardown, slot + store reconstructs: carried covers everything
+   * the store might be missing. `fingerprint` must match the base
+   * this boot (the store-fold rule) or the resume is refused.
+   * Reference (`expected`) restores only.
+   */
+  carriedPrimary?: {
+    chunkSizeBytes: number;
+    fingerprint: string;
+    chunks: OverlayChunk[];
+  } | null;
+  /**
+   * Field fix #4 — the carried secondary delta: the sectors dirty at
+   * capture (unconfirmed against the fork row), bytes from the
+   * capture's own snapshot. Applied over the resolved secondary
+   * before the `secondarySha` check; written through the tracker on
+   * success so they re-enter the persistence chain. Reference
+   * restores only.
+   */
+  carriedSecondary?: Array<{ lba: number; bytes: Uint8Array }> | null;
 }
 
 // ============================================================
@@ -289,15 +313,19 @@ export interface OverlayFlushMessage {
 /**
  * Phase 18 M2: capture the running machine's complete state. The
  * worker's synchronous part (machine + disk copies + the final
- * overlay sweep) happens at the message boundary — coherent for free;
+ * overlay epoch) happens at the message boundary — coherent for free;
  * hashing and the {@link StateCapturedMessage} reply complete async
  * over the copies while the machine keeps running.
  *
- * Two-phase per §1.4: the handler first posts a final overlay sweep
- * (all writes up to this boundary reach the store), then the reply.
- * Main persists the sweep, writes the fork row from the reply's own
- * secondary bytes (one snapshot, one truth), and only then declares
- * the state saved.
+ * Field fix #4 (the torn resume pair): a 'reference' capture no
+ * longer posts `overlay-sweep` — its final epoch rides INSIDE the
+ * reply (`overlayEpoch`) and stays pending worker-side until main
+ * acks with {@link OverlaySweptMessage} AFTER the store write
+ * commits. Main's write order is slot row → fork row → overlay
+ * chunks → acks, so nothing newer than the committed slot can reach
+ * the store. 'embedded' captures don't sweep at all (their bytes are
+ * self-contained; a flush would only advance the store past the
+ * resume slot).
  */
 export interface CaptureStateMessage {
   type: 'capture-state';
@@ -311,13 +339,30 @@ export interface CaptureStateMessage {
    */
   disks: 'embedded' | 'reference';
   /**
-   * Phase 18 M2 field fix (the F5 race): when true, the secondary
-   * snapshot MARKS CLEAN — this capture IS the persistence path (the
-   * heartbeat resume flow writes the fork row from these very bytes),
-   * exactly the snapshot-secondary semantics. Absent/false = peek
-   * (named saves — the fork auto-persist keeps its own trigger).
+   * Phase 18 M2 field fix (the F5 race), REVISED by field fix #4:
+   * when true this capture IS the persistence path — the worker
+   * BEGINS a two-phase clean (the dirty set moves to pending, the
+   * reply carries its LBAs in `secondaryDirtyLbas`) and main must
+   * confirm the fork-row write with {@link SecondaryPersistedMessage}
+   * before the sectors count as durable. Absent/false = peek (named
+   * saves — the fork auto-persist keeps its own trigger).
    */
   markSecondaryClean?: boolean;
+}
+
+/**
+ * Field fix #4: main's confirmation of the fork-row write a
+ * reference capture's `markSecondaryClean` began. `ok: true` after
+ * the IDB write commits (or when there was nothing to persist) drops
+ * the worker's pending-clean set; `ok: false` folds it back so the
+ * next capture re-carries those sectors. Stale requestIds (a reply
+ * that outlived a reset or a newer capture) are ignored.
+ */
+export interface SecondaryPersistedMessage {
+  type: 'secondary-persisted';
+  /** The capture whose clean epoch this confirms. */
+  requestId: number;
+  ok: boolean;
 }
 
 /**
@@ -354,6 +399,7 @@ export type MainToWorkerMessage =
   | OverlaySweptMessage
   | OverlayFlushMessage
   | CaptureStateMessage
+  | SecondaryPersistedMessage
   | SetPausedMessage
   | InspectMachineMessage;
 
@@ -555,6 +601,28 @@ export interface StateCapturedMessage {
    * guaranteed to refuse.
    */
   referenceValid?: boolean;
+  /**
+   * Field fix #4, 'reference' mode: the capture's final overlay
+   * epoch — every boot-disk write since the last acked sweep. Main
+   * stores these chunks IN the slot row (the carried delta), then
+   * writes them to the overlay store, then acks `epochId` via
+   * {@link OverlaySweptMessage}. Null = the hot map was clean (the
+   * slot needs no carried delta). The worker holds the epoch pending
+   * until the ack/nack; its ack timeout self-heals an abandoned one.
+   */
+  overlayEpoch?: {
+    epochId: number;
+    chunkSizeBytes: number;
+    chunks: OverlayChunk[];
+  } | null;
+  /**
+   * Field fix #4, with `markSecondaryClean`: the unconfirmed
+   * secondary sectors at capture (the pending-clean set). Main
+   * slices their bytes from `secondary.bytes` into the slot row's
+   * carried delta and confirms the fork write with
+   * {@link SecondaryPersistedMessage}.
+   */
+  secondaryDirtyLbas?: number[];
 }
 
 /**

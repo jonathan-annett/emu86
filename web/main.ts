@@ -62,6 +62,7 @@ import { createKeyClick } from './keyfx.js';
 import { loadSession, saveSession } from './session-store.js';
 import { HELLO_HUMAN_MARKER } from '../src/browser/image-stamps.js';
 import { OverlayStore } from './overlay-store.js';
+import { SECTOR_SIZE } from '../src/disk/disk.js';
 import {
   gcOrphanOverlays,
   mintOverlayId,
@@ -470,7 +471,10 @@ async function init(): Promise<void> {
   /** Rough stored footprint for the meta row (UI only, not quota math). */
   function roughStateSize(reply: CapturedReply, gzBytes = 0): number {
     const ramBytes = (reply.state?.ram.pages.length ?? 0) * 4096;
-    return ramBytes + 64 * 1024 + gzBytes; // devices + NIC ring ride in the fudge
+    const carriedBytes =
+      (reply.overlayEpoch?.chunks ?? []).reduce((n, c) => n + c.bytes.length, 0) +
+      (reply.secondaryDirtyLbas?.length ?? 0) * SECTOR_SIZE;
+    return ramBytes + carriedBytes + 64 * 1024 + gzBytes; // devices + NIC ring ride in the fudge
   }
 
   /**
@@ -501,33 +505,81 @@ async function init(): Promise<void> {
   let resumeCaptureInFlight = false;
   let lastResumeCaptureAt = 0;
   let resumeSlotBroken = false; // IDB failed — stop hammering it
+  /** Field fix #4: fold a capture's claimed deltas back worker-side —
+   *  the epoch nack and the clean nack — when this beat can't (or
+   *  won't) persist them. The next capture re-carries them. */
+  function nackCaptureDeltas(reply: CapturedReply): void {
+    if (reply.overlayEpoch != null) {
+      const nack: MainToWorkerMessage = {
+        type: 'overlay-swept',
+        epochId: reply.overlayEpoch.epochId,
+        ok: false,
+        detail: 'resume funnel abandoned this beat',
+      };
+      worker.postMessage(nack);
+    }
+    if (reply.secondaryDirtyLbas !== undefined) {
+      const nack: MainToWorkerMessage = {
+        type: 'secondary-persisted',
+        requestId: reply.requestId,
+        ok: false,
+      };
+      worker.postMessage(nack);
+    }
+  }
+
   function maybeRefreshResumeSlot(force = false): void {
     if (resumeCaptureInFlight || resumeSlotBroken) return;
     if (!force && Date.now() - lastResumeCaptureAt < RESUME_CAPTURE_MS) return;
     resumeCaptureInFlight = true;
     leds?.set('state', 'amber', 'capturing resume slot…');
+    let replyForNack: CapturedReply | null = null;
     void (async () => {
       const reply = await requestCapture('reference', { markSecondaryClean: true });
-      if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) return;
+      replyForNack = reply;
+      if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) {
+        nackCaptureDeltas(reply);
+        return;
+      }
       // An embedded-restore session applies its disks verbatim — no
       // reference reconstruction can ever match it, so a slot written
       // now would be a guaranteed refusal at the next boot. Skip.
       if (reply.referenceValid !== true) {
+        nackCaptureDeltas(reply);
         leds?.set(
           'state', 'dim',
           'no reload-resume this session (restored from a named save; a reload cold-boots)',
         );
         return;
       }
-      if (
-        drive !== null &&
+      // Field fix #4 — the write ORDER is the fix: the slot row lands
+      // FIRST, carrying the deltas the other rows are about to get,
+      // so whatever subset of {slot, fork, chunks} survives a
+      // teardown, the newest committed slot always reconstructs.
+      const carriedPrimary =
+        reply.overlayEpoch != null
+          ? {
+              chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+              chunks: reply.overlayEpoch.chunks.map((c) => ({
+                chunkIndex: c.chunkIndex,
+                bytes: c.bytes,
+              })),
+            }
+          : null;
+      const carriedSecondary =
         reply.secondary != null &&
-        ((reply.secondaryDirtySectors ?? 0) > 0 || force)
-      ) {
-        await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
-        driveBanner.autoSaved();
-        editorPanel?.driveUpdated(reply.secondary.bytes);
-      }
+        reply.secondaryDirtyLbas !== undefined &&
+        reply.secondaryDirtyLbas.length > 0
+          ? reply.secondaryDirtyLbas.map((lba) => ({
+              lba,
+              // slice() copies — a subarray view would drag the whole
+              // drive buffer into the IDB row per sector.
+              bytes: reply.secondary!.bytes.slice(
+                lba * SECTOR_SIZE,
+                (lba + 1) * SECTOR_SIZE,
+              ),
+            }))
+          : null;
       const now = Date.now();
       await machineStore.putState({
         meta: {
@@ -552,8 +604,74 @@ async function init(): Promise<void> {
             tail: txTailSnapshot(),
             viewportY: term.buffer.active.viewportY,
           },
+          carriedPrimary,
+          carriedSecondary,
         },
       });
+      // Fork row SECOND — a teardown here leaves fork(old) + the
+      // slot's carried delta, which still reconstructs.
+      if (
+        drive !== null &&
+        reply.secondary != null &&
+        ((reply.secondaryDirtySectors ?? 0) > 0 || force)
+      ) {
+        try {
+          await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
+          driveBanner.autoSaved();
+          editorPanel?.driveUpdated(reply.secondary.bytes);
+          const confirm: MainToWorkerMessage = {
+            type: 'secondary-persisted',
+            requestId: reply.requestId,
+            ok: true,
+          };
+          worker.postMessage(confirm);
+        } catch (err) {
+          const nack: MainToWorkerMessage = {
+            type: 'secondary-persisted',
+            requestId: reply.requestId,
+            ok: false,
+          };
+          worker.postMessage(nack);
+          throw err;
+        }
+      } else if (reply.secondaryDirtyLbas !== undefined) {
+        // Nothing needed persisting this beat (clean drive) — confirm
+        // only when the pending set really was empty; anything else
+        // stays unconfirmed and re-carries.
+        const settle: MainToWorkerMessage = {
+          type: 'secondary-persisted',
+          requestId: reply.requestId,
+          ok: reply.secondaryDirtyLbas.length === 0,
+        };
+        worker.postMessage(settle);
+      }
+      // Overlay chunks THIRD, then the ack that lets the worker drop
+      // the epoch. A teardown before the commit leaves the slot's
+      // carried copy as the only survivor — exactly what restore folds.
+      if (reply.overlayEpoch != null) {
+        try {
+          await overlayStore.putChunks(ensureOverlayId(), reply.overlayEpoch.chunks, {
+            chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+            baseFingerprint: reply.baseFingerprint ?? bootFingerprint,
+          });
+          const ack: MainToWorkerMessage = {
+            type: 'overlay-swept',
+            epochId: reply.overlayEpoch.epochId,
+            ok: true,
+          };
+          worker.postMessage(ack);
+        } catch (err) {
+          const nack: MainToWorkerMessage = {
+            type: 'overlay-swept',
+            epochId: reply.overlayEpoch.epochId,
+            ok: false,
+            detail: String(err),
+          };
+          worker.postMessage(nack);
+          throw err;
+        }
+      }
+      replyForNack = null; // every delta settled (acked or nacked)
       leds?.set(
         'state', 'green',
         `resume slot fresh — a reload resumes (captured ${new Date().toLocaleTimeString()})`,
@@ -564,7 +682,10 @@ async function init(): Promise<void> {
         resumeSlotBroken = true;
         leds?.set('state', 'red', 'resume machinery degraded — reload cold-boots');
         // Degrade to the pre-M2 pair from here on (stats handler
-        // checks resumeSlotBroken); flush what this beat owed.
+        // checks resumeSlotBroken). Fold any unsettled deltas back
+        // FIRST — the flush below re-sweeps them the moment the
+        // nacked epoch settles.
+        if (replyForNack !== null) nackCaptureDeltas(replyForNack);
         if (latestDirtySectors > 0) maybeAutoPersist(true);
         const flush: MainToWorkerMessage = { type: 'overlay-flush' };
         worker.postMessage(flush);
@@ -1179,8 +1300,20 @@ async function init(): Promise<void> {
       if (
         rec !== null &&
         rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
-        rec.payload.primarySha !== null
+        rec.payload.primarySha !== null &&
+        // Field fix #4: a carried delta needs the slot's base identity
+        // for the worker's fingerprint gate — a row that has one
+        // without the other can't be trusted; cold-boot honestly.
+        (rec.payload.carriedPrimary == null || rec.meta.baseFingerprint !== null)
       ) {
+        const carriedPrimary =
+          rec.payload.carriedPrimary != null && rec.meta.baseFingerprint !== null
+            ? {
+                chunkSizeBytes: rec.payload.carriedPrimary.chunkSizeBytes,
+                fingerprint: rec.meta.baseFingerprint,
+                chunks: rec.payload.carriedPrimary.chunks,
+              }
+            : null;
         boot.config.restore = {
           state: rec.payload.state,
           capturedAt: rec.payload.capturedAt,
@@ -1188,7 +1321,19 @@ async function init(): Promise<void> {
             primarySha: rec.payload.primarySha,
             secondarySha: rec.payload.secondarySha,
           },
+          ...(carriedPrimary !== null ? { carriedPrimary } : {}),
+          ...(rec.payload.carriedSecondary != null
+            ? { carriedSecondary: rec.payload.carriedSecondary }
+            : {}),
         };
+        if (carriedPrimary !== null) {
+          for (const c of carriedPrimary.chunks) {
+            if (c.bytes.buffer instanceof ArrayBuffer) bootTransfers.add(c.bytes.buffer);
+          }
+        }
+        for (const s of rec.payload.carriedSecondary ?? []) {
+          if (s.bytes.buffer instanceof ArrayBuffer) bootTransfers.add(s.bytes.buffer);
+        }
         activeRestoreStateId = ownResumeSlotId;
         pendingTerminalRestore = rec.payload.terminal ?? null;
       }

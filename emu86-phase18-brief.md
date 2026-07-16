@@ -280,3 +280,72 @@ field record. The promotion cadence stays his.
   protocol-layer + new modules.
 - Rule 6 cadence unchanged: full suite gates deploys; the
   equivalence harness gates every M1 device pair.
+
+## 6. Field fix #4 — the torn resume pair (addendum 2026-07-16,
+## approved in-session: "go for #4")
+
+Field (M4 loop, the telnet scenario): "managed to get the telnet
+test to work once. most of the time the disk does not reconstruct
+properly" — the reference restore's honest refusal, nearly every F5.
+
+**Diagnosis (traced in source, this session).** The resume pair —
+overlay chunks in `emu86-overlays`, slot row in `emu86-machines` —
+is written by two independent IDB transactions in different
+databases, so it can never commit atomically. The capture's flush
+posts its chunks BEFORE the reply (the sweep message beats the
+32 MiB snapshot+SHA by hundreds of ms), so the chunk write always
+gets a head start on the slot write; on the forced
+visibilitychange-hidden capture the chunk transaction wins the old
+page's teardown grace and the slot write (queued behind the hash
+AND the fork-row `updateImageBytes`) loses it. The store ends AHEAD
+of the slot's `primarySha`; the reconstruction is refused — the
+check working as designed against genuinely incoherent state we
+ourselves created. Field fix #2 closed the maintenance-sweep race;
+the capture's OWN flush at teardown was the remaining (dominant)
+tear. Same class exists for the secondary via the fork row (masked
+today by the primary refusing first). The one field success = no
+boot-disk writes since the last completed pair (empty flush,
+nothing to tear).
+
+**Fix — the slot carries its own delta.** No write ordering can fix
+this (either surviving half mismatches); atomicity across three IDB
+databases doesn't exist; so make every tear resolve to a consistent
+pair:
+
+1. Reference captures stop posting `overlay-sweep`. The final epoch
+   rides INSIDE the `state-captured` reply; the worker keeps it
+   pending until main acks (existing `overlay-swept` message) and
+   the 10 s ack-timeout still nacks abandoned epochs. Embedded
+   captures stop sweeping entirely (their flush only advanced the
+   store past the resume slot — a smaller cousin of the same tear).
+2. The slot row gains the carried deltas: `carriedPrimary` (the
+   reply's epoch chunks) and `carriedSecondary` (the dirty sectors
+   at capture, bytes sliced from the reply's own secondary
+   snapshot). Main's write order per capture: **slot row FIRST**,
+   then fork row, then overlay chunks, then the acks. A failure
+   anywhere nacks, and the worker folds the delta back.
+3. Secondary dirty-tracking becomes two-phase (`beginClean` /
+   `ackClean` / `nackClean`, the overlay epoch pattern): dirt only
+   clears when main CONFIRMS the fork write committed (new
+   `secondary-persisted` message). Carried is thus always a
+   superset of "differs from the committed row" — over-carrying is
+   idempotent and safe; under-carrying was the bug.
+4. Restore reconstructs base → store fold → carried, hash-checking
+   on SNAPSHOTS (no live-disk mutation until both hashes pass, so a
+   refusal falls back to today's cold boot untouched). On success
+   the carried deltas are written through the OverlayDisk/tracker
+   wrappers — re-hot-mapping them so they re-enter the persistence
+   chain (the bootDeltaLbas seeding precedent; without this, a
+   slot-committed/store-lost resume would strand the carried bytes
+   outside every future reconstruction).
+
+Invariant restored: whatever subset of {slot, fork, chunks}
+survives a teardown, the newest COMMITTED slot row always
+reconstructs — carried ⊇ writes-since-last-acked ⊇
+writes-since-last-committed, and nothing newer than the slot can
+reach the store because chunk/fork writes are ordered after it.
+
+**Residual accepted (unchanged from M2):** the forced 4 MiB sweep
+still writes the store mid-pair under heavy I/O; an F5 inside that
+≤5 s window cold-boots honestly and the next capture heals it.
+Sweep suppression (field fix #2) stays load-bearing.

@@ -49,6 +49,14 @@ const post = (msg: WorkerToMainMessage): void => {
     if (msg.secondary != null && msg.secondary.bytes.buffer instanceof ArrayBuffer) {
       transfers.push(msg.secondary.bytes.buffer);
     }
+    // Field fix #4: a reference capture's carried epoch — chunk
+    // buffers are freshly allocated at sweep time, same as the
+    // overlay-sweep case above.
+    if (msg.overlayEpoch != null) {
+      for (const c of msg.overlayEpoch.chunks) {
+        if (c.bytes.buffer instanceof ArrayBuffer) transfers.push(c.bytes.buffer);
+      }
+    }
     self.postMessage(msg, transfers);
     return;
   }
