@@ -79,6 +79,15 @@ export interface MachineStatePayload {
   /** Reference hashes (resume slot; also stored for named saves as integrity). */
   primarySha: string | null;
   secondarySha: string | null;
+  /**
+   * Main-side terminal snapshot (Phase 18 field-loop UI): the last
+   * ~48 KB of raw serial TX bytes plus the scroll position. Replayed
+   * into xterm before the machine resumes, so the restored screen
+   * looks like the one that was left — deliberately OUTSIDE the
+   * machine state (it's xterm's history, not guest memory). Absent on
+   * rows from before this field; restore just skips the replay.
+   */
+  terminal?: { tail: Uint8Array; viewportY: number } | null;
 }
 
 export interface MachineStateRecord {

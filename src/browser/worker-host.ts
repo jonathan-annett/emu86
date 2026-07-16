@@ -337,6 +337,10 @@ export class WorkerHost {
    * stores a resume slot that is guaranteed to refuse.
    */
   #referenceValid = true;
+  /** Freeze flag (the inspect popup): paced loop steps nothing while set. */
+  #paused = false;
+  /** Guest→fabric frame count since boot (NET LED telemetry). */
+  #nicTxFrames = 0;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -513,6 +517,17 @@ export class WorkerHost {
       // coherent (the snapshot-secondary precedent). Hashing + the
       // reply complete async over the copies; the machine keeps running.
       this.#captureState(msg);
+      return;
+    }
+    if (msg.type === 'set-paused') {
+      // Freeze/unfreeze (inspect popup). The paced loop skips the pacer
+      // every paused turn, so frozen wall time never becomes guest time
+      // — the resume is seamless by the same law boot uses.
+      this.#paused = msg.paused;
+      return;
+    }
+    if (msg.type === 'inspect-machine') {
+      this.#inspectMachine(msg.requestId);
       return;
     }
     if (msg.type === 'reset') {
@@ -706,6 +721,15 @@ export class WorkerHost {
     while (!this.#stopping && this.#machine !== null && this.#console !== null) {
       const machine = this.#machine;
 
+      // Frozen (inspect popup): step nothing, skip the pacer so the
+      // freeze never becomes guest time. The network fabric stays live
+      // between yields — only the CPU clock is ever gated.
+      if (this.#paused) {
+        this.#pacer.skip();
+        await yieldMacrotask();
+        continue;
+      }
+
       // DNS resolve or gateway fetch in flight: stall the machine (and
       // its clock) until it settles — with honest pacing this is
       // bounded belt-and-braces (a slow fetch can still outlast the
@@ -787,6 +811,8 @@ export class WorkerHost {
           ...(this.#overlayDisk !== null
             ? { overlayHotSectors: this.#overlayDisk.hotSectorCount }
             : {}),
+          nicRxFrames: machine.nic.rxAccepted,
+          nicTxFrames: this.#nicTxFrames,
         });
         // Overlay upkeep rides the same heartbeat: nack a timed-out
         // epoch (its writes fold back, newer wins), then sweep under
@@ -988,6 +1014,8 @@ export class WorkerHost {
     this.#captureShaCache = null;
     // Fresh boot: maintenance sweeps run normally until captures start.
     this.#lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
+    this.#paused = false;
+    this.#nicTxFrames = 0;
     if (primary.overlayFingerprint !== undefined) {
       this.#post({
         type: 'overlay-identity',
@@ -1105,7 +1133,10 @@ export class WorkerHost {
       hostClock: this.#hostClock,
       cyclesPerPitTick: 4,
       uartTransmit: (byte: number) => this.#txBuffer.push(byte),
-      nicTransmit: (frame: Uint8Array) => nicPort.transmit(frame),
+      nicTransmit: (frame: Uint8Array) => {
+        this.#nicTxFrames++;
+        nicPort.transmit(frame);
+      },
       // On the TAN every tab needs a unique MAC; solo machines keep
       // the fixed default.
       ...(tanIdentity !== null ? { nicMac: tanIdentity.mac } : {}),
@@ -1516,6 +1547,81 @@ export class WorkerHost {
         requestId: msg.requestId,
         ok: false,
         reason: String(err),
+      });
+    }
+  }
+
+  // ============================================================
+  // Freeze-and-inspect (Phase 18 field-loop UI)
+  // ============================================================
+
+  /**
+   * One coherent machine inspection — registers, code/stack memory
+   * windows, device summaries (the M1 serialize pairs make the device
+   * side free). Synchronous at the message boundary, same coherence
+   * law as capture; pair with set-paused to hold the picture still.
+   */
+  #inspectMachine(requestId: number): void {
+    const machine = this.#machine;
+    if (machine === null) {
+      this.#post({
+        type: 'machine-inspected', requestId, ok: false,
+        reason: 'no machine is running',
+      });
+      return;
+    }
+    try {
+      const cpu = machine.cpu;
+      const r = cpu.regs;
+      const readWindow = (linear: number, length: number): Uint8Array => {
+        const out = new Uint8Array(length);
+        for (let i = 0; i < length; i++) {
+          out[i] = machine.memory.readByte((linear + i) & 0xfffff);
+        }
+        return out;
+      };
+      const codeLinear = ((r.CS << 4) + r.IP) & 0xfffff;
+      const stackLinear = ((r.SS << 4) + r.SP) & 0xfffff;
+      const pic = machine.pic.serializeState();
+      const pit = machine.pit.serializeState();
+      const uart = machine.uart.serializeState();
+      const nic = machine.nic.serializeState();
+      this.#post({
+        type: 'machine-inspected',
+        requestId,
+        ok: true,
+        snapshot: {
+          regs: {
+            ax: r.AX, bx: r.BX, cx: r.CX, dx: r.DX,
+            si: r.SI, di: r.DI, bp: r.BP, sp: r.SP,
+            ip: r.IP, cs: r.CS, ds: r.DS, es: r.ES, ss: r.SS,
+          },
+          flags: cpu.flags.value,
+          halted: cpu.halted,
+          mode: this.#pacer.mode,
+          code: { linear: codeLinear, bytes: readWindow(codeLinear, 64) },
+          stack: { linear: stackLinear, bytes: readWindow(stackLinear, 32) },
+          devices: {
+            pic: { irr: pic.irr, isr: pic.isr, imr: pic.imr, vectorBase: pic.vectorBase },
+            pit: {
+              counter: pit.channels[0].counter,
+              divisor: pit.channels[0].divisor,
+              mode: pit.channels[0].mode,
+            },
+            uart: {
+              ier: uart.ier, lcr: uart.lcr, mcr: uart.mcr,
+              rxQueued: uart.rxFifo.length,
+            },
+            nic: {
+              isr: nic.isr, imr: nic.imr, curr: nic.curr, bnry: nic.bnry,
+              running: machine.nic.running,
+            },
+          },
+        },
+      });
+    } catch (err) {
+      this.#post({
+        type: 'machine-inspected', requestId, ok: false, reason: String(err),
       });
     }
   }

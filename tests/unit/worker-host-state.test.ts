@@ -193,6 +193,46 @@ describe('WorkerHost — capture-state', () => {
   });
 });
 
+describe('WorkerHost — freeze-and-inspect (field-loop UI)', () => {
+  it('inspect-machine returns a coherent snapshot matching the machine', async () => {
+    const rig = await boot({ imageBytes: haltImage() });
+    rig.host.runUntil(200);
+    rig.host.handleMessage({ type: 'inspect-machine', requestId: 42 });
+    const reply = rig.messages.find((m) => m.type === 'machine-inspected');
+    if (reply === undefined || reply.type !== 'machine-inspected') {
+      throw new Error('no machine-inspected reply');
+    }
+    expect(reply).toMatchObject({ requestId: 42, ok: true });
+    const cpu = rig.host.machine?.cpu;
+    if (cpu === undefined || cpu === null || reply.snapshot === undefined) {
+      throw new Error('snapshot missing');
+    }
+    expect(reply.snapshot.regs.ip).toBe(cpu.regs.IP);
+    expect(reply.snapshot.regs.cs).toBe(cpu.regs.CS);
+    expect(reply.snapshot.halted).toBe(cpu.halted);
+    // The code window reads the actual bytes at CS:IP.
+    const linear = ((cpu.regs.CS << 4) + cpu.regs.IP) & 0xfffff;
+    expect(reply.snapshot.code.linear).toBe(linear);
+    expect(reply.snapshot.code.bytes[0]).toBe(
+      rig.host.machine?.memory.readByte(linear),
+    );
+    expect(reply.snapshot.code.bytes.length).toBe(64);
+    expect(reply.snapshot.devices.pic.imr).toBeDefined();
+  });
+
+  it('inspect with no machine replies ok:false; set-paused round-trips', () => {
+    const messages: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({ post: (m) => messages.push(m), autoRun: false });
+    host.handleMessage({ type: 'inspect-machine', requestId: 1 });
+    expect(messages.find((m) => m.type === 'machine-inspected')).toMatchObject({
+      ok: false,
+    });
+    // set-paused is accepted without a machine (a no-op until boot).
+    host.handleMessage({ type: 'set-paused', paused: true });
+    host.handleMessage({ type: 'set-paused', paused: false });
+  });
+});
+
 describe('WorkerHost — restore round trips (the M1 law through the protocol)', () => {
   it('embedded: capture → restore → identical machine, and it stays identical', async () => {
     const a = await boot({ imageBytes: haltImage() });

@@ -309,6 +309,29 @@ export interface CaptureStateMessage {
   markSecondaryClean?: boolean;
 }
 
+/**
+ * Phase 18 field-loop UI: freeze the CPU (the inspect popup's law —
+ * "freezes the cpu until popup dismissed"). While paused the paced
+ * loop steps nothing and skips the pacer every turn, so frozen wall
+ * time never becomes guest time; the network fabric stays live
+ * (frames keep injecting — only the CPU clock is ever gated).
+ */
+export interface SetPausedMessage {
+  type: 'set-paused';
+  paused: boolean;
+}
+
+/**
+ * Phase 18 field-loop UI: one coherent machine inspection — registers,
+ * code/stack windows, device summaries. Machine state is coherent at
+ * every message boundary; pair with {@link SetPausedMessage} to hold
+ * it still while the popup is open.
+ */
+export interface InspectMachineMessage {
+  type: 'inspect-machine';
+  requestId: number;
+}
+
 export type MainToWorkerMessage =
   | BootMessage
   | RxMessage
@@ -319,7 +342,9 @@ export type MainToWorkerMessage =
   | ControlResponseMessage
   | OverlaySweptMessage
   | OverlayFlushMessage
-  | CaptureStateMessage;
+  | CaptureStateMessage
+  | SetPausedMessage
+  | InspectMachineMessage;
 
 // ============================================================
 // Worker → Main
@@ -388,6 +413,13 @@ export interface StatsMessage {
    * data, not taste). Present whenever the overlay engine is attached.
    */
   overlayHotSectors?: number;
+  /**
+   * Cumulative NIC frame counters since boot (Phase 18 field-loop UI —
+   * the NET LED blinks on deltas). rx = frames accepted into the ring;
+   * tx = frames the guest transmitted onto the fabric.
+   */
+  nicRxFrames?: number;
+  nicTxFrames?: number;
 }
 
 /**
@@ -528,6 +560,38 @@ export interface RestoreResultMessage {
   reason?: string;
 }
 
+/** One coherent machine inspection (the freeze-and-inspect popup). */
+export interface InspectSnapshot {
+  regs: {
+    ax: number; bx: number; cx: number; dx: number;
+    si: number; di: number; bp: number; sp: number;
+    ip: number; cs: number; ds: number; es: number; ss: number;
+  };
+  flags: number;
+  halted: boolean;
+  /** Instantaneous speed context (mode; ratio rides the stats LED). */
+  mode: CpuSpeedMode;
+  /** Code window: bytes starting at linear CS:IP. */
+  code: { linear: number; bytes: Uint8Array };
+  /** Stack window: bytes starting at linear SS:SP (little-endian words). */
+  stack: { linear: number; bytes: Uint8Array };
+  devices: {
+    pic: { irr: number; isr: number; imr: number; vectorBase: number };
+    pit: { counter: number; divisor: number; mode: number };
+    uart: { ier: number; lcr: number; mcr: number; rxQueued: number };
+    nic: { isr: number; imr: number; curr: number; bnry: number; running: boolean };
+  };
+}
+
+/** Reply to {@link InspectMachineMessage}. */
+export interface MachineInspectedMessage {
+  type: 'machine-inspected';
+  requestId: number;
+  ok: boolean;
+  reason?: string;
+  snapshot?: InspectSnapshot;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -541,4 +605,5 @@ export type WorkerToMainMessage =
   | OverlaySweepMessage
   | OverlayIdentityMessage
   | StateCapturedMessage
-  | RestoreResultMessage;
+  | RestoreResultMessage
+  | MachineInspectedMessage;

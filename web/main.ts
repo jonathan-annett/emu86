@@ -86,6 +86,8 @@ import {
   resumeSlotLockName,
   type MachineStateMeta,
 } from './machine-store.js';
+import { mountStatusLeds, type StatusLeds } from './status-leds.js';
+import { mountInspectPanel } from './inspect-panel.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -266,6 +268,39 @@ async function init(): Promise<void> {
   // or deletes a refused resume slot.
   let activeRestoreStateId: string | null = null;
 
+  // Phase 18 field-loop UI: the restored screen. A rolling tail of raw
+  // serial TX bytes rides the resume slot (and named saves); replaying
+  // it through xterm before the machine resumes reproduces the screen
+  // byte-faithfully — colors, cursor and all — because it is literally
+  // the same output stream. Deliberately main-side state: this is
+  // xterm's history, not guest memory.
+  const TX_TAIL_CAP = 48 * 1024;
+  const txTailChunks: Uint8Array[] = [];
+  let txTailTotal = 0;
+  function txTailAppend(bytes: Uint8Array): void {
+    txTailChunks.push(new Uint8Array(bytes));
+    txTailTotal += bytes.byteLength;
+    while (txTailTotal > TX_TAIL_CAP && txTailChunks.length > 1) {
+      const dropped = txTailChunks.shift();
+      txTailTotal -= dropped?.byteLength ?? 0;
+    }
+  }
+  function txTailSnapshot(): Uint8Array {
+    const out = new Uint8Array(txTailTotal);
+    let off = 0;
+    for (const chunk of txTailChunks) {
+      out.set(chunk, off);
+      off += chunk.byteLength;
+    }
+    return out;
+  }
+  let pendingTerminalRestore: { tail: Uint8Array; viewportY: number } | null = null;
+
+  // Status LEDs (mounted onto the header once the DOM is settled).
+  let leds: StatusLeds | null = null;
+  let lastNetFrames = 0;
+  let lastDiskHot = 0;
+
   // Boot script (Phase 14 — autoexec): a prompt-aware runner types the
   // active script into the console as the guest becomes ready. Fed from
   // the same TX stream the terminal renders; sends through the same rx
@@ -414,6 +449,18 @@ async function init(): Promise<void> {
     });
   }
 
+  // Freeze-and-inspect plumbing (Phase 18 field-loop UI).
+  type InspectedReply = WorkerToMainMessage & { type: 'machine-inspected' };
+  const inspectSinks = new Map<number, (reply: InspectedReply) => void>();
+  function requestInspect(): Promise<InspectedReply> {
+    return new Promise((resolve) => {
+      const requestId = nextCaptureId++; // shared id space, distinct sink maps
+      inspectSinks.set(requestId, resolve);
+      const msg: MainToWorkerMessage = { type: 'inspect-machine', requestId };
+      worker.postMessage(msg);
+    });
+  }
+
   /** Rough stored footprint for the meta row (UI only, not quota math). */
   function roughStateSize(reply: CapturedReply, gzBytes = 0): number {
     const ramBytes = (reply.state?.ram.pages.length ?? 0) * 4096;
@@ -452,13 +499,20 @@ async function init(): Promise<void> {
     if (resumeCaptureInFlight || resumeSlotBroken) return;
     if (!force && Date.now() - lastResumeCaptureAt < RESUME_CAPTURE_MS) return;
     resumeCaptureInFlight = true;
+    leds?.set('state', 'amber', 'capturing resume slot…');
     void (async () => {
       const reply = await requestCapture('reference', { markSecondaryClean: true });
       if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) return;
       // An embedded-restore session applies its disks verbatim — no
       // reference reconstruction can ever match it, so a slot written
       // now would be a guaranteed refusal at the next boot. Skip.
-      if (reply.referenceValid !== true) return;
+      if (reply.referenceValid !== true) {
+        leds?.set(
+          'state', 'dim',
+          'no reload-resume this session (restored from a named save; a reload cold-boots)',
+        );
+        return;
+      }
       if (
         drive !== null &&
         reply.secondary != null &&
@@ -488,12 +542,21 @@ async function init(): Promise<void> {
           secondary: null,
           primarySha: reply.primarySha ?? null,
           secondarySha: reply.secondarySha ?? null,
+          terminal: {
+            tail: txTailSnapshot(),
+            viewportY: term.buffer.active.viewportY,
+          },
         },
       });
+      leds?.set(
+        'state', 'green',
+        `resume slot fresh — a reload resumes (captured ${new Date().toLocaleTimeString()})`,
+      );
     })()
       .catch((err: unknown) => {
         console.warn('[emu86] resume-slot capture failed:', err);
         resumeSlotBroken = true;
+        leds?.set('state', 'red', 'resume machinery degraded — reload cold-boots');
         // Degrade to the pre-M2 pair from here on (stats handler
         // checks resumeSlotBroken); flush what this beat owed.
         if (latestDirtySectors > 0) maybeAutoPersist(true);
@@ -623,6 +686,10 @@ async function init(): Promise<void> {
             : null,
         primarySha: reply.primarySha ?? null,
         secondarySha: reply.secondarySha ?? null,
+        terminal: {
+          tail: txTailSnapshot(),
+          viewportY: term.buffer.active.viewportY,
+        },
       },
     });
   }
@@ -676,6 +743,7 @@ async function init(): Promise<void> {
     const msg = event.data;
     if (msg.type === 'tx') {
       term.write(msg.bytes);
+      txTailAppend(msg.bytes);
       if (autoexec !== null && autoexec.active) {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
       }
@@ -719,6 +787,14 @@ async function init(): Promise<void> {
       }
       return;
     }
+    if (msg.type === 'machine-inspected') {
+      const sink = inspectSinks.get(msg.requestId);
+      if (sink !== undefined) {
+        inspectSinks.delete(msg.requestId);
+        sink(msg);
+      }
+      return;
+    }
     if (msg.type === 'restore-result') {
       // Phase 18 M2 honesty: a fresh resume is silent (the crown's
       // "nothing breaks"); a stale one says when it's from; a refusal
@@ -726,6 +802,20 @@ async function init(): Promise<void> {
       // slot is deleted — it describes a world that no longer exists,
       // and the next hidden-capture rewrites it.
       if (msg.ok) {
+        // The restored screen: replay the captured TX tail through
+        // xterm — literally the same output stream, so the rendering
+        // (colors, cursor position) reproduces itself. Then re-scroll.
+        const terminal = pendingTerminalRestore;
+        if (terminal !== null && terminal.tail.byteLength > 0) {
+          term.reset();
+          txTailAppend(terminal.tail); // the tail is history going forward too
+          term.write(terminal.tail, () => {
+            try {
+              const delta = terminal.viewportY - term.buffer.active.viewportY;
+              if (delta !== 0) term.scrollLines(delta);
+            } catch { /* scroll restore is a nicety, never an error */ }
+          });
+        }
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
           term.writeln(`[resumed machine state from ${describeAge(age)} ago]`);
@@ -874,6 +964,35 @@ async function init(): Promise<void> {
       } else if (latestDirtySectors > 0) {
         maybeAutoPersist();
       }
+      // LEDs sample the same beat. Idle detection: an ELKS at the
+      // prompt executes a few-thousand instr/s of timer ticks; a busy
+      // one runs six figures and up.
+      if (leds !== null) {
+        const busy = msg.instrPerSec >= 100_000;
+        leds.set(
+          'cpu',
+          msg.mode === 'turbo' ? 'blue' : busy ? 'green' : 'dim',
+          `${msg.instrPerSec.toLocaleString()} instr/s · ` +
+            `${(msg.realTimeRatio * 100).toFixed(0)}% of 4.77 MHz · ${msg.mode}`,
+        );
+        const hot = (msg.overlayHotSectors ?? 0) + (msg.secondaryDirtySectors ?? 0);
+        leds.set(
+          'disk',
+          hot > 0 ? 'amber' : 'dim',
+          `${msg.overlayHotSectors ?? 0} unswept boot-disk sectors · ` +
+            `${msg.secondaryDirtySectors ?? 0} unpersisted drive sectors`,
+        );
+        if (hot !== lastDiskHot) leds.flash('disk');
+        lastDiskHot = hot;
+        const frames = (msg.nicRxFrames ?? 0) + (msg.nicTxFrames ?? 0);
+        leds.set(
+          'net',
+          frames > 0 ? 'green' : 'dim',
+          `${msg.nicRxFrames ?? 0} frames in · ${msg.nicTxFrames ?? 0} frames out`,
+        );
+        if (frames > lastNetFrames) leds.flash('net');
+        lastNetFrames = frames;
+      }
       console.debug(
         `[emu86] ${msg.instrPerSec.toLocaleString()} instr/s ` +
           `(${(msg.realTimeRatio * 100).toFixed(0)}% of 4.77 MHz), ` +
@@ -1021,6 +1140,7 @@ async function init(): Promise<void> {
           bootTransfers.add(secondaryBytes.buffer);
         }
         activeRestoreStateId = pendingRestoreId;
+        pendingTerminalRestore = rec.payload.terminal ?? null;
         term.writeln(
           `[restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…]`,
         );
@@ -1043,6 +1163,7 @@ async function init(): Promise<void> {
           },
         };
         activeRestoreStateId = ownResumeSlotId;
+        pendingTerminalRestore = rec.payload.terminal ?? null;
       }
     }
   } catch (err) {
@@ -1105,6 +1226,31 @@ async function init(): Promise<void> {
         },
         remove: (stateId: string) => machineStore.deleteState(stateId),
       },
+    },
+  });
+
+  // Phase 18 field-loop UI: the LED strip in the header and the
+  // freeze-and-inspect popup. Both are read-only affordances over the
+  // running machine; degraded mounts (missing header) just skip.
+  const headerH1 = document.querySelector<HTMLElement>('header h1');
+  if (headerH1 !== null) {
+    leds = mountStatusLeds(headerH1);
+    leds.set('cpu', 'dim', 'waiting for the first stats beat');
+    leds.set('disk', 'dim', 'no disk activity yet');
+    leds.set('net', 'dim', 'no frames yet');
+    leds.set('state', 'dim', 'no resume capture yet');
+  }
+  mountInspectPanel({
+    setPaused: (paused) => {
+      const msg: MainToWorkerMessage = { type: 'set-paused', paused };
+      worker.postMessage(msg);
+    },
+    inspect: async () => {
+      const reply = await requestInspect();
+      if (!reply.ok || reply.snapshot === undefined) {
+        throw new Error(reply.reason ?? 'inspection failed');
+      }
+      return reply.snapshot;
     },
   });
 
