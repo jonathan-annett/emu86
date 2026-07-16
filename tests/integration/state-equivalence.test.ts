@@ -318,6 +318,117 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
     })();
   }, 60_000);
 
+  it('XMS M3(a): the equivalence law holds on a 4 MiB machine with live XMS state', () => {
+    // The xms brief's owed acceptance: "the M1 pairs are size-agnostic;
+    // prove it." A 4 MiB ELKS with INT15 XMS enabled runs its ext
+    // buffers ABOVE 1 MiB — so the capture must carry resident pages
+    // beyond the 8086's classic megabyte, and the restore must land
+    // them. N is past xms_init + the root mount (the buffer cache has
+    // real extended-memory content by then).
+    const N = 3_000_000;
+    const M = 1_000_000;
+    const image = new Uint8Array(
+      readFileSync(resolve('reference/elks-images-hd', 'hd32-minix.img')),
+    );
+
+    const bootHost = async (
+      config: BootConfig,
+    ): Promise<{ host: WorkerHost; messages: WorkerToMainMessage[]; tx: number[] }> => {
+      const messages: WorkerToMainMessage[] = [];
+      const tx: number[] = [];
+      const host = new WorkerHost({
+        post: (m) => {
+          messages.push(m);
+          if (m.type === 'tx') tx.push(...m.bytes);
+        },
+        autoRun: false,
+        hostClock: new InMemoryHostClock(),
+      });
+      host.handleMessage({ type: 'boot', config });
+      await host.whenIdle();
+      return { host, messages, tx };
+    };
+
+    const snapDisk = (d: {
+      sectorCount: number;
+      readSector(lba: number): Uint8Array;
+    }): Uint8Array => {
+      const out = new Uint8Array(d.sectorCount * 512);
+      for (let lba = 0; lba < d.sectorCount; lba++) out.set(d.readSector(lba), lba * 512);
+      return out;
+    };
+
+    return (async () => {
+      const a = await bootHost({
+        imageBytes: new Uint8Array(image),
+        diskClass: 'hard-disk',
+        memorySize: 4 * 1024 * 1024,
+      });
+      a.host.runUntil(N);
+      const bootText = String.fromCharCode(...a.tx);
+      expect(bootText).toContain('xms: 3072K'); // INT15 XMS is live, not decorative
+
+      a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'embedded' });
+      let reply: StateCapturedMessage | undefined;
+      for (let i = 0; i < 400 && reply === undefined; i++) {
+        reply = a.messages.find(
+          (m): m is StateCapturedMessage => m.type === 'state-captured',
+        );
+        if (reply === undefined) await new Promise((r) => setTimeout(r, 5));
+      }
+      if (reply?.state === undefined || reply.capturedAt === undefined ||
+          reply.primary === undefined) {
+        throw new Error(`capture failed: ${reply?.reason ?? 'no reply'}`);
+      }
+
+      // The proof this test exists for: the snapshot holds RESIDENT
+      // PAGES ABOVE 1 MiB — extended memory is real captured state,
+      // not an address-mask trick.
+      const pageSize = reply.state.ram.pageSize;
+      const pagesAbove1MiB = reply.state.ram.pages.filter(
+        (p) => p.pageId * pageSize >= 0x100000,
+      );
+      expect(pagesAbove1MiB.length).toBeGreaterThan(0);
+
+      const b = await bootHost({
+        memorySize: 4 * 1024 * 1024,
+        restore: {
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          embedded: {
+            primary: {
+              imageBytes: reply.primary.bytes,
+              geometry: reply.primary.geometry,
+              diskClass: reply.primary.diskClass,
+            },
+            secondary: null,
+          },
+        },
+      });
+      const result = b.messages.find((m) => m.type === 'restore-result');
+      expect(result).toMatchObject({ ok: true });
+
+      a.host.runUntil(M);
+      b.host.runUntil(M);
+      if (a.host.machine === null || b.host.machine === null) {
+        throw new Error('machine missing after run');
+      }
+      expect(
+        diffStates(
+          captureMachineState(a.host.machine),
+          captureMachineState(b.host.machine),
+        ),
+      ).toEqual([]);
+      // The disks too — the law is whole-machine.
+      if (a.host.machine.disk === null || b.host.machine.disk === null) {
+        throw new Error('disk missing after run');
+      }
+      expect(
+        diffBytes('disk', snapDisk(a.host.machine.disk), snapDisk(b.host.machine.disk)),
+      ).toEqual([]);
+    })();
+  }, 180_000);
+
   it('M2 REFERENCE round trip over ELKS with per-boot stamps (the field case)', () => {
     // Jonathan's field failure, as a regression test: an autologin boot
     // stamps the image through minix-fs (wall-clock mtimes, allocator
