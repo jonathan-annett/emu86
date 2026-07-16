@@ -62,6 +62,7 @@ function makeBootHarness(opts: {
     hostClock: new InMemoryHostClock(),
     warn: () => { /* silent */ },
     eoiPort: 0x20,
+    extendedMemoryKb: 0,
   };
   return { cpu, memory, ctx };
 }

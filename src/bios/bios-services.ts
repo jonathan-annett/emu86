@@ -62,6 +62,12 @@ export interface BiosContext {
   warn: (msg: string) => void;
   /** Optional EOI port (for INT 8 timer handler). Default 0x20. */
   eoiPort: number;
+  /**
+   * KiB of memory above 1 MiB (INT 15h AH=88h — XMS brief M1). The
+   * Machine computes it from its address-space size: 0 for the
+   * canonical 1 MiB PC, 3072 for a 4 MiB machine, etc.
+   */
+  extendedMemoryKb: number;
 }
 
 /** Base BIOS drive number for a class — 0x00 for floppy, 0x80 for HD. */
@@ -313,6 +319,42 @@ export function int12Handler(cpu: CPU8086, _ctx: BiosContext): void {
   const bda = new BiosDataArea(cpu.memory);
   const kb = bda.readWord(BDA.MEMORY_SIZE_KB);
   cpu.regs.AX = kb === 0 ? MEMORY_SIZE_KB_DEFAULT : kb;
+}
+
+// ============================================================
+// INT 15h — System services
+// ============================================================
+
+/**
+ * XMS brief M1 (field-diagnosed 2026-07-16): with NO handler at this
+ * vector, the stub's bare IRET returned AX unchanged — so ELKS's
+ * `AH=88h` extended-memory probe read back 0x8800 and believed in
+ * "34816K" of phantom XMS, whose 64 K of ext buffers then fell back
+ * into MAIN ram when the A20 test failed. AH=88h now answers honestly
+ * from the machine's real address space (0 on a 1 MiB machine — the
+ * kernel skips XMS entirely and the 64 K comes home).
+ *
+ * Every OTHER function deliberately reproduces the pre-handler
+ * behaviour byte-for-byte: registers untouched, pushed flags
+ * untouched, exactly the bare IRET — anything already booting against
+ * that contract keeps booting. New functions (the XMS block move)
+ * get cases here as the brief lands them.
+ */
+export function int15Handler(cpu: CPU8086, ctx: BiosContext): void {
+  const ah = cpu.regs.AH;
+  switch (ah) {
+    case 0x88: {
+      // Get Extended Memory Size: AX = KiB above 1 MiB, CF clear.
+      cpu.regs.AX = Math.min(0xFFFF, Math.max(0, ctx.extendedMemoryKb));
+      setReturnCF(cpu, false);
+      return;
+    }
+    default:
+      // Bare-IRET compatibility — see the docblock. Not even a warn:
+      // ELKS probes several INT 15h functions per boot and a per-boot
+      // warning would be noise about behaviour that is deliberate.
+      return;
+  }
 }
 
 // ============================================================
@@ -721,6 +763,7 @@ export function registerBiosHandlers(
     [0x11, int11Handler],
     [0x12, int12Handler],
     [0x13, int13Handler],
+    [0x15, int15Handler],
     [0x16, int16Handler],
     [0x19, int19Handler],
     [0x1A, int1aHandler],

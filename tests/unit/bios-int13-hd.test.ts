@@ -46,6 +46,7 @@ function makeHdHarness(geometry = { cylinders: 63, heads: 16, sectorsPerTrack: 6
     hostClock: new InMemoryHostClock(),
     warn: () => { /* silent */ },
     eoiPort: 0x20,
+    extendedMemoryKb: 0,
   };
   return { cpu, memory, ctx };
 }
@@ -66,6 +67,7 @@ function makeFloppyHarness(): Harness {
     hostClock: new InMemoryHostClock(),
     warn: () => { /* silent */ },
     eoiPort: 0x20,
+    extendedMemoryKb: 0,
   };
   return { cpu, memory, ctx };
 }

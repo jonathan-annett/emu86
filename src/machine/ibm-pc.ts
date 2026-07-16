@@ -409,6 +409,9 @@ export class IBMPCMachine {
         hostClock: clockRef!,
         warn: warn ?? (() => { /* silent default */ }),
         eoiPort: 0x20,
+        // XMS brief M1: what INT 15h AH=88h answers. 0 on the
+        // canonical 1 MiB machine — no phantom extended memory.
+        extendedMemoryKb: Math.max(0, (memorySize - 0x100000) / 1024),
       };
       registerBiosHandlers(traps!, bios!.layout, ctx);
     }

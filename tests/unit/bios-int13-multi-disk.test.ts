@@ -68,6 +68,7 @@ function makeHarness(primary: Slot, secondary: Slot | null): Harness {
     hostClock: new InMemoryHostClock(),
     warn: () => { /* silent */ },
     eoiPort: 0x20,
+    extendedMemoryKb: 0,
   };
   return { cpu, memory, ctx, primary: primaryDisk, secondary: secondaryDisk };
 }

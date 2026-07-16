@@ -16,6 +16,7 @@ import {
   int10Handler,
   int11Handler,
   int12Handler,
+  int15Handler,
   int13Handler,
   int16Handler,
   int19Handler,
@@ -81,6 +82,7 @@ function makeHarness(opts: { withDisk?: boolean; diskClass?: 'floppy' | 'hard-di
     hostClock,
     warn: (m) => warnings.push(m),
     eoiPort: 0x20,
+    extendedMemoryKb: 0,
   };
 
   return {
@@ -252,6 +254,41 @@ describe('INT 12h — memory size', () => {
     const h = makeHarness();
     int12Handler(h.cpu, h.ctx);
     expect(h.cpu.regs.AX).toBe(MEMORY_SIZE_KB_DEFAULT);
+  });
+});
+
+// ============================================================
+// INT 15h — system services (XMS brief M1)
+// ============================================================
+
+describe('INT 15h — system services', () => {
+  it('AH=88h answers the ctx extended-memory size, CF clear', () => {
+    const h = makeHarness();
+    h.cpu.regs.AX = 0x8800;
+    h.ctx.extendedMemoryKb = 3072;
+    int15Handler(h.cpu, h.ctx);
+    expect(h.cpu.regs.AX).toBe(3072);
+    expect(readPushedFlags(h) & 0x0001).toBe(0);
+  });
+
+  it('AH=88h is 0 on a 1 MiB machine — the 0x8800 phantom is dead', () => {
+    // The field bug: with no handler, the bare IRET left AX = 0x8800
+    // and ELKS believed in "34816K" of extended memory.
+    const h = makeHarness();
+    h.cpu.regs.AX = 0x8800;
+    int15Handler(h.cpu, h.ctx); // harness ctx: extendedMemoryKb 0
+    expect(h.cpu.regs.AX).toBe(0);
+  });
+
+  it('unlisted functions reproduce the bare IRET: registers untouched', () => {
+    const h = makeHarness();
+    h.cpu.regs.AX = 0x2403; // an A20 query nothing implements
+    h.cpu.regs.BX = 0x1234;
+    const flagsBefore = readPushedFlags(h);
+    int15Handler(h.cpu, h.ctx);
+    expect(h.cpu.regs.AX).toBe(0x2403);
+    expect(h.cpu.regs.BX).toBe(0x1234);
+    expect(readPushedFlags(h)).toBe(flagsBefore);
   });
 });
 
