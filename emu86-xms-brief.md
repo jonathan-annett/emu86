@@ -25,6 +25,19 @@ direction: "we should try to support XMS."
 
 ## 2. Why real XMS is cheap HERE
 
+**Upstream confirmation (Jonathan surfaced it, 2026-07-16):** ELKS
+author Greg Haerr, in ghaerr/elks#2338 (comment 2867766741): the
+kernel and applications never run outside 1 MB+64 K; the 32-bit
+`addr_t/ramdesc_t` linear addresses live ONLY in the buffer/ramdisk
+subsystems and go through `xms_fmemcpy` — which in INT15 mode is the
+BIOS block move. So the trap service below covers the entirety of how
+ELKS will ever touch extended memory. He also confirms the access
+method is auto-selected per CPU at startup — no bootopts required on
+our 8086. (The issue's exotic 24/29-bit CPU modes — V33 BRKXA etc. —
+are recorded as NOT our path; though his opening question, "do you
+have an emulator platform such enhancements could be tested on?", is
+one emu86 could conceivably answer some day.)
+
 ELKS ships an XMS mode built for exactly this substrate: `XMS_INT15`
 (xms.c) — buffers live above 1 MB and every access goes through the
 BIOS block-move (`bios_block_movew`, the INT 15h copy service). No
