@@ -143,8 +143,10 @@ describe('WorkerHost — capture-state', () => {
     const reply = await awaitCaptured(rig);
     expect(reply.ok).toBe(true);
     expect(reply.state?.v).toBe(1);
-    expect(reply.primarySha).toMatch(/^[0-9a-f]{64}$/);
-    expect(reply.primary).toBeUndefined(); // reference mode: hashes only
+    // §7: reference captures pin inputs — a store digest, no image sha.
+    expect(reply.storeDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(reply.primarySha).toBeUndefined();
+    expect(reply.primary).toBeUndefined(); // reference mode: no image bytes
     expect(reply.secondary?.bytes[9 * SECTOR_SIZE]).toBe(0x77);
     expect(reply.secondarySha).toMatch(/^[0-9a-f]{64}$/);
     expect(reply.secondaryDirtySectors).toBe(1);
@@ -189,25 +191,45 @@ describe('WorkerHost — capture-state', () => {
     expect(tracked.dirtySectorCount).toBe(0);
   });
 
-  it('the sha cache serves idle repeat captures and invalidates on a disk write', async () => {
+  it('the store digest tracks acked epochs and excludes the carried delta (§7)', async () => {
     const rig = await boot({ imageBytes: haltImage() });
-    rig.host.runUntil(200);
+    workTheMachine(rig); // guest writes → the first capture mints an epoch
 
     rig.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
     const first = await awaitCaptured(rig);
+    if (first.overlayEpoch == null) throw new Error('no epoch in capture 1');
+    expect(first.storeDigest).toMatch(/^[0-9a-f]{64}$/);
     rig.messages.length = 0;
 
-    // Idle: no writes since — the cached hash must be IDENTICAL.
+    // Idle repeat with the epoch still UNACKED: the capture re-mints
+    // the same delta (fold-back), the mirror is unchanged — digest
+    // identical.
     rig.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
     const second = await awaitCaptured(rig);
-    expect(second.primarySha).toBe(first.primarySha);
+    expect(second.storeDigest).toBe(first.storeDigest);
+    if (second.overlayEpoch == null) throw new Error('no epoch in capture 2');
     rig.messages.length = 0;
 
-    // A write invalidates: the hash must change.
-    rig.host.overlayDisk?.writeSector(50, sector(0x99));
+    // Ack it (the store committed): the mirror advances, and the next
+    // idle capture has NO epoch to carry — the digest now includes the
+    // acked chunks instead of excluding them.
+    rig.host.handleMessage({
+      type: 'overlay-swept', epochId: second.overlayEpoch.epochId, ok: true,
+    });
     rig.host.handleMessage({ type: 'capture-state', requestId: 3, disks: 'reference' });
     const third = await awaitCaptured(rig);
-    expect(third.primarySha).not.toBe(first.primarySha);
+    expect(third.overlayEpoch).toBeNull();
+    expect(third.storeDigest).not.toBe(first.storeDigest);
+    rig.messages.length = 0;
+
+    // New writes mint a fresh epoch; its indexes are excluded, so if
+    // they cover exactly the acked chunks the digest can regress —
+    // write a NEW chunk's sector so the digests must differ.
+    rig.host.overlayDisk?.writeSector(1500, sector(0x99));
+    rig.host.handleMessage({ type: 'capture-state', requestId: 4, disks: 'reference' });
+    const fourth = await awaitCaptured(rig);
+    expect(fourth.overlayEpoch).not.toBeNull();
+    expect(fourth.storeDigest).toBe(third.storeDigest); // new chunk excluded, mirror unchanged
   });
 });
 
@@ -298,9 +320,11 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     const reply = await awaitCaptured(a);
     expect(reply.ok).toBe(true);
     if (reply.state === undefined || reply.capturedAt === undefined ||
-        reply.primarySha === undefined) {
+        reply.storeDigest === undefined) {
       throw new Error('reference capture reply incomplete');
     }
+    // §7: reference captures never hash the image — no primarySha.
+    expect(reply.primarySha).toBeUndefined();
 
     // Field fix #4: the capture posts NO overlay-sweep — its final
     // epoch rides the reply, for main to store slot-first.
@@ -308,7 +332,8 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     if (reply.overlayEpoch == null) throw new Error('no overlayEpoch in reply');
     expect(reply.overlayEpoch.chunks.length).toBeGreaterThan(0);
 
-    // Main's happy path, simulated: the epoch reached the store.
+    // Main's happy path, simulated: the epoch reached the store AND
+    // the slot row carries it (they always travel together since #4).
     const b = await boot({
       imageBytes: new Uint8Array(image), // the pristine base, as a reload would fetch
       overlay: {
@@ -320,8 +345,13 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
         state: reply.state,
         capturedAt: reply.capturedAt,
         expected: {
-          primarySha: reply.primarySha,
+          storeDigest: reply.storeDigest,
           secondarySha: reply.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+          fingerprint: bootFingerprint(a),
+          chunks: reply.overlayEpoch.chunks,
         },
       },
     });
@@ -346,25 +376,46 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     expect(compareHosts(a.host, b.host)).toEqual([]);
   });
 
-  it('reference: a hash mismatch refuses and cold-boots — honestly', async () => {
+  it('reference: a store missing an ACKED epoch refuses and cold-boots — honestly', async () => {
     const image = haltImage();
     const a = await boot({ imageBytes: new Uint8Array(image) });
+    const fingerprint = bootFingerprint(a);
     workTheMachine(a);
+
+    // Epoch 1 is acked — the worker's mirror (and the slot's digest)
+    // now assume the store holds it.
     a.host.handleMessage({ type: 'capture-state', requestId: 3, disks: 'reference' });
+    const first = await awaitCaptured(a);
+    if (first.overlayEpoch == null) throw new Error('capture 1 carried no epoch');
+    a.host.handleMessage({
+      type: 'overlay-swept', epochId: first.overlayEpoch.epochId, ok: true,
+    });
+
+    a.host.overlayDisk?.writeSector(700, sector(0xe1));
+    a.messages.length = 0;
+    a.host.handleMessage({ type: 'capture-state', requestId: 4, disks: 'reference' });
     const reply = await awaitCaptured(a);
-    if (reply.state === undefined || reply.capturedAt === undefined) {
-      throw new Error('capture reply incomplete');
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.storeDigest === undefined || reply.overlayEpoch == null) {
+      throw new Error('capture 2 reply incomplete');
     }
 
-    // The reconstruction is missing the sweeps (a lost final epoch).
+    // The store lost the ACKED epoch (rows vanished) — only the
+    // carried delta survives. The digest must refuse: the slot's
+    // mirror view includes epoch 1, the store has nothing.
     const b = await boot({
       imageBytes: new Uint8Array(image),
       restore: {
         state: reply.state,
         capturedAt: reply.capturedAt,
         expected: {
-          primarySha: reply.primarySha ?? '0'.repeat(64),
-          secondarySha: null,
+          storeDigest: reply.storeDigest,
+          secondarySha: reply.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+          fingerprint,
+          chunks: reply.overlayEpoch.chunks,
         },
       },
     });
@@ -430,7 +481,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     a.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
     const second = await awaitCaptured(a);
     if (second.state === undefined || second.capturedAt === undefined ||
-        second.primarySha === undefined || second.overlayEpoch == null) {
+        second.storeDigest === undefined || second.overlayEpoch == null) {
       throw new Error('capture 2 reply incomplete');
     }
 
@@ -445,7 +496,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
         state: second.state,
         capturedAt: second.capturedAt,
         expected: {
-          primarySha: second.primarySha,
+          storeDigest: second.storeDigest,
           secondarySha: second.secondarySha ?? null,
         },
         carriedPrimary: {
@@ -482,7 +533,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     });
     const reply = await awaitCaptured(a);
     if (reply.state === undefined || reply.capturedAt === undefined ||
-        reply.primarySha === undefined || reply.secondary == null ||
+        reply.storeDigest === undefined || reply.secondary == null ||
         reply.secondaryDirtyLbas === undefined) {
       throw new Error('capture reply incomplete');
     }
@@ -510,7 +561,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
         state: reply.state,
         capturedAt: reply.capturedAt,
         expected: {
-          primarySha: reply.primarySha,
+          storeDigest: reply.storeDigest,
           secondarySha: reply.secondarySha ?? null,
         },
         ...(reply.overlayEpoch != null
@@ -536,6 +587,69 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     expect(tracked.dirtySectorCount).toBe(2);
   });
 
+  it('an epoch committed to the store but never acked is subsumed by the carried delta (§7)', async () => {
+    const image = haltImage();
+    const a = await boot({ imageBytes: new Uint8Array(image) });
+    const fingerprint = bootFingerprint(a);
+    workTheMachine(a);
+
+    // Capture 1's epoch reaches the store, but the ACK is lost — the
+    // worker folds it back (nack) while the rows sit committed. This
+    // is the committed-but-unacked window the digest's exclusion rule
+    // exists for.
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const first = await awaitCaptured(a);
+    if (first.overlayEpoch == null) throw new Error('capture 1 carried no epoch');
+    const committedRows = first.overlayEpoch.chunks;
+    a.host.handleMessage({
+      type: 'overlay-swept', epochId: first.overlayEpoch.epochId, ok: false,
+    });
+
+    // More writes, then capture 2 — its carried delta is a SUPERSET
+    // of the unacked epoch (fold-back semantics).
+    a.host.overlayDisk?.writeSector(2700, sector(0xf2));
+    a.messages.length = 0;
+    a.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
+    const second = await awaitCaptured(a);
+    if (second.state === undefined || second.capturedAt === undefined ||
+        second.storeDigest === undefined || second.overlayEpoch == null) {
+      throw new Error('capture 2 reply incomplete');
+    }
+    const carriedIdx = new Set(second.overlayEpoch.chunks.map((c) => c.chunkIndex));
+    for (const c of committedRows) expect(carriedIdx.has(c.chunkIndex)).toBe(true);
+
+    // Boot with the store AHEAD of the mirror (it holds the unacked
+    // rows) — the exclusion drops them on both sides, the fold's
+    // carried layer overwrites them with capture-time bytes, resume
+    // succeeds.
+    const b = await boot({
+      imageBytes: new Uint8Array(image),
+      overlay: {
+        chunks: committedRows,
+        chunkSizeBytes: first.overlayEpoch.chunkSizeBytes,
+        fingerprint,
+      },
+      restore: {
+        state: second.state,
+        capturedAt: second.capturedAt,
+        expected: {
+          storeDigest: second.storeDigest,
+          secondarySha: second.secondarySha ?? null,
+        },
+        carriedPrimary: {
+          chunkSizeBytes: second.overlayEpoch.chunkSizeBytes,
+          fingerprint,
+          chunks: second.overlayEpoch.chunks,
+        },
+      },
+    });
+    expect(restoreResult(b)).toMatchObject({ ok: true });
+    expect(compareHosts(a.host, b.host)).toEqual([]);
+    a.host.runUntil(300);
+    b.host.runUntil(300);
+    expect(compareHosts(a.host, b.host)).toEqual([]);
+  });
+
   it('a corrupt carried delta refuses and cold-boots', async () => {
     const image = haltImage();
     const a = await boot({ imageBytes: new Uint8Array(image) });
@@ -543,7 +657,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
     const reply = await awaitCaptured(a);
     if (reply.state === undefined || reply.capturedAt === undefined ||
-        reply.primarySha === undefined) {
+        reply.storeDigest === undefined) {
       throw new Error('capture reply incomplete');
     }
     const b = await boot({
@@ -552,7 +666,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
         state: reply.state,
         capturedAt: reply.capturedAt,
         expected: {
-          primarySha: reply.primarySha,
+          storeDigest: reply.storeDigest,
           secondarySha: reply.secondarySha ?? null,
         },
         carriedPrimary: {
@@ -576,7 +690,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
     const reply = await awaitCaptured(a);
     if (reply.state === undefined || reply.capturedAt === undefined ||
-        reply.primarySha === undefined || reply.overlayEpoch == null) {
+        reply.storeDigest === undefined || reply.overlayEpoch == null) {
       throw new Error('capture reply incomplete');
     }
     const b = await boot({
@@ -585,7 +699,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
         state: reply.state,
         capturedAt: reply.capturedAt,
         expected: {
-          primarySha: reply.primarySha,
+          storeDigest: reply.storeDigest,
           secondarySha: reply.secondarySha ?? null,
         },
         carriedPrimary: {

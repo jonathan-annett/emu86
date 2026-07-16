@@ -153,13 +153,13 @@ export interface BootConfig {
    *     overlay fold, no bootopts patch, no M3 stamps. Re-stamping
    *     would fight the captured RAM's buffer cache (§1.4).
    *   - `expected` (the reload-resume slot, D2(b) reference): the
-   *     NORMAL pipeline runs (base → overlay fold → patch → stamps)
-   *     and the result must hash to `primarySha` (secondary to
-   *     `secondarySha`) or the restore is REFUSED — the machine
-   *     cold-boots the resolved disk instead and a
-   *     {@link RestoreResultMessage} says so honestly. Any drift
-   *     (lost final sweep, changed autologin, different octet's
-   *     stamps) lands here by construction.
+   *     PURE pipeline runs (base → store fold → carried delta) and
+   *     its INPUTS must verify (§7: base fingerprint, store digest,
+   *     carried in the slot row; secondary still by `secondarySha`)
+   *     or the restore is REFUSED — the machine cold-boots the
+   *     resolved disk instead and a {@link RestoreResultMessage}
+   *     says so honestly. Any drift (lost store rows, foreign base,
+   *     corrupt delta) lands here by construction.
    *
    * Exactly one of `embedded` / `expected` should be set.
    */
@@ -178,20 +178,27 @@ export interface RestoreSpec {
     secondary?: (DiskSlotSpec & { imageBytes: Uint8Array }) | null;
   };
   /**
-   * D2(b): SHA-256 hexes the reference reconstruction must match.
+   * D2(b): what the reference reconstruction must match.
    *
    * Field fix #3 (the reconstruction law): the reference rebuild is
-   * PURE `base + overlay fold` — no bootopts patch, no M3 stamps.
-   * The boot deltas (patch + stamp sectors) are seeded into the
-   * overlay hot map at boot time and ride the store like any guest
-   * write, so the fold reproduces the captured image byte-for-byte
-   * by construction. Re-applying them at restore can never be
-   * byte-stable: minix-fs writes stamp wall-clock mtimes, and the
-   * block allocator runs against a different filesystem state than
-   * the boot did (both found live, Jonathan's field pass).
+   * PURE `base + overlay fold + carried` — no bootopts patch, no M3
+   * stamps. The boot deltas (patch + stamp sectors) are seeded into
+   * the overlay hot map at boot time and ride the store like any
+   * guest write, so the fold reproduces the captured image
+   * byte-for-byte by construction.
+   *
+   * §7 (the 0-stale capture): the primary is verified by INPUT
+   * pinning, not an output hash — `storeDigest` is the
+   * {@link chunkSetDigest} of the store's rows excluding the carried
+   * delta's indexes, compared against the same digest over the
+   * worker's acked-chunk mirror at capture. Base identity is the
+   * fingerprint gate; carried rides the slot row itself. This is
+   * what removed the 32 MiB copy+hash from the capture path. The
+   * secondary keeps its full-image sha for v1 (drives are small).
    */
   expected?: {
-    primarySha: string;
+    /** chunkSetDigest(store rows \ carried indexes) at capture. */
+    storeDigest: string;
     /** null = no secondary was attached at capture. */
     secondarySha: string | null;
   };
@@ -578,8 +585,21 @@ export interface StateCapturedMessage {
   capturedAt?: number;
   /** SHA-256 of the PRISTINE base this boot (the overlay identity), or null (no primary fingerprint era). */
   baseFingerprint?: string | null;
-  /** SHA-256 of the primary's CURRENT image at capture (stamps + writes included). */
+  /**
+   * 'embedded' mode only (named-save integrity): SHA-256 of the
+   * primary's image at capture. Reference captures stopped hashing
+   * the image entirely (§7 — the 0-stale capture); they carry
+   * `storeDigest` instead.
+   */
   primarySha?: string;
+  /**
+   * 'reference' mode (§7): chunkSetDigest of the worker's acked-chunk
+   * mirror minus the carried epoch's indexes — the slot row's
+   * `expected.storeDigest`. Undefined when the mirror is invalid
+   * (chunk-size era mismatch): main must skip the slot write, the
+   * next boot cold-boots honestly.
+   */
+  storeDigest?: string;
   /** SHA-256 of the secondary at capture, or null when none attached. */
   secondarySha?: string | null;
   /** 'embedded' mode only. */

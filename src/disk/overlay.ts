@@ -137,6 +137,28 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 /**
+ * The store digest (Phase 18 §7 — the 0-stale capture): a stable
+ * summary of an overlay chunk SET, hashed as sorted
+ * `chunkIndex:sha256(chunkBytes)` lines under a chunk-size preamble.
+ * `exclude` drops the indexes a carried delta covers — both the
+ * capture side (worker mirror) and the boot side (store rows) exclude
+ * the same set, which is what makes committed-but-unacked epochs
+ * harmless: their sectors are subsumed by the carried delta and never
+ * enter the comparison.
+ */
+export async function chunkSetDigest(
+  chunkSizeBytes: number,
+  entries: Iterable<readonly [number, string]>,
+  exclude: ReadonlySet<number>,
+): Promise<string> {
+  const lines = [...entries]
+    .filter(([index]) => !exclude.has(index))
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, hash]) => `${index}:${hash}`);
+  return sha256Hex(new TextEncoder().encode(`${chunkSizeBytes}\n${lines.join('\n')}`));
+}
+
+/**
  * Disk decorator + overlay epoch state machine. Wraps the primary
  * disk transparently — the machine and BIOS see only {@link Disk}.
  */

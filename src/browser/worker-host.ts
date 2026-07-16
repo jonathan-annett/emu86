@@ -54,7 +54,9 @@ import {
 import { InMemoryDisk, SECTOR_SIZE, WriteTrackingDisk, type Disk } from '../disk/disk.js';
 import {
   FORCED_SWEEP_BYTES,
+  OVERLAY_CHUNK_BYTES,
   OverlayDisk,
+  chunkSetDigest,
   foldOverlay,
   sha256Hex,
   type OverlayChunk,
@@ -282,13 +284,16 @@ function snapshotDisk(disk: Disk): Uint8Array {
 }
 
 /**
- * Field fix #4: lay a carried overlay epoch over a disk snapshot.
- * Returns false instead of throwing on malformed input (bad chunk
- * span, out-of-range offset) — a corrupt slot row refuses the
- * restore, it must never kill the boot.
+ * Field fix #4 (validation form since §7): a carried overlay epoch is
+ * structurally sound for a disk of `diskSizeBytes` — sector-aligned
+ * spans inside the disk. Returns false instead of throwing — a
+ * corrupt slot row refuses the restore, it must never kill the boot.
+ * (§7 removed the snapshot application this used to do: nothing
+ * output-side is hashed anymore, so bounds are all that's checked
+ * before the accepted delta writes through the wrappers.)
  */
-function applyCarriedChunks(
-  snap: Uint8Array,
+function validCarriedChunks(
+  diskSizeBytes: number,
   carried: { chunkSizeBytes: number; chunks: readonly OverlayChunk[] },
 ): boolean {
   const span = carried.chunkSizeBytes;
@@ -298,11 +303,10 @@ function applyCarriedChunks(
     if (
       !Number.isInteger(offset) || offset < 0 ||
       chunk.bytes.length % SECTOR_SIZE !== 0 ||
-      offset + chunk.bytes.length > snap.length
+      offset + chunk.bytes.length > diskSizeBytes
     ) {
       return false;
     }
-    snap.set(chunk.bytes, offset);
   }
   return true;
 }
@@ -366,13 +370,25 @@ export class WorkerHost {
   #tan: TabAreaNetwork | null = null;
   /** This boot's pristine-primary SHA-256 (Phase 18 M2 pairs captures with it). */
   #bootFingerprint: string | null = null;
+  // ---- §7: the acked-chunk hash mirror (the 0-stale capture) ----
   /**
-   * Capture sha cache (Phase 18 M2 field fix): the heartbeat resume
-   * capture runs every ~5 s, and an idle machine's boot disk doesn't
-   * change — `writesSeen` unchanged means the last hash (and for
-   * reference captures, the skipped 32 MB copy) still holds.
+   * chunkIndex → sha256(chunkBytes) for every chunk the overlay STORE
+   * is known to hold: seeded from the boot fold's rows, advanced when
+   * an epoch's ack confirms its store commit. `chunkSetDigest` over
+   * this map (minus a capture's carried indexes) is what the slot row
+   * pins instead of a 32 MiB image hash — reference captures stopped
+   * copying/hashing the image entirely.
    */
-  #captureShaCache: { writesSeen: number; sha: string } | null = null;
+  #mirror = new Map<number, string>();
+  /** False when the store's chunk-size era differs from the engine's —
+   *  the mirror can't compose and reference captures are refused. */
+  #mirrorValid = true;
+  /** Serializes every mirror mutation/read — message order becomes
+   *  mirror order (acks merge before the next capture's digest). */
+  #mirrorChain: Promise<void> = Promise.resolve();
+  /** Per-epoch chunk hashes, staged at sweep time (bytes copied BEFORE
+   *  the chunks transfer to main), merged into the mirror on ack. */
+  readonly #epochHashes = new Map<number, Map<number, string>>();
   /** Pacer-time of the last 'reference' capture — gates maintenance sweeps. */
   #lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
   /**
@@ -546,8 +562,13 @@ export class WorkerHost {
       // and no-op inside the engine.
       const overlay = this.#overlayDisk;
       if (overlay !== null) {
-        if (msg.ok) overlay.ackSweep(msg.epochId);
-        else overlay.nackSweep(msg.epochId);
+        if (msg.ok) {
+          overlay.ackSweep(msg.epochId);
+          this.#mirrorAckEpoch(msg.epochId); // §7: the store holds it now
+        } else {
+          overlay.nackSweep(msg.epochId);
+          this.#mirrorDropEpoch(msg.epochId);
+        }
         if (this.#overlayFlushWanted) {
           this.#overlayFlushWanted = false;
           this.#emitOverlaySweep(this.#pacerNow());
@@ -1064,6 +1085,15 @@ export class WorkerHost {
     // them outside every future reconstruction).
     let acceptedCarried: { chunkSizeBytes: number; chunks: OverlayChunk[] } | null = null;
     let acceptedCarriedSec: Array<{ lba: number; bytes: Uint8Array }> | null = null;
+    // §7: hash the offered store rows ONCE — the restore verification
+    // compares them against the slot's storeDigest, and the mirror
+    // seeds from them below. O(store bytes), boot-time only.
+    const offeredHashes = new Map<number, string>();
+    if (config.overlay !== undefined && embeddedRestore === undefined) {
+      for (const c of config.overlay.chunks) {
+        offeredHashes.set(c.chunkIndex, await sha256Hex(c.bytes));
+      }
+    }
     if (embeddedRestore !== undefined) {
       primary = await this.#resolveSlot(
         'primary', primarySpec, [], undefined, undefined, /* verbatim: */ true,
@@ -1072,41 +1102,53 @@ export class WorkerHost {
       primary = await this.#resolveSlot(
         'primary', primarySpec, [], config.overlay, undefined, /* verbatim: */ true,
       );
-      // Field fix #4: reconstruction = base → store fold → carried
-      // delta. The carried layers apply to SNAPSHOT copies for the
-      // hash checks, so a refusal falls back to a cold boot on
-      // untouched disks.
+      // Field fix #4 + §7: reconstruction = base → store fold →
+      // carried delta, verified by INPUT pinning — base via the
+      // fingerprint gate, store via the chunk-set digest, carried via
+      // the slot row itself. No output hash exists to compare; the
+      // bytes are right by construction when the inputs are. A
+      // refusal falls back to a cold boot on untouched disks.
       const carried = config.restore?.carriedPrimary ?? null;
       const carriedSec = config.restore?.carriedSecondary ?? null;
-      if (carried !== null && carried.fingerprint !== primary.overlayFingerprint) {
+      const diskSizeBytes = primary.disk.sectorCount * SECTOR_SIZE;
+      const offeredChunkSize = config.overlay?.chunkSizeBytes ?? OVERLAY_CHUNK_BYTES;
+      if (
+        offeredChunkSize !== OVERLAY_CHUNK_BYTES ||
+        (carried !== null && carried.chunkSizeBytes !== OVERLAY_CHUNK_BYTES)
+      ) {
+        restoreRefusal = 'machine state is from a different overlay era';
+      } else if (carried !== null && carried.fingerprint !== primary.overlayFingerprint) {
         restoreRefusal = 'machine state was carried against a different base image';
+      } else if (carried !== null && !validCarriedChunks(diskSizeBytes, carried)) {
+        restoreRefusal = 'saved machine state carried a corrupt boot-disk delta';
       } else {
-        const primSnap = snapshotDisk(primary.disk);
-        if (carried !== null && !applyCarriedChunks(primSnap, carried)) {
-          restoreRefusal = 'saved machine state carried a corrupt boot-disk delta';
+        // The store side: only rows the fold actually APPLIED count —
+        // a refused fold (base changed underneath) must fail the
+        // digest, not sneak past it.
+        const storeHashes =
+          primary.overlayApplied === true ? offeredHashes : new Map<number, string>();
+        const exclude = new Set((carried?.chunks ?? []).map((c) => c.chunkIndex));
+        const digest = await chunkSetDigest(OVERLAY_CHUNK_BYTES, storeHashes, exclude);
+        if (digest !== expected.storeDigest) {
+          restoreRefusal = 'boot disk reconstruction does not match the capture';
         } else {
-          const primarySha = await sha256Hex(primSnap);
-          if (primarySha !== expected.primarySha) {
-            restoreRefusal = 'boot disk reconstruction does not match the capture';
-          } else {
-            let secondarySha: string | null = null;
-            let secOk = true;
-            if (secondary !== null) {
-              const secSnap = snapshotDisk(secondary.disk);
-              if (carriedSec !== null && !applyCarriedSectors(secSnap, carriedSec)) {
-                restoreRefusal = 'saved machine state carried a corrupt drive delta';
-                secOk = false;
-              } else {
-                secondarySha = await sha256Hex(secSnap);
-              }
+          let secondarySha: string | null = null;
+          let secOk = true;
+          if (secondary !== null) {
+            const secSnap = snapshotDisk(secondary.disk);
+            if (carriedSec !== null && !applyCarriedSectors(secSnap, carriedSec)) {
+              restoreRefusal = 'saved machine state carried a corrupt drive delta';
+              secOk = false;
+            } else {
+              secondarySha = await sha256Hex(secSnap);
             }
-            if (secOk && secondarySha !== expected.secondarySha) {
-              restoreRefusal = 'secondary drive does not match the capture';
-            }
-            if (restoreRefusal === null) {
-              acceptedCarried = carried;
-              acceptedCarriedSec = carriedSec;
-            }
+          }
+          if (secOk && secondarySha !== expected.secondarySha) {
+            restoreRefusal = 'secondary drive does not match the capture';
+          }
+          if (restoreRefusal === null) {
+            acceptedCarried = carried;
+            acceptedCarriedSec = carriedSec;
           }
         }
       }
@@ -1131,9 +1173,22 @@ export class WorkerHost {
     // under the tab's machine state) and main moves sweeps to a fresh
     // overlayId.
     this.#bootFingerprint = primary.overlayFingerprint ?? null;
-    // A fresh boot's OverlayDisk restarts writesSeen at 0 over a
-    // possibly-different image — a stale cache entry would falsely hit.
-    this.#captureShaCache = null;
+    // §7: seed the acked-chunk mirror from the very rows the fold
+    // consumed — the boot's verification hashed them already, and
+    // from here every acked epoch advances the mirror in lockstep
+    // with the store. A refused fold seeds EMPTY (main moves sweeps
+    // to a fresh overlayId, so the store is effectively new too). A
+    // chunk-size era mismatch invalidates the whole scheme for this
+    // boot — reference captures then refuse honestly.
+    this.#mirrorChain = Promise.resolve();
+    this.#epochHashes.clear();
+    this.#mirrorValid =
+      (config.overlay?.chunkSizeBytes ?? OVERLAY_CHUNK_BYTES) === OVERLAY_CHUNK_BYTES;
+    this.#mirror =
+      this.#mirrorValid && primary.overlayApplied === true
+        ? new Map(offeredHashes)
+        : new Map();
+    if (!this.#mirrorValid) this.#referenceValid = false;
     // Fresh boot: maintenance sweeps run normally until captures start.
     this.#lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
     this.#paused = false;
@@ -1520,6 +1575,7 @@ export class WorkerHost {
     if (chunks === null) return;
     this.#overlayLastSweepAt = now;
     this.#overlayPendingSince = now;
+    this.#stageEpochHashes(epochId, chunks); // before the buffers transfer
     this.#post({
       type: 'overlay-sweep',
       epochId,
@@ -1535,6 +1591,7 @@ export class WorkerHost {
     const pendingId = overlay.pendingEpochId;
     if (pendingId !== null && now - this.#overlayPendingSince >= OVERLAY_ACK_TIMEOUT_MS) {
       overlay.nackSweep(pendingId);
+      this.#mirrorDropEpoch(pendingId);
     }
     // Reference captures own the sweep cadence while they flow — see
     // RESUME_SWEEP_SUPPRESS_MS. Post-capture writes stay hot until the
@@ -1549,6 +1606,67 @@ export class WorkerHost {
     }
   }
 
+  /** Chain a mirror operation — errors are swallowed per-op so one
+   *  failed hash can never wedge the chain (§7 mirror). */
+  #chainMirrorOp(op: () => Promise<void> | void): Promise<void> {
+    const run = async (): Promise<void> => {
+      try {
+        await op();
+      } catch (err) {
+        // A mirror op that fails poisons the digest scheme for this
+        // boot — refuse future reference slots rather than lie.
+        this.#mirrorValid = false;
+        console.warn('WorkerHost: mirror op failed —', err);
+      }
+    };
+    this.#mirrorChain = this.#mirrorChain.then(run);
+    return this.#mirrorChain;
+  }
+
+  /**
+   * Stage an epoch's chunk hashes (§7). The byte copies happen HERE,
+   * synchronously — the caller is about to transfer the chunk buffers
+   * to main, and hashing a detached buffer would poison the mirror.
+   */
+  #stageEpochHashes(epochId: number, chunks: readonly OverlayChunk[]): void {
+    const copies = chunks.map((c) => ({
+      chunkIndex: c.chunkIndex,
+      bytes: new Uint8Array(c.bytes),
+    }));
+    void this.#chainMirrorOp(async () => {
+      const hashes = new Map<number, string>();
+      for (const c of copies) hashes.set(c.chunkIndex, await sha256Hex(c.bytes));
+      this.#epochHashes.set(epochId, hashes);
+    });
+  }
+
+  /** The epoch's store commit was confirmed — its hashes join the mirror. */
+  #mirrorAckEpoch(epochId: number): void {
+    void this.#chainMirrorOp(() => {
+      const hashes = this.#epochHashes.get(epochId);
+      this.#epochHashes.delete(epochId);
+      if (hashes === undefined) return;
+      for (const [index, hash] of hashes) this.#mirror.set(index, hash);
+    });
+  }
+
+  /** The epoch never reached the store — drop its staged hashes. */
+  #mirrorDropEpoch(epochId: number): void {
+    void this.#chainMirrorOp(() => {
+      this.#epochHashes.delete(epochId);
+    });
+  }
+
+  /** digest(mirror \ exclude) — the capture side of the §7 pairing. */
+  async #mirrorDigest(exclude: ReadonlySet<number>): Promise<string> {
+    let out = '';
+    await this.#chainMirrorOp(async () => {
+      out = await chunkSetDigest(OVERLAY_CHUNK_BYTES, this.#mirror, exclude);
+    });
+    if (out === '') throw new Error('mirror digest unavailable');
+    return out;
+  }
+
   /**
    * Immediate, complete flush (the reset path): fold any pending epoch
    * back under the hot map and sweep everything in one final epoch.
@@ -1557,7 +1675,10 @@ export class WorkerHost {
     const overlay = this.#overlayDisk;
     if (overlay === null) return;
     const pendingId = overlay.pendingEpochId;
-    if (pendingId !== null) overlay.nackSweep(pendingId);
+    if (pendingId !== null) {
+      overlay.nackSweep(pendingId);
+      this.#mirrorDropEpoch(pendingId);
+    }
     this.#emitOverlaySweep(this.#pacerNow());
   }
 
@@ -1566,13 +1687,16 @@ export class WorkerHost {
   // ============================================================
 
   /**
-   * Capture the running machine (brief §1.4 revised by field fix #4):
+   * Capture the running machine (brief §1.4, revised by fix #4 + §7):
    * a 'reference' capture's final overlay epoch rides IN the reply —
    * main writes it into the slot row BEFORE the overlay store, so the
-   * reconstruction (base → store fold → carried delta) lands on
-   * `primarySha` no matter which of those writes a teardown kills.
-   * Machine state + disk copies are synchronous at this message
-   * boundary; hashes and the reply complete async over the copies.
+   * reconstruction (base → store fold → carried delta) verifies no
+   * matter which of those writes a teardown kills. §7 made the whole
+   * path O(delta): the slot pins the store by digest (the acked-chunk
+   * mirror), and nothing copies or hashes the 32 MiB image anymore —
+   * this is what lets the F5-forced capture land inside the teardown
+   * grace. Machine state + drive copies are synchronous at this
+   * message boundary; the delta hashes and the reply complete async.
    *
    * Secondary dirty-tracking is two-phase for the same reason: the
    * dirty set moves to pending at capture (its LBAs ride the reply as
@@ -1624,32 +1748,29 @@ export class WorkerHost {
       const overlay = this.#overlayDisk;
       if (msg.disks === 'reference' && overlay !== null) {
         const pendingId = overlay.pendingEpochId;
-        if (pendingId !== null) overlay.nackSweep(pendingId);
+        if (pendingId !== null) {
+          overlay.nackSweep(pendingId);
+          this.#mirrorDropEpoch(pendingId);
+        }
         const epochId = this.#overlayEpochSeq++;
         const chunks = overlay.beginSweep(epochId);
         if (chunks !== null) {
           const sweepNow = this.#pacerNow();
           this.#overlayLastSweepAt = sweepNow;
           this.#overlayPendingSince = sweepNow;
+          this.#stageEpochHashes(epochId, chunks); // before the reply transfers them
           overlayEpoch = { epochId, chunkSizeBytes: overlay.chunkBytes, chunks };
         }
       }
 
-      // Phase 2, synchronous copies at this message boundary. The
-      // primary copy+hash is skipped when nothing wrote the boot disk
-      // since the last capture (the heartbeat-idle case — see the
-      // cache field); embedded captures always copy (bytes must ride).
+      // Phase 2, synchronous copies at this message boundary. §7: a
+      // reference capture never touches the primary's bytes — the
+      // slot pins the INPUTS (base fingerprint + store digest +
+      // carried epoch), so only embedded captures copy the image.
       const state = captureMachineState(machine);
       const capturedAt = Date.now();
       const embedded = msg.disks === 'embedded';
-      const writesSeen = this.#overlayDisk?.writesSeen ?? -1;
-      const cached =
-        this.#captureShaCache !== null &&
-        writesSeen >= 0 &&
-        this.#captureShaCache.writesSeen === writesSeen
-          ? this.#captureShaCache.sha
-          : null;
-      const primaryBytes = embedded || cached === null ? snapshotDisk(primaryDisk) : null;
+      const primaryBytes = embedded ? snapshotDisk(primaryDisk) : null;
       const primaryGeometry = primaryDisk.geometry;
       const secondaryDisk = this.#secondaryDisk;
       const secondaryDirtySectors = secondaryDisk !== null ? secondaryDisk.dirtySectorCount : 0;
@@ -1670,20 +1791,21 @@ export class WorkerHost {
       const secondaryDiskClass = machine.secondaryDiskClass;
       const referenceValid = this.#referenceValid;
 
-      // Async completion: hashes over the copies, then the reply.
+      // Async completion: the delta-sized hashes, then the reply.
       void (async () => {
         try {
-          let primarySha: string;
-          if (primaryBytes !== null) {
+          // Embedded keeps its full-image integrity sha (user-paced
+          // named save). Reference computes the §7 store digest over
+          // the mirror — microseconds, whatever the disk size.
+          let primarySha: string | undefined;
+          let storeDigest: string | undefined;
+          if (embedded && primaryBytes !== null) {
             primarySha = await sha256Hex(primaryBytes);
-          } else if (cached !== null) {
-            primarySha = cached;
-          } else {
-            // Unreachable: primaryBytes is only skipped when cached hit.
-            throw new Error('capture: no primary bytes and no cached sha');
-          }
-          if (writesSeen >= 0) {
-            this.#captureShaCache = { writesSeen, sha: primarySha };
+          } else if (!embedded && this.#mirrorValid) {
+            const exclude = new Set(
+              (overlayEpoch?.chunks ?? []).map((c) => c.chunkIndex),
+            );
+            storeDigest = await this.#mirrorDigest(exclude);
           }
           const secondarySha =
             secondaryBytes !== null ? await sha256Hex(secondaryBytes) : null;
@@ -1694,7 +1816,8 @@ export class WorkerHost {
             state,
             capturedAt,
             baseFingerprint,
-            primarySha,
+            ...(primarySha !== undefined ? { primarySha } : {}),
+            ...(storeDigest !== undefined ? { storeDigest } : {}),
             secondarySha,
             secondaryDirtySectors,
             referenceValid,

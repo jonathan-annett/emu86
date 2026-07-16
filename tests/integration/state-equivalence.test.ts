@@ -368,15 +368,15 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
         if (reply === undefined) await new Promise((r) => setTimeout(r, 5));
       }
       if (reply?.state === undefined || reply.capturedAt === undefined ||
-          reply.primarySha === undefined) {
+          reply.storeDigest === undefined) {
         throw new Error(`capture failed: ${reply?.reason ?? 'no reply'}`);
       }
       expect(reply.referenceValid).toBe(true);
 
       // Main's role: the store accumulated every maintenance sweep,
-      // and (field fix #4) the capture's own final epoch rides the
-      // REPLY — main persists it after the slot row. Fold both here,
-      // reply last (it is the newest).
+      // and (field fix #4 / §7) the capture's own final epoch rides
+      // the REPLY — into the slot row (carried) AND the store. Fold
+      // both here, reply last (it is the newest).
       const chunkMap = new Map<number, { chunkIndex: number; bytes: Uint8Array }>();
       let chunkSizeBytes = 32 * 1024;
       let fingerprint = '';
@@ -407,9 +407,18 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
           state: reply.state,
           capturedAt: reply.capturedAt,
           expected: {
-            primarySha: reply.primarySha,
+            storeDigest: reply.storeDigest,
             secondarySha: reply.secondarySha ?? null,
           },
+          ...(reply.overlayEpoch != null
+            ? {
+                carriedPrimary: {
+                  chunkSizeBytes: reply.overlayEpoch.chunkSizeBytes,
+                  fingerprint,
+                  chunks: reply.overlayEpoch.chunks,
+                },
+              }
+            : {}),
         },
       });
       const result = b.messages.find((m) => m.type === 'restore-result');

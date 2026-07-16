@@ -545,7 +545,9 @@ async function init(): Promise<void> {
       // An embedded-restore session applies its disks verbatim — no
       // reference reconstruction can ever match it, so a slot written
       // now would be a guaranteed refusal at the next boot. Skip.
-      if (reply.referenceValid !== true) {
+      // (§7: a chunk-size era mismatch also lands here — the worker
+      // reports referenceValid false and sends no storeDigest.)
+      if (reply.referenceValid !== true || reply.storeDigest === undefined) {
         nackCaptureDeltas(reply);
         leds?.set(
           'state', 'dim',
@@ -599,8 +601,9 @@ async function init(): Promise<void> {
           capturedAt: reply.capturedAt,
           primary: null,
           secondary: null,
-          primarySha: reply.primarySha ?? null,
+          primarySha: null, // §7: reference slots pin inputs, not the image
           secondarySha: reply.secondarySha ?? null,
+          storeDigest: reply.storeDigest,
           terminal: {
             tail: txTailSnapshot(),
             viewportY: term.buffer.active.viewportY,
@@ -1298,10 +1301,16 @@ async function init(): Promise<void> {
       }
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
       const rec = await machineStore.getState(ownResumeSlotId);
+      // §7: only storeDigest slots can be verified now. A pre-§7 row
+      // (primarySha era) cold-boots once, honestly, and is deleted —
+      // the next heartbeat writes a new-style slot.
+      if (rec !== null && (rec.payload.storeDigest ?? null) === null) {
+        void machineStore.deleteState(ownResumeSlotId).catch(() => { /* best effort */ });
+      }
       if (
         rec !== null &&
         rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
-        rec.payload.primarySha !== null &&
+        typeof rec.payload.storeDigest === 'string' &&
         // Field fix #4: a carried delta needs the slot's base identity
         // for the worker's fingerprint gate — a row that has one
         // without the other can't be trusted; cold-boot honestly.
@@ -1319,7 +1328,7 @@ async function init(): Promise<void> {
           state: rec.payload.state,
           capturedAt: rec.payload.capturedAt,
           expected: {
-            primarySha: rec.payload.primarySha,
+            storeDigest: rec.payload.storeDigest,
             secondarySha: rec.payload.secondarySha,
           },
           ...(carriedPrimary !== null ? { carriedPrimary } : {}),

@@ -76,9 +76,19 @@ export interface MachineStatePayload {
   primary: StoredDisk | null;
   /** Embedded secondary; null when none was attached or kind is resume. */
   secondary: StoredDisk | null;
-  /** Reference hashes (resume slot; also stored for named saves as integrity). */
+  /** Named-save integrity sha of the embedded primary; null on resume
+   *  slots since §7 (reference captures stopped hashing the image). */
   primarySha: string | null;
   secondarySha: string | null;
+  /**
+   * §7 (the 0-stale capture), resume slots only: chunkSetDigest of
+   * the overlay store's rows minus the carried delta's indexes, as
+   * the worker's acked-chunk mirror saw them at capture. Replaces
+   * primarySha as the reference verification. Rows without it
+   * (pre-§7) can't be verified the new way — boot skips and deletes
+   * them; the next heartbeat writes a new-style slot.
+   */
+  storeDigest?: string | null;
   /**
    * Main-side terminal snapshot (Phase 18 field-loop UI): the last
    * ~48 KB of raw serial TX bytes plus the scroll position. Replayed

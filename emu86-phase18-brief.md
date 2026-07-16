@@ -349,3 +349,63 @@ reach the store because chunk/fork writes are ordered after it.
 still writes the store mid-pair under heavy I/O; an F5 inside that
 ≤5 s window cold-boots honestly and the next capture heals it.
 Sweep suppression (field fix #2) stays load-bearing.
+
+## 7. The 0-stale capture (addendum 2026-07-16, approved: "ok lets
+## do these in order" — first in the queue)
+
+Field result that motivates it: with fix #4 in, the IDLE telnet
+crown passes ("sitting at the command line in a remote tab was
+absolutely fine") but an ACTIVE-flow session dies — tetris on the
+remote tab, F5 the client, and the peer's ktcp exhausts retransmits
+("tcp retrans: max retries exceeded"). Cause: the resume slot rides
+the 5 s heartbeat, so a restore rewinds the client's TCP state to
+before bytes the peer has already seen ACKed and discarded —
+unrecoverable by construction, however patient the peer. The only
+fix is freshness: capture AT the F5, not near it.
+
+What blocks freshness: every reference capture copies and SHA-256s
+the whole 32 MiB boot disk to produce `expected.primarySha`
+(~300 ms+), so the visibilitychange-forced capture loses the
+teardown race and the slot stays heartbeat-stale.
+
+**The change: verify the INPUTS, not the output.** The
+reconstruction is base → store fold → carried delta; byte-identity
+is guaranteed by construction if the inputs are pinned:
+
+1. base: the fingerprint gate (exists, unchanged);
+2. carried: rides the slot row itself (fix #4, trusted);
+3. the store: NEW — pinned by a **store digest**: sha-256 over the
+   sorted (chunkIndex, sha-256(chunkBytes)) pairs of the store's
+   rows, EXCLUDING indexes the carried delta covers. The worker
+   maintains the acked-chunk hash mirror incrementally (hash each
+   epoch's chunks at sweep time — O(delta); ≤2048 entries even for
+   a 64 MB disk), seeded at boot from the offered fold's rows.
+   Capture computes digest(mirror \ carried) in microseconds.
+
+The exclusion is what makes committed-but-unacked epochs harmless:
+a nacked epoch's sectors fold back into the hot map, so the next
+carried delta SUBSUMES it — both sides of the comparison drop those
+indexes, and the fold overwrites them with capture-time bytes
+anyway (the fix-#4 invariant, reused).
+
+Consequences:
+- Reference captures stop copying/hashing the image entirely (the
+  writesSeen sha cache retires with it). Forced-capture critical
+  path becomes RAM copy + drive snapshot + delta hashes + one IDB
+  put — expected to land inside the teardown grace; F5 resumes
+  from NOW. The crown's boundary moves: active-flow sessions
+  survive if the peer's retry budget outlasts the reload gap.
+- The secondary keeps its full-image sha for v1 (drives are small;
+  ~40-80 ms). If the field pass says the window is still tight,
+  the recorded escalation is fork-row generation pinning
+  (accepted-generations = {this beat, last confirmed} — the
+  beginClean invariant in uuid form).
+- `expected.primarySha` leaves the reference path; named saves keep
+  their embedded-bytes sha untouched. Pre-upgrade resume slots
+  (no storeDigest) refuse once, honestly — one cold boot per tab
+  at deploy, and the next heartbeat writes a new-style slot.
+- Chunk-size era guard: the mirror only composes when the store's
+  chunkSizeBytes equals the engine's; a mismatch refuses resume
+  (rare-to-never; 32 KB since Phase 17).
+- Fix #2's sweep suppression and fix #4's ordering stay
+  load-bearing and unchanged.
