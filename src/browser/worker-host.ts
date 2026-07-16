@@ -939,6 +939,19 @@ export class WorkerHost {
         netLine = ['net=ne0'];
       }
     }
+    // XMS (brief M2): machines with memory above 1 MiB stamp the two
+    // lines that turn it on. xms=int15 selects the BIOS block-move
+    // method (the default gate is DISABLED without a bootopts line);
+    // hma=off drops the image's hma=kernel via the patcher's
+    // key-prefix rule — stock ELKS auto-disables INT15 XMS when the
+    // kernel sits in the HMA (xms.c AUTODISABLE), and the tunable XMS
+    // buffer pool is worth more than the fixed 64 K of HMA kernel.
+    const memorySize = config.memorySize ?? 0x100000;
+    const xmsLines: string[] =
+      memorySize > 0x100000 && embeddedRestore === undefined
+        ? ['xms=int15', 'hma=off']
+        : [];
+
     const bootLines: string[] = [
       ...(tanIdentity !== null && embeddedRestore === undefined
         ? [
@@ -949,6 +962,7 @@ export class WorkerHost {
           ]
         : []),
       ...netLine,
+      ...xmsLines,
     ];
 
     const primarySpec: DiskSlotSpec =
@@ -1121,6 +1135,7 @@ export class WorkerHost {
     }
 
     const machine = new IBMPCMachine({
+      memorySize,
       disk: overlayPrimary,
       diskClass: primary.diskClass,
       ...(secondary && trackedSecondary

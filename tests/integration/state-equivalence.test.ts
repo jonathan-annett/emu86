@@ -277,6 +277,47 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
     })();
   }, 120_000);
 
+  it('XMS M1/M2: a 4 MiB machine boots ELKS with INT15 XMS enabled', () => {
+    // The XMS brief's acceptance seed: honest AH=88h + the AH=87h
+    // block move + xms=int15/hma=off stamps → ELKS's xms_init takes
+    // the INT15 path instead of "disabled, A20 error". The kernel
+    // then runs its ext buffers ABOVE 1 MiB — the 64 K that used to
+    // fall back into main RAM stays out of it.
+    const image = new Uint8Array(
+      readFileSync(resolve('reference/elks-images-hd', 'hd32-minix.img')),
+    );
+    return (async () => {
+      const messages: WorkerToMainMessage[] = [];
+      const tx: number[] = [];
+      const host = new WorkerHost({
+        post: (m) => {
+          messages.push(m);
+          if (m.type === 'tx') tx.push(...m.bytes);
+        },
+        autoRun: false,
+        hostClock: new InMemoryHostClock(),
+      });
+      host.handleMessage({
+        type: 'boot',
+        config: {
+          imageBytes: image,
+          diskClass: 'hard-disk',
+          memorySize: 4 * 1024 * 1024,
+        },
+      });
+      await host.whenIdle();
+      // xms_init runs early in kernel start — 3M instructions covers
+      // it with margin (the mount lines land around there too).
+      host.runUntil(3_000_000);
+      const text = String.fromCharCode(...tx);
+      expect(text).toContain('xms: 3072K');
+      expect(text).toContain('int 15/1F');
+      expect(text).not.toContain('A20 error');
+      // The stamp did its job: no HMA kernel to auto-disable INT15.
+      expect(text).not.toContain('disabled w/kernel HMA');
+    })();
+  }, 60_000);
+
   it('M2 REFERENCE round trip over ELKS with per-boot stamps (the field case)', () => {
     // Jonathan's field failure, as a regression test: an autologin boot
     // stamps the image through minix-fs (wall-clock mtimes, allocator

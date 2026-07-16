@@ -343,6 +343,38 @@ export function int12Handler(cpu: CPU8086, _ctx: BiosContext): void {
 export function int15Handler(cpu: CPU8086, ctx: BiosContext): void {
   const ah = cpu.regs.AH;
   switch (ah) {
+    case 0x87: {
+      // Block Move (XMS brief M1) — the service ELKS's XMS_INT15 mode
+      // funnels EVERY extended-memory access through (xms.c
+      // int15_fmemcpy → bios15-ibm.S bios_block_movew): ES:SI points
+      // at a six-descriptor GDT-shaped table, source = entry 2,
+      // destination = entry 3, CX = word count. ELKS fills full
+      // 32-bit bases (base_31_24 included), so read all four base
+      // bytes; the memory mask bounds the result. Real AT BIOSes
+      // flip into protected mode here and many disable A20 on the
+      // way out (xms.c's AUTODISABLE paranoia) — we do neither,
+      // exactly like QEMU, which is the behaviour ELKS's INT15 mode
+      // was developed against.
+      const table = linearAddress(cpu.regs.ES, cpu.regs.SI);
+      const descBase = (entry: number): number => {
+        const off = table + entry * 8;
+        const lo = cpu.memory.readWord(off + 2);
+        const mid = cpu.memory.readByte(off + 4);
+        const hi = cpu.memory.readByte(off + 7);
+        // Compose without << 24 (JS bitwise is 32-bit signed).
+        return hi * 0x1000000 + mid * 0x10000 + lo;
+      };
+      const src = descBase(2);
+      const dst = descBase(3);
+      const bytes = cpu.regs.CX * 2;
+      for (let i = 0; i < bytes; i++) {
+        cpu.memory.writeByte(dst + i, cpu.memory.readByte(src + i));
+      }
+      cpu.regs.AH = 0x00; // success
+      setReturnCF(cpu, false);
+      setReturnZF(cpu, true);
+      return;
+    }
     case 0x88: {
       // Get Extended Memory Size: AX = KiB above 1 MiB, CF clear.
       cpu.regs.AX = Math.min(0xFFFF, Math.max(0, ctx.extendedMemoryKb));

@@ -50,8 +50,8 @@ interface Harness {
   ctx: BiosContext;
 }
 
-function makeHarness(opts: { withDisk?: boolean; diskClass?: 'floppy' | 'hard-disk'; diskGeometry?: { cylinders: number; heads: number; sectorsPerTrack: number } } = {}): Harness {
-  const memory = new PagedMemory({ addressSpaceSize: 0x100000 });
+function makeHarness(opts: { withDisk?: boolean; diskClass?: 'floppy' | 'hard-disk'; diskGeometry?: { cylinders: number; heads: number; sectorsPerTrack: number }; addressSpaceSize?: number } = {}): Harness {
+  const memory = new PagedMemory({ addressSpaceSize: opts.addressSpaceSize ?? 0x100000 });
   const bus = new BasicIOBus();
   const cpu = new CPU8086(memory, bus);
   cpu.regs.SS = 0x0030;
@@ -289,6 +289,45 @@ describe('INT 15h — system services', () => {
     expect(h.cpu.regs.AX).toBe(0x2403);
     expect(h.cpu.regs.BX).toBe(0x1234);
     expect(readPushedFlags(h)).toBe(flagsBefore);
+  });
+
+  /** Write an ELKS-shaped AH=87h descriptor table at ES:SI (entries 2+3). */
+  function writeGdtTable(h: Harness, tableLinear: number, src: number, dst: number): void {
+    const desc = (entry: number, base: number): void => {
+      const off = tableLinear + entry * 8;
+      h.memory.writeWord(off + 0, 0xffff);              // limit_15_0
+      h.memory.writeWord(off + 2, base & 0xffff);       // base_15_0
+      h.memory.writeByte(off + 4, (base >> 16) & 0xff); // base_23_16
+      h.memory.writeByte(off + 5, 0x92);                // access
+      h.memory.writeByte(off + 6, 0);                   // flags/limit
+      h.memory.writeByte(off + 7, Math.floor(base / 0x1000000) & 0xff); // base_31_24
+    };
+    desc(2, src);
+    desc(3, dst);
+  }
+
+  it('AH=87h moves words from conventional to EXTENDED memory and back', () => {
+    const h = makeHarness({ addressSpaceSize: 4 * 1024 * 1024 });
+    const src = 0x20000;      // conventional
+    const dst = 0x180000;     // 1.5 MiB — beyond any segment's reach
+    for (let i = 0; i < 32; i++) h.memory.writeByte(src + i, 0xa0 + i);
+    h.cpu.regs.ES = 0x0900;
+    h.cpu.regs.SI = 0x0000;
+    writeGdtTable(h, 0x9000, src, dst);
+    h.cpu.regs.AH = 0x87;
+    h.cpu.regs.CX = 16;       // 16 words = 32 bytes
+    int15Handler(h.cpu, h.ctx);
+    expect(h.cpu.regs.AH).toBe(0);
+    expect(readPushedFlags(h) & 0x0001).toBe(0);
+    for (let i = 0; i < 32; i++) expect(h.memory.readByte(dst + i)).toBe(0xa0 + i);
+
+    // And back down, into a different conventional window.
+    const back = 0x30000;
+    writeGdtTable(h, 0x9000, dst, back);
+    h.cpu.regs.AH = 0x87;
+    h.cpu.regs.CX = 16;
+    int15Handler(h.cpu, h.ctx);
+    for (let i = 0; i < 32; i++) expect(h.memory.readByte(back + i)).toBe(0xa0 + i);
   });
 });
 

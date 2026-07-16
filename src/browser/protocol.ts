@@ -69,6 +69,17 @@ export interface BootConfig {
   imageUrl?: string;
   imageBytes?: Uint8Array;
   /**
+   * Machine memory in bytes — a power of two (XMS brief M2). Default
+   * 1 MiB (the canonical 8086 PC; tests and CLI unchanged). The
+   * browser boots 4 MiB: memory above 1 MiB is reachable ONLY through
+   * the BIOS INT 15h block move (the CPU's segment arithmetic tops
+   * out at the HMA), which is exactly ELKS's XMS_INT15 model. When
+   * >1 MiB the worker stamps `xms=int15` (+ `hma=off` — INT15 XMS and
+   * an HMA kernel are mutually exclusive in stock ELKS, and the
+   * tunable XMS buffer pool is worth more than the fixed 64 K of HMA).
+   */
+  memorySize?: number;
+  /**
    * Optional explicit geometry. If absent, the worker infers from the
    * image size against its built-in floppy + ELKS HD table; anything
    * else needs an explicit geometry.

@@ -1080,6 +1080,11 @@ async function init(): Promise<void> {
   }
   // Pacing: initial CPU speed from settings.
   boot.config.cpuSpeed = settings.cpuSpeed;
+  // XMS (brief M2): browser machines get 4 MiB — 3 MiB of extended
+  // memory reachable via the BIOS block move, which ELKS's XMS_INT15
+  // mode turns into buffer/ramdisk space OUTSIDE the 640 K. The goal
+  // (Jonathan): network and compiling in the same boot session.
+  boot.config.memorySize = 4 * 1024 * 1024;
   // Phase 17 M3 — the un-typed boot: inittab autologin + net=ne0
   // stamps ride the boot config; the worker suppresses net on a
   // first-boot-show boot (640K: ktcp vs the compile show).
