@@ -36,6 +36,15 @@ interface LogEntry {
 
 const LOG_CAP = 500;
 
+/**
+ * No toasts during the first moments of a page load (field ask,
+ * 2026-07-17): a first-time visitor's opening impression must not be
+ * "couldn't resume saved state — cold-booting instead". Everything
+ * still lands in the log and the unread badge; only the transient
+ * pop-over is suppressed inside this window.
+ */
+const TOAST_QUIET_MS = 20_000;
+
 const LOG_CSS = `
 #emu86-syslog-btn {
   position: fixed;
@@ -143,6 +152,7 @@ export function mountSystemLog(opts: SystemLogOptions = {}): SystemLog {
   style.textContent = LOG_CSS;
   document.head.appendChild(style);
 
+  const mountedAt = Date.now();
   const entries: LogEntry[] = [];
   let unread = 0;
 
@@ -170,12 +180,14 @@ export function mountSystemLog(opts: SystemLogOptions = {}): SystemLog {
   });
 
   return {
-    log(text, opts = {}) {
+    log(text, logOpts = {}) {
       entries.push({ at: new Date(), text });
       if (entries.length > LOG_CAP) entries.shift();
       unread++;
       refreshBadge();
-      if (opts.toast === true) showToast(text);
+      if (logOpts.toast === true && Date.now() - mountedAt > TOAST_QUIET_MS) {
+        showToast(text);
+      }
     },
   };
 }

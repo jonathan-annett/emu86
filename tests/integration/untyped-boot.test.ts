@@ -4,12 +4,12 @@
  * Boot 1: blank 8086 KB fork + autologin user1 + autoNet. NOTHING is
  * typed: sysinit's stamped /etc/home.sh formats the blank, mounts it
  * at /home and seeds /home/root + /home/user1; inittab's stamped s0
- * line logs user1 straight in; the seeded .profile consumes .welcome
- * and emits the hello-human marker. net=ne0 must be ABSENT (the 640K
- * ktcp-vs-c86 constraint — this is the show boot).
+ * line logs user1 straight in. Since 2026-07-17 (the button-gated
+ * show) NO marker is seeded or emitted, and net=ne0 rides EVERY
+ * autoNet boot — the first boot comes up networked (ghaerr's field
+ * report on stable is the case this pins).
  *
- * Boot 2 (same drive): the show stays quiet (once per drive), the
- * home survives, and net=ne0 is stamped now the show is done.
+ * Boot 2 (same drive): still no marker, home survives, net still up.
  *
  * Boot 3 (root autologin, same drive): root's home is /home/root on
  * the drive, and ELKS fsck judges the STAMPED root device clean —
@@ -123,7 +123,9 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       const boot1 = s1.txText();
       expect(boot1).not.toContain('login:');
       expect(boot1).not.toContain('Password');
-      expect(boot1).toContain(HELLO_HUMAN_MARKER); // .profile fired the show
+      // The auto-show is RETIRED (field ask 2026-07-17, button-gated
+      // pre-promotion): a virgin drive's first boot emits NO marker.
+      expect(boot1).not.toContain(HELLO_HUMAN_MARKER);
 
       expect(shell(s1, 'echo HOME=$HOME USER=$USER', USER_PROMPT))
         .toContain('HOME=/home/user1 USER=user1');
@@ -140,14 +142,10 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       expect(shell(s1, 'login root', ROOT_PROMPT)).toContain('#');
       expect(shell(s1, 'echo NESTED=$USER', ROOT_PROMPT)).toContain('NESTED=root');
       shell(s1, 'exit', USER_PROMPT);
-      // The show boot must NOT have net staged (640K vs the compile).
-      // Behavioral probe: rc.sys's `net start` announces itself at
-      // sysinit. (`cat /bootopts` CANNOT see the stamp: the patch is
-      // a raw 1024-byte block write the kernel reads whole, but the
-      // inode still says 692 bytes, so the fs truncates at the
-      // pristine prefix — pre-existing since Phase 14, recorded in
-      // the M3 report.)
-      expect(boot1).not.toContain('Starting networking');
+      // With the show retired, the net suppression went with it: the
+      // FIRST boot brings the NIC up (autoNet, no exceptions) — the
+      // exact behavior ghaerr's field report asked of the stable tier.
+      expect(boot1).toContain('Starting networking');
 
       shell(s1, 'sync', USER_PROMPT);
       const drive1 = snapshotSecondary(s1);
@@ -155,13 +153,12 @@ describe('the un-typed boot (Phase 17 M3)', () => {
       if (!fs1.ok) throw new Error('fork did not get formatted');
       expect(fs1.fs.readFile('/user1/.profile').ok).toBe(true);
       expect(fs1.fs.readFile('/user1/hello.sh').ok).toBe(true);
-      expect(fs1.fs.readFile('/user1/.welcome').ok).toBe(false); // consumed
+      expect(fs1.fs.readFile('/user1/.welcome').ok).toBe(false); // never seeded at all now
       expect(fs1.fs.list('/root').ok).toBe(true);
 
       // ---- Boot 2: same drive — quiet show, net up, home persists ----
       const s2 = await bootUntyped(drive1, 'user1', USER_PROMPT);
-      expect(s2.txText()).not.toContain(HELLO_HUMAN_MARKER); // once per drive
-      // Show consumed → net=ne0 stamped → rc.sys brought the NIC up.
+      expect(s2.txText()).not.toContain(HELLO_HUMAN_MARKER);
       expect(s2.txText()).toContain('Starting networking');
       expect(shell(s2, 'test -f /home/user1/hello.sh && echo HOME-OK', USER_PROMPT))
         .toContain('HOME-OK');
