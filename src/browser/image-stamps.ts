@@ -140,7 +140,7 @@ export function homeShText(secondaryBlocks: number | null): string {
 # ping is stamped fresh each boot and needs its execute bit. Before
 # the mount line so all of this applies no matter what state the
 # drive is in.
-chmod 4755 /bin/passwd /bin/login /bin/mount /bin/umount
+chmod 4755 /bin/passwd /bin/login /bin/mount /bin/umount /bin/ktcp
 chmod 666 /dev/null /dev/ne0
 chmod 755 /bin/ping /bin/resync
 ${mountLine}

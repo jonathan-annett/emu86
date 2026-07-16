@@ -150,6 +150,11 @@ describe('applyImageStamps on the real image', () => {
     expect(text).toContain('mount /dev/hdb /home');
     // The setuid-passwd line rides BOTH variants, ahead of the mount.
     expect(text.indexOf('chmod 4755 /bin/passwd')).toBeLessThan(text.indexOf('mount /dev/hdb'));
+    // ktcp joins the setuid family (field, 2026-07-17 — ghaerr's
+    // report on the public stable: manual `net start` as user1 died
+    // on the kernel's suser() gate in tcpdev_open; no chmod of
+    // /dev/tcpdev can help, euid must be 0).
+    expect(text).toContain('chmod 4755 /bin/passwd /bin/login /bin/mount /bin/umount /bin/ktcp');
   });
 
   it('the skel profile seeds NO show machinery (button-gated since 2026-07-17)', () => {
