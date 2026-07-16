@@ -171,7 +171,22 @@ export interface RestoreSpec {
     primarySha: string;
     /** null = no secondary was attached at capture. */
     secondarySha: string | null;
+    /**
+     * The CAPTURE boot's per-boot inputs, replayed verbatim (field
+     * fix #2): the reconstruction must reproduce the image the hash
+     * was taken over, and re-deriving from current state drifts —
+     * the first-boot show clearing `net=ne0` suppression was the
+     * field case. `lines` = the exact extra bootopts lines that boot
+     * patched in; `stamps` = its M3 stamp set (null = none applied).
+     */
+    inputs: RestoreBootInputs;
   };
+}
+
+/** The per-boot image mutations a reference reconstruction replays. */
+export interface RestoreBootInputs {
+  lines: string[];
+  stamps: { autologin: 'off' | 'root' | 'user1'; secondaryBlocks: number | null } | null;
 }
 
 // ============================================================
@@ -491,6 +506,16 @@ export interface StateCapturedMessage {
    * hasn't touched the drive since the last persist.
    */
   secondaryDirtySectors?: number;
+  /**
+   * This boot's per-boot image inputs — what a reference restore must
+   * replay to reconstruct the hashed image (see
+   * {@link RestoreSpec.expected}). null when this boot applied disks
+   * verbatim (an embedded-restore session): a reference reconstruction
+   * from the library base can never match such a session, so the
+   * resume flow must skip slot updates rather than store a slot that
+   * is guaranteed to refuse.
+   */
+  restoreInputs?: RestoreBootInputs | null;
 }
 
 /**

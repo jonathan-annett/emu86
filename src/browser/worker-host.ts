@@ -43,7 +43,7 @@ import type {
   DiskGeometry,
   DiskSlotSpec,
   MainToWorkerMessage,
-  RestoreSpec,
+  RestoreBootInputs,
   WorkerToMainMessage,
 } from './protocol.js';
 import { BrowserConsole } from './browser-console.js';
@@ -243,6 +243,23 @@ export interface RunResult {
 const OVERLAY_SWEEP_THROTTLE_MS = 5_000;
 const OVERLAY_ACK_TIMEOUT_MS = 10_000;
 
+/**
+ * Phase 18 M2 field fix #2 (Jonathan's second report: "couldn't resume
+ * saved state — boot disk reconstruction does not match the capture"):
+ * while reference captures are flowing, THEY own the sweep cadence.
+ * A maintenance sweep landing between captures puts the overlay store
+ * AHEAD of the resume slot's hash — the reconstruction then honestly
+ * refuses on every refresh of a disk-active guest, which during and
+ * after an ELKS boot is most of the time. Suppression self-cancels:
+ * if no reference capture arrives for this long (main degraded, tab
+ * that never captures), maintenance sweeps resume and overlay
+ * persistence is exactly the pre-M2 behaviour. The forced 4 MiB sweep
+ * is NOT suppressed — it bounds hot-map RAM under heavy I/O, and the
+ * ≤5 s window it can desync is healed by the next capture (an F5
+ * inside it cold-boots honestly).
+ */
+const RESUME_SWEEP_SUPPRESS_MS = 15_000;
+
 /** Full-image copy via the sector loop. Boot-time (Phase 17 M3 reads
  *  the secondary to decide the show/net stamps) and capture-time
  *  (Phase 18 M2 — works through the OverlayDisk wrapper too: overlay
@@ -304,6 +321,16 @@ export class WorkerHost {
    * reference captures, the skipped 32 MB copy) still holds.
    */
   #captureShaCache: { writesSeen: number; sha: string } | null = null;
+  /** Pacer-time of the last 'reference' capture — gates maintenance sweeps. */
+  #lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
+  /**
+   * The per-boot image inputs THIS boot applied (field fix #2) — a
+   * reference capture carries them so its restore replays exactly this
+   * boot's patch + stamps instead of re-deriving from drifted state.
+   * null = disks were applied verbatim (embedded-restore session):
+   * reference reconstruction can never match, captures say so.
+   */
+  #bootInputs: RestoreBootInputs | null = null;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -862,12 +889,14 @@ export class WorkerHost {
       secondary = await this.#resolveSlot('secondary', config.secondary);
     }
 
-    let stamps: ImageStampOptions | undefined;
-    let netLine: string[] = [];
+    // Per-boot image inputs, derived from CURRENT state — what a
+    // normal boot applies, and what a refused restore falls back to.
+    let derivedStamps: ImageStampOptions | undefined;
+    let derivedNetLine: string[] = [];
     if (config.autologin !== undefined && embeddedRestore === undefined) {
       const secondaryBytes =
         secondary !== null ? snapshotDisk(secondary.disk) : null;
-      stamps = {
+      derivedStamps = {
         autologin: config.autologin,
         secondaryBlocks:
           secondary !== null
@@ -875,12 +904,33 @@ export class WorkerHost {
             : null,
       };
       if (config.autoNet === true && !showPending(secondaryBytes)) {
-        netLine = ['net=ne0'];
+        derivedNetLine = ['net=ne0'];
       }
     }
+    const derivedLines: string[] = [
+      ...(tanIdentity !== null && embeddedRestore === undefined
+        ? [
+            tanIdentity.localipLine,
+            // The shell's who-am-I (API v1): stock /etc/profile does
+            // PS1="$HOSTNAME$PS1", so the prompt becomes `mouse# ` too.
+            ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
+          ]
+        : []),
+      ...derivedNetLine,
+    ];
 
-    const primary = await this.#resolveSlot(
-      'primary',
+    // Field fix #2: a REFERENCE restore replays the CAPTURE boot's
+    // recorded inputs — re-deriving drifts (the first-boot show
+    // clearing net=ne0 suppression was the field case) and a drifted
+    // patch can never hash to the capture.
+    const expected = config.restore?.expected;
+    const replay = expected !== undefined && embeddedRestore === undefined;
+    const appliedLines = replay ? [...expected.inputs.lines] : derivedLines;
+    const appliedStamps = replay
+      ? expected.inputs.stamps ?? undefined
+      : derivedStamps;
+
+    const primarySpec: DiskSlotSpec =
       embeddedRestore !== undefined
         ? embeddedRestore.primary
         : {
@@ -888,27 +938,19 @@ export class WorkerHost {
             imageBytes: config.imageBytes,
             geometry: config.geometry,
             diskClass: config.diskClass,
-          },
-      [
-        ...(tanIdentity !== null && embeddedRestore === undefined
-          ? [
-              tanIdentity.localipLine,
-              // The shell's who-am-I (API v1): stock /etc/profile does
-              // PS1="$HOSTNAME$PS1", so the prompt becomes `mouse# ` too.
-              ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
-            ]
-          : []),
-        ...netLine,
-      ],
+          };
+    let primary = await this.#resolveSlot(
+      'primary',
+      primarySpec,
+      appliedLines,
       embeddedRestore !== undefined ? undefined : config.overlay,
-      stamps,
+      appliedStamps,
       /* verbatim: */ embeddedRestore !== undefined,
     );
 
     // Phase 18 M2, reference verification: the reconstructed disks
     // must hash to what the capture recorded, or the restore is off.
     let restoreRefusal: string | null = null;
-    const expected = config.restore?.expected;
     if (expected !== undefined) {
       const primarySha = await sha256Hex(snapshotDisk(primary.disk));
       if (primarySha !== expected.primarySha) {
@@ -920,7 +962,30 @@ export class WorkerHost {
           restoreRefusal = 'secondary drive does not match the capture';
         }
       }
+      if (restoreRefusal !== null && replay) {
+        // The cold boot must NOT keep the replayed (possibly stale)
+        // identity lines — rebuild the primary with current inputs.
+        primary = await this.#resolveSlot(
+          'primary',
+          primarySpec,
+          derivedLines,
+          config.overlay,
+          derivedStamps,
+        );
+      }
     }
+
+    // Record what THIS boot actually applied — the next reference
+    // capture carries it. Verbatim (embedded-restore) sessions record
+    // null: no reference reconstruction can match them.
+    this.#bootInputs =
+      embeddedRestore !== undefined
+        ? null
+        : {
+            lines: restoreRefusal !== null && replay ? derivedLines : appliedLines,
+            stamps:
+              (restoreRefusal !== null && replay ? derivedStamps : appliedStamps) ?? null,
+          };
 
     // Phase 17 M2: report the base's identity every boot. Main stamps
     // the fingerprint into the overlay meta on future sweeps; applied
@@ -931,6 +996,8 @@ export class WorkerHost {
     // A fresh boot's OverlayDisk restarts writesSeen at 0 over a
     // possibly-different image — a stale cache entry would falsely hit.
     this.#captureShaCache = null;
+    // Fresh boot: maintenance sweeps run normally until captures start.
+    this.#lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
     if (primary.overlayFingerprint !== undefined) {
       this.#post({
         type: 'overlay-identity',
@@ -1260,6 +1327,10 @@ export class WorkerHost {
     if (pendingId !== null && now - this.#overlayPendingSince >= OVERLAY_ACK_TIMEOUT_MS) {
       overlay.nackSweep(pendingId);
     }
+    // Reference captures own the sweep cadence while they flow — see
+    // RESUME_SWEEP_SUPPRESS_MS. Post-capture writes stay hot until the
+    // next capture's own flush, so store == slot-hash between captures.
+    if (now - this.#lastReferenceCaptureAt < RESUME_SWEEP_SUPPRESS_MS) return;
     if (
       !overlay.sweepPending &&
       overlay.hotSectorCount > 0 &&
@@ -1319,6 +1390,9 @@ export class WorkerHost {
       });
       return;
     }
+    if (msg.disks === 'reference') {
+      this.#lastReferenceCaptureAt = this.#pacerNow();
+    }
     try {
       // Phase 1: the final overlay sweep (a pending epoch folds back
       // first so the sweep is complete — the reset-path precedent).
@@ -1353,6 +1427,10 @@ export class WorkerHost {
       const baseFingerprint = this.#bootFingerprint;
       const diskClass = machine.diskClass;
       const secondaryDiskClass = machine.secondaryDiskClass;
+      const restoreInputs =
+        this.#bootInputs !== null
+          ? { lines: [...this.#bootInputs.lines], stamps: this.#bootInputs.stamps }
+          : null;
 
       // Async completion: hashes over the copies, then the reply.
       void (async () => {
@@ -1381,6 +1459,7 @@ export class WorkerHost {
             primarySha,
             secondarySha,
             secondaryDirtySectors,
+            restoreInputs,
             ...(embedded && primaryBytes !== null
               ? {
                   primary: {

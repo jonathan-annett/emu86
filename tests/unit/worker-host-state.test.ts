@@ -258,6 +258,7 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
         expected: {
           primarySha: reply.primarySha,
           secondarySha: reply.secondarySha ?? null,
+          inputs: reply.restoreInputs ?? { lines: [], stamps: null },
         },
       },
     });
@@ -285,7 +286,11 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
       restore: {
         state: reply.state,
         capturedAt: reply.capturedAt,
-        expected: { primarySha: reply.primarySha ?? '0'.repeat(64), secondarySha: null },
+        expected: {
+          primarySha: reply.primarySha ?? '0'.repeat(64),
+          secondarySha: null,
+          inputs: reply.restoreInputs ?? { lines: [], stamps: null },
+        },
       },
     });
     const result = restoreResult(b);
