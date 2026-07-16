@@ -101,6 +101,13 @@ export interface SettingsModalDeps {
       remove: (stateId: string) => Promise<void>;
     };
   };
+  /**
+   * Called after the modal closes, however it closes (field report
+   * 2026-07-16: dismissing stole focus from the terminal). When
+   * provided it replaces the gear-refocus default — this is a
+   * terminal-first app and the terminal is where hands live.
+   */
+  onClosed?: () => void;
 }
 
 /** What the saved-states list renders — mirrors MachineStateMeta. */
@@ -165,9 +172,17 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     backdrop.appendChild(panel);
     root.appendChild(backdrop);
 
-    // Backdrop click closes; clicks on the panel itself shouldn't bubble out.
-    backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) close();
+    // Backdrop click closes; clicks on the panel itself shouldn't
+    // bubble out — and a text-selection drag released over the
+    // backdrop must not close either (field ask, 2026-07-16), so the
+    // press must have STARTED on the backdrop too.
+    const clickTarget = backdrop;
+    let pressStartedOnBackdrop = false;
+    clickTarget.addEventListener('pointerdown', (e) => {
+      pressStartedOnBackdrop = e.target === clickTarget;
+    });
+    clickTarget.addEventListener('click', (e) => {
+      if (e.target === clickTarget && pressStartedOnBackdrop) close();
     });
 
     document.addEventListener('keydown', onKeydown);
@@ -187,7 +202,10 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
     backdrop = null;
     panel = null;
     reloadNotice = null;
-    gear.focus();
+    // Field report 2026-07-16: hands live in the terminal — hand
+    // focus back there when main wires it; gear otherwise.
+    if (deps.onClosed !== undefined) deps.onClosed();
+    else gear.focus();
   };
 
   const onKeydown = (e: KeyboardEvent) => {

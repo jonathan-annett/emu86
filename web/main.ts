@@ -225,8 +225,9 @@ async function init(): Promise<void> {
   // The system log (Phase 18 field-loop UI): every HOST-side message
   // lands here — the terminal is the machine's alone from this point
   // on (Jonathan: "a system log that is totally detached from what the
-  // machine actually prints out").
-  const syslog = mountSystemLog();
+  // machine actually prints out"). Dismissing any overlay hands focus
+  // back to the terminal (field report 2026-07-16).
+  const syslog = mountSystemLog({ onClosed: () => term.focus() });
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
@@ -1403,6 +1404,8 @@ async function init(): Promise<void> {
         remove: (stateId: string) => machineStore.deleteState(stateId),
       },
     },
+    // Field report 2026-07-16: hands live in the terminal.
+    onClosed: () => term.focus(),
   });
 
   // Phase 18 field-loop UI: the LED strip in the header and the
@@ -1432,7 +1435,8 @@ async function init(): Promise<void> {
     // add the save machine state button") — same flow as the settings
     // modal's, capturing the frozen picture exactly.
     saveState: (label: string) => saveNamedState(label),
-    // …and restore from it too ("click - restore - boom").
+    // …and restore from it too ("click - restore - boom"), and delete
+    // (field ask 2026-07-16: "<dropdown> [Restore] [Delete]").
     savedStates: {
       list: async () =>
         (await machineStore.listMeta())
@@ -1442,6 +1446,7 @@ async function init(): Promise<void> {
         saveSession({ pendingRestoreStateId: stateId });
         location.reload();
       },
+      remove: (stateId: string) => machineStore.deleteState(stateId),
     },
     // The reset button (field loop: "there is now no way to reboot the
     // pc" — reload-resume ate the old one). One-shot cold boot.
@@ -1449,6 +1454,8 @@ async function init(): Promise<void> {
       saveSession({ pendingColdBoot: true });
       location.reload();
     },
+    // Field report 2026-07-16: hands live in the terminal.
+    onClosed: () => term.focus(),
   });
 
   // The system-level editor (Phase 16 M4): a panel over THIS tab's

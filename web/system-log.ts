@@ -20,6 +20,15 @@ export interface SystemLog {
   log(text: string, opts?: { toast?: boolean }): void;
 }
 
+export interface SystemLogOptions {
+  /**
+   * Called after the overlay closes, however it closes (field report
+   * 2026-07-16: dismissing the log stole focus from the terminal —
+   * this is where main.ts hands it back).
+   */
+  onClosed?: () => void;
+}
+
 interface LogEntry {
   at: Date;
   text: string;
@@ -82,6 +91,22 @@ const LOG_CSS = `
   font-size: 0.9rem;
   color: #7fb3d5;
 }
+.emu86-syslog-panel .head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.emu86-syslog-panel .head h2 { flex: 1; }
+.emu86-syslog-panel .head button {
+  font: inherit;
+  background: none;
+  border: 1px solid #394048;
+  border-radius: 4px;
+  color: #9fb2bf;
+  cursor: pointer;
+  padding: 0.1rem 0.5rem;
+}
+.emu86-syslog-panel .head button:hover { color: #fff; border-color: #5a646e; }
 .emu86-syslog-panel .entry { white-space: pre-wrap; }
 .emu86-syslog-panel .entry .ts { color: #6a7680; }
 .emu86-syslog-panel .hint { color: #7c8790; font-size: 0.7rem; margin-top: 0.6rem; }
@@ -113,7 +138,7 @@ const LOG_CSS = `
 }
 `;
 
-export function mountSystemLog(): SystemLog {
+export function mountSystemLog(opts: SystemLogOptions = {}): SystemLog {
   const style = document.createElement('style');
   style.textContent = LOG_CSS;
   document.head.appendChild(style);
@@ -141,7 +166,7 @@ export function mountSystemLog(): SystemLog {
   btn.addEventListener('click', () => {
     unread = 0;
     refreshBadge();
-    openPanel(entries);
+    openPanel(entries, opts.onClosed);
   });
 
   return {
@@ -155,14 +180,41 @@ export function mountSystemLog(): SystemLog {
   };
 }
 
-function openPanel(entries: readonly LogEntry[]): void {
+function openPanel(entries: readonly LogEntry[], onClosed?: () => void): void {
   const backdrop = document.createElement('div');
   backdrop.className = 'emu86-syslog-backdrop';
   const panel = document.createElement('div');
   panel.className = 'emu86-syslog-panel';
+
+  const asText = (): string =>
+    entries
+      .map((e) => `${e.at.toLocaleTimeString()}  ${e.text}`)
+      .join('\n');
+
+  // Header row: title, copy-to-clipboard, and an explicit ✕ — both
+  // field asks (2026-07-16).
+  const head = document.createElement('div');
+  head.className = 'head';
   const title = document.createElement('h2');
   title.textContent = 'system log — host events, not machine output';
-  panel.appendChild(title);
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.textContent = 'copy';
+  copyBtn.title = 'Copy the whole log to the clipboard';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(asText()).then(
+      () => { copyBtn.textContent = 'copied ✓'; },
+      () => { copyBtn.textContent = 'copy failed'; },
+    );
+    window.setTimeout(() => { copyBtn.textContent = 'copy'; }, 2_000);
+  });
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close the system log');
+  head.append(title, copyBtn, closeBtn);
+  panel.appendChild(head);
+
   for (const entry of entries) {
     const line = document.createElement('div');
     line.className = 'entry';
@@ -183,15 +235,26 @@ function openPanel(entries: readonly LogEntry[]): void {
   hint.textContent = 'click outside (or press Esc) to close';
   panel.appendChild(hint);
 
+  const close = (): void => {
+    document.removeEventListener('keydown', onKey);
+    backdrop.remove();
+    onClosed?.();
+  };
+  closeBtn.addEventListener('click', close);
+
   backdrop.appendChild(panel);
+  // Close on backdrop click ONLY when the press also started there —
+  // releasing a text-selection drag over the backdrop must not close
+  // the window (field ask, 2026-07-16).
+  let pressStartedOnBackdrop = false;
+  backdrop.addEventListener('pointerdown', (ev) => {
+    pressStartedOnBackdrop = ev.target === backdrop;
+  });
   backdrop.addEventListener('click', (ev) => {
-    if (ev.target === backdrop) backdrop.remove();
+    if (ev.target === backdrop && pressStartedOnBackdrop) close();
   });
   const onKey = (ev: KeyboardEvent): void => {
-    if (ev.key === 'Escape') {
-      document.removeEventListener('keydown', onKey);
-      backdrop.remove();
-    }
+    if (ev.key === 'Escape') close();
   };
   document.addEventListener('keydown', onKey);
   document.body.appendChild(backdrop);

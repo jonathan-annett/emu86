@@ -36,6 +36,8 @@ export interface InspectPanelDeps {
   savedStates?: {
     list: () => Promise<Array<{ stateId: string; label: string | null; lastTouched: number }>>;
     restore: (stateId: string) => void;
+    /** Field ask (2026-07-16): delete straight from the picker. */
+    remove?: (stateId: string) => Promise<void>;
   };
   /**
    * Reboot the machine (field loop: reload-resume removed the only
@@ -43,6 +45,12 @@ export interface InspectPanelDeps {
    * cold boot and reloads; disk state (overlay + fork) persists.
    */
   reboot?: () => void;
+  /**
+   * Called after the popup closes, however it closes (field report
+   * 2026-07-16: dismissing stole focus from the terminal — main.ts
+   * hands it back here).
+   */
+  onClosed?: () => void;
 }
 
 const PANEL_CSS = `
@@ -145,7 +153,36 @@ export function mountInspectPanel(deps: InspectPanelDeps): void {
     backdrop.remove();
     deps.setPaused(false);
     open = false;
+    deps.onClosed?.();
   }
+}
+
+/**
+ * Backdrop dismissal that ignores text-selection drags: close only
+ * when the press STARTED on the backdrop too — releasing a selection
+ * sweep over the backdrop must not dismiss (field ask, 2026-07-16).
+ */
+function wireBackdropDismiss(backdrop: HTMLDivElement, close: () => void): void {
+  let pressStartedOnBackdrop = false;
+  backdrop.addEventListener('pointerdown', (ev) => {
+    pressStartedOnBackdrop = ev.target === backdrop;
+  });
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop && pressStartedOnBackdrop) close();
+  });
+}
+
+/** The explicit ✕ every overlay now carries (field ask, 2026-07-16). */
+function closeButton(onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '✕';
+  btn.setAttribute('aria-label', 'Close and resume the CPU');
+  btn.style.cssText =
+    'float:right;font:inherit;background:none;border:1px solid #394048;' +
+    'border-radius:4px;color:#9fb2bf;cursor:pointer;padding:0.1rem 0.5rem;';
+  btn.addEventListener('click', onClick);
+  return btn;
 }
 
 function showPanel(
@@ -159,6 +196,7 @@ function showPanel(
   backdrop.className = 'emu86-inspect-backdrop';
   const panel = document.createElement('div');
   panel.className = 'emu86-inspect-panel';
+  panel.appendChild(closeButton(() => dismiss()));
 
   const r = s.regs;
   const regs = [
@@ -177,7 +215,6 @@ function showPanel(
     `NE2K  ISR=${hex2(d.nic.isr)} IMR=${hex2(d.nic.imr)} CURR=${hex2(d.nic.curr)} BNRY=${hex2(d.nic.bnry)} ${d.nic.running ? 'running' : 'stopped'}`,
   ].join('\n');
 
-  panel.innerHTML = '';
   panel.append(
     heading('h2', 'machine frozen — dismiss to resume'),
     heading('h3', 'registers'),
@@ -238,31 +275,46 @@ function showPanel(
     restoreBtn.type = 'button';
     restoreBtn.textContent = 'Restore';
     restoreBtn.disabled = true;
+    const removeFn = savedStates.remove;
+    const deleteBtn = removeFn !== undefined ? document.createElement('button') : null;
+    if (deleteBtn !== null) {
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.disabled = true;
+      deleteBtn.style.borderColor = '#6e3a3a';
+      deleteBtn.style.color = '#d08080';
+    }
     const note = document.createElement('span');
     note.className = 'hint';
-    row.append(select, restoreBtn, note);
+    row.append(select, restoreBtn, ...(deleteBtn !== null ? [deleteBtn] : []), note);
     panel.appendChild(row);
 
-    void savedStates.list().then(
-      (rows) => {
-        select.innerHTML = '';
-        if (rows.length === 0) {
-          const opt = document.createElement('option');
-          opt.textContent = 'no saved states yet';
-          select.appendChild(opt);
-          return;
-        }
-        for (const r of rows) {
-          const opt = document.createElement('option');
-          opt.value = r.stateId;
-          opt.textContent =
-            `${r.label ?? r.stateId} (${new Date(r.lastTouched).toLocaleString()})`;
-          select.appendChild(opt);
-        }
-        restoreBtn.disabled = false;
-      },
-      (err: unknown) => { note.textContent = `list failed: ${String(err)}`; },
-    );
+    const refresh = (): void => {
+      void savedStates.list().then(
+        (rows) => {
+          select.innerHTML = '';
+          if (rows.length === 0) {
+            const opt = document.createElement('option');
+            opt.textContent = 'no saved states yet';
+            select.appendChild(opt);
+            restoreBtn.disabled = true;
+            if (deleteBtn !== null) deleteBtn.disabled = true;
+            return;
+          }
+          for (const r of rows) {
+            const opt = document.createElement('option');
+            opt.value = r.stateId;
+            opt.textContent =
+              `${r.label ?? r.stateId} (${new Date(r.lastTouched).toLocaleString()})`;
+            select.appendChild(opt);
+          }
+          restoreBtn.disabled = false;
+          if (deleteBtn !== null) deleteBtn.disabled = false;
+        },
+        (err: unknown) => { note.textContent = `list failed: ${String(err)}`; },
+      );
+    };
+    refresh();
 
     restoreBtn.addEventListener('click', () => {
       const stateId = select.value;
@@ -271,6 +323,25 @@ function showPanel(
       restoreBtn.textContent = 'Restoring…';
       savedStates.restore(stateId); // queues + reloads the page
     });
+
+    // Field ask (2026-07-16): delete straight from the picker. A
+    // named save is user-curated (D4) — confirm before it goes.
+    if (deleteBtn !== null && removeFn !== undefined) {
+      deleteBtn.addEventListener('click', () => {
+        const stateId = select.value;
+        const label = select.selectedOptions[0]?.textContent ?? stateId;
+        if (stateId === '') return;
+        if (!confirm(`Delete saved state ${label}? This cannot be undone.`)) return;
+        deleteBtn.disabled = true;
+        void removeFn(stateId).then(
+          () => { note.textContent = 'deleted.'; refresh(); },
+          (err: unknown) => {
+            deleteBtn.disabled = false;
+            note.textContent = `delete failed: ${String(err)}`;
+          },
+        );
+      });
+    }
   }
 
   // The reset button a frozen machine deserves. Disk state persists
@@ -301,15 +372,14 @@ function showPanel(
   );
 
   backdrop.appendChild(panel);
-  backdrop.addEventListener('click', (ev) => {
-    if (ev.target === backdrop) close(backdrop);
-  });
   const onKey = (ev: KeyboardEvent): void => {
-    if (ev.key === 'Escape') {
-      document.removeEventListener('keydown', onKey);
-      close(backdrop);
-    }
+    if (ev.key === 'Escape') dismiss();
   };
+  const dismiss = (): void => {
+    document.removeEventListener('keydown', onKey);
+    close(backdrop);
+  };
+  wireBackdropDismiss(backdrop, dismiss);
   document.addEventListener('keydown', onKey);
   document.body.appendChild(backdrop);
 }
@@ -319,12 +389,11 @@ function showError(reason: string, close: (b: HTMLDivElement) => void): void {
   backdrop.className = 'emu86-inspect-backdrop';
   const panel = document.createElement('div');
   panel.className = 'emu86-inspect-panel';
+  panel.appendChild(closeButton(() => close(backdrop)));
   panel.append(heading('h2', 'inspection failed'), pre(reason),
     hintEl('click outside to resume'));
   backdrop.appendChild(panel);
-  backdrop.addEventListener('click', (ev) => {
-    if (ev.target === backdrop) close(backdrop);
-  });
+  wireBackdropDismiss(backdrop, () => close(backdrop));
   document.body.appendChild(backdrop);
 }
 
