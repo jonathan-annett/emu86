@@ -86,6 +86,35 @@ PARENT'S LIVE MACHINE in the new tab instead of cold-booting:
   served") → child opens on the parent's screen; a duplicate of a
   CLOSED parent cold-boots after ~3 s; duplicating mid-heavy-I/O.
 
+## 3.5 Field find #1 (Jonathan, 2026-07-16, same evening): the clone
+## ghost — FIXED
+
+"if i dup mouse→cat then make a new pc dog, telnet from mouse to dog
+fails as there are 2 machines trying to accept the ack reply ... if
+close cat, mouse can telnet to dog." Exactly right: the restored
+NIC's device state carries the CAPTURE's MAC (PAR registers ride the
+M1 serialize pair) and the guest the capture's IP, and v1 attached
+the clone's LAN to the TAN trunk anyway — so dog's replies to mouse
+arrived at BOTH machines, and the clone's ktcp RST'd a connection it
+never opened. My §2 claim that a stale identity was "effectively
+detached" was falsified in the field within the hour.
+
+Fix: D5(b) taken literally. An embedded restore (clone or named
+save) LEASES its octet (defended, persisted, titled "(detached)")
+but never bridges onto the trunk — `tan.attach` is skipped, the
+tan-identity message carries `detached: true`, and the syslog says
+the cable is unplugged and a reboot rejoins. The local LAN
+(gateway/DNS/HTTP → real internet) still works; no frame crosses
+between tabs. The reboot path re-attaches normally (regression test:
+lease-but-never-attach, then reboot rejoins).
+
+DHCP came up as the alternative (guest re-identifies itself): ruled
+out by source inspection — ktcp has NO UDP layer at all (arp / icmp
+/ ip / tcp only; the dhcpd man hits are MINIX-heritage docs), so
+DHCP has no transport to ride. The recorded future path for D5's
+"rational plan" is a guest-side ktcp restart with a fresh LOCALIP
+handed through the control endpoint — no reboot, no DHCP needed.
+
 ## 4. Findings for the record
 
 - A duplicated tab shared its parent's sessionId from Phase 18 M2

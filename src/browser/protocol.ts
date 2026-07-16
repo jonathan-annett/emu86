@@ -448,6 +448,16 @@ export interface TanIdentityMessage {
    * could derive it, but sending it keeps the mapping in one place.
    */
   name?: string;
+  /**
+   * Phase 18 M3 (field find, 2026-07-16): true when this boot leased
+   * the identity but did NOT bridge the machine onto the TAN — an
+   * embedded restore (clone / named save) whose guest wears the
+   * CAPTURE's MAC+IP. Attached, it answers for the original machine
+   * and RSTs its connections ("2 machines trying to accept the ack
+   * reply"). The lease is held for the tab's NEXT (re)boot; main's
+   * identity line must say "detached", not "you are X".
+   */
+  detached?: boolean;
 }
 
 /**

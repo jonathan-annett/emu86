@@ -273,6 +273,14 @@ export class TabAreaNetwork {
     throw new Error('TAN: could not acquire a host octet after 10 attempts');
   }
 
+  /** Whether a LAN is currently bridged onto the trunk (Phase 18 M3:
+   *  a cloned/restored machine boots with this deliberately false —
+   *  its guest wears another tab's MAC+IP and would RST that tab's
+   *  connections; field-found 2026-07-16). */
+  get lanAttached(): boolean {
+    return this.#trunk !== null;
+  }
+
   /** Bridge a switch onto the TAN. Call after {@link acquire}. */
   attach(lan: EthernetSwitch): void {
     if (this.#trunk !== null) throw new Error('TAN: already attached');

@@ -1134,7 +1134,21 @@ async function init(): Promise<void> {
       // CHANGED — a sticky re-lease on reload is old news.
       const octetChanged = loadSession().tanHostOctet !== msg.hostOctet;
       saveSession({ tanHostOctet: msg.hostOctet });
-      if (msg.name !== undefined) {
+      if (msg.detached === true) {
+        // Phase 18 M3 field find: a restored (cloned / named-save)
+        // machine wears the CAPTURE's network identity, so its cable
+        // is deliberately unplugged from the tab network — attached,
+        // it would answer for the original machine and RST its
+        // connections. The lease below is for the NEXT reboot.
+        if (msg.name !== undefined) document.title = `${msg.name}.tabs (detached) — emu86`;
+        syslog.log(
+          'restored machine: tab-network cable detached (the guest still wears ' +
+            `its original identity) — reboot to rejoin as ${
+              msg.name !== undefined ? `${msg.name}.tabs at ` : ''
+            }10.0.2.${msg.hostOctet}. Internet via the gateway still works.`,
+          { toast: true },
+        );
+      } else if (msg.name !== undefined) {
         document.title = `${msg.name}.tabs — emu86`;
         syslog.log(
           `you are ${msg.name}.tabs at 10.0.2.${msg.hostOctet} — ` +

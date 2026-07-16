@@ -980,6 +980,16 @@ export class WorkerHost {
           : {}),
       });
     }
+    // Phase 18 M2: an EMBEDDED restore (named save / clone) replaces
+    // the whole resolve pipeline — captured bytes verbatim, no overlay
+    // fold, no bootopts patch, no M3 stamps (§1.4: re-stamping would
+    // fight the captured RAM's buffer cache). A REFERENCE restore
+    // (reload-resume slot) runs the normal pipeline below and
+    // input-verifies after. Read before the TAN identity: the lease
+    // still runs for an embedded boot (the octet stays defended for
+    // the tab's next reboot) but the identity line must say DETACHED.
+    const embeddedRestore = config.restore?.embedded;
+
     const tanIdentity = this.#tan !== null ? await this.#tan.acquire() : null;
     if (tanIdentity !== null) {
       // Report the settled identity so the main thread can persist it
@@ -990,15 +1000,9 @@ export class WorkerHost {
         ...(nameForOctet(tanIdentity.hostOctet) !== null
           ? { name: nameForOctet(tanIdentity.hostOctet) as string }
           : {}),
+        ...(embeddedRestore !== undefined ? { detached: true } : {}),
       });
     }
-
-    // Phase 18 M2: an EMBEDDED restore (named save) replaces the whole
-    // resolve pipeline — captured bytes verbatim, no overlay fold, no
-    // bootopts patch, no M3 stamps (§1.4: re-stamping would fight the
-    // captured RAM's buffer cache). A REFERENCE restore (reload-resume
-    // slot) runs the normal pipeline below and hash-verifies after.
-    const embeddedRestore = config.restore?.embedded;
 
     // Phase 17 M3: the secondary resolves FIRST — the primary's stamp
     // set needs to know the drive (mkfs block count for /etc/home.sh)
@@ -1269,8 +1273,20 @@ export class WorkerHost {
     control.attachTo(gateway);
     this.#control = control;
 
-    // M3-tabs: bridge this LAN onto the Tab Area Network.
-    if (this.#tan !== null) this.#tan.attach(network);
+    // M3-tabs: bridge this LAN onto the Tab Area Network — UNLESS
+    // this is an embedded restore (Phase 18 M3 field find,
+    // 2026-07-16): the restored NIC wears the CAPTURE's MAC and the
+    // guest the capture's IP, so an attached clone answers for the
+    // original machine — both accept its packets, the clone's ktcp
+    // RSTs connections it never opened, and the original's telnet
+    // dies ("2 machines trying to accept the ack reply"; closing the
+    // clone fixed it). D5(b) means the cable hangs LITERALLY loose:
+    // the local LAN (gateway, DNS, HTTP) still works, no frame
+    // crosses the trunk, and the tab's own lease waits for the
+    // reboot that re-identifies the guest honestly.
+    if (this.#tan !== null && embeddedRestore === undefined) {
+      this.#tan.attach(network);
+    }
 
     // Phase 15 M2: the secondary rides behind a write tracker so guest
     // writes can be counted (unsaved-changes indicator) and snapshotted

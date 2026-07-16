@@ -457,6 +457,102 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
   });
 });
 
+describe('WorkerHost — the clone ghost (Phase 18 M3 field find)', () => {
+  /** Minimal TAN hub: every member hears every other member. */
+  function makeTanHub(): { join(): {
+    postMessage(data: unknown): void;
+    onmessage: ((ev: { data: unknown }) => void) | null;
+    close(): void;
+  }; } {
+    const members: Array<{ h: ((ev: { data: unknown }) => void) | null }> = [];
+    return {
+      join() {
+        const slot: { h: ((ev: { data: unknown }) => void) | null } = { h: null };
+        members.push(slot);
+        return {
+          postMessage(data: unknown) {
+            for (const m of members) {
+              if (m !== slot) m.h?.({ data });
+            }
+          },
+          set onmessage(handler: ((ev: { data: unknown }) => void) | null) {
+            slot.h = handler;
+          },
+          close() { /* hub members never leave in tests */ },
+        };
+      },
+    };
+  }
+
+  it('an embedded restore leases its octet but never bridges onto the TAN', async () => {
+    const hub = makeTanHub();
+    const image = haltImage();
+
+    const bootWithTan = async (config: BootConfig, octet: number): Promise<Rig> => {
+      const messages: WorkerToMainMessage[] = [];
+      const host = new WorkerHost({
+        post: (m) => messages.push(m),
+        autoRun: false,
+        hostClock: new InMemoryHostClock(),
+        tan: { channel: hub.join(), hostOctet: octet },
+      });
+      host.handleMessage({ type: 'boot', config });
+      await host.whenIdle();
+      return { host, messages };
+    };
+
+    // The original: normal boot, attached — this is mouse.
+    const a = await bootWithTan({ imageBytes: new Uint8Array(image) }, 16);
+    expect(a.host.tan?.lanAttached).toBe(true);
+    const aIdentity = a.messages.find((m) => m.type === 'tan-identity');
+    expect(aIdentity).toMatchObject({ hostOctet: 16 });
+    expect(aIdentity && 'detached' in aIdentity ? aIdentity.detached : undefined)
+      .toBeUndefined();
+
+    a.host.runUntil(300);
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'embedded' });
+    const reply = await awaitCaptured(a);
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.primary === undefined) {
+      throw new Error('capture reply incomplete');
+    }
+
+    // The clone: embedded restore. Its guest wears mouse's identity,
+    // so the trunk must stay unplugged — attached, it answers for
+    // mouse and RSTs mouse's connections (field, 2026-07-16: "telnet
+    // from mouse to dog fails ... if close cat, mouse can telnet").
+    const b = await bootWithTan({
+      restore: {
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        embedded: {
+          primary: {
+            imageBytes: reply.primary.bytes,
+            geometry: reply.primary.geometry,
+            diskClass: reply.primary.diskClass,
+          },
+          secondary: null,
+        },
+      },
+    }, 17);
+    expect(b.messages.find((m) => m.type === 'restore-result')).toMatchObject({ ok: true });
+    expect(b.host.tan?.lanAttached).toBe(false);
+    // The lease still ran (the octet is defended for the reboot), and
+    // the identity message says so honestly.
+    expect(b.messages.find((m) => m.type === 'tan-identity')).toMatchObject({
+      hostOctet: 17,
+      detached: true,
+    });
+
+    // A reboot of the clone tab rejoins normally (cold boot, no restore).
+    b.host.handleMessage({ type: 'reset' });
+    await b.host.whenIdle();
+    b.host.handleMessage({ type: 'boot', config: { imageBytes: new Uint8Array(image) } });
+    await b.host.whenIdle();
+    expect(b.host.tan?.lanAttached).toBe(true);
+  });
+});
+
 describe('WorkerHost — the torn resume pair (field fix #4)', () => {
   it('slot committed, store lost: the carried epoch reconstructs and re-enters the hot map', async () => {
     const image = haltImage();
