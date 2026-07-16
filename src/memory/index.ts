@@ -5,4 +5,4 @@ export type { PageStore } from './page-store.js';
 export { IndexedDBPageStore } from './idb-page-store.js';
 export type { IndexedDBPageStoreOptions } from './idb-page-store.js';
 export { PagedMemory } from './paged-memory.js';
-export type { PagedMemoryOptions, WriteBackOptions } from './paged-memory.js';
+export type { PagedMemoryOptions, WriteBackOptions, PagedMemoryState } from './paged-memory.js';

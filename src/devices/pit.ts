@@ -160,6 +160,41 @@ interface Channel {
 const MASK16 = 0xFFFF;
 const MAX16P1 = 0x10000;
 
+/**
+ * Serialized per-channel state (Phase 18 M1) — every mutable Channel
+ * field except `index` (positional). The latched VALUES and both
+ * flip-flops ride along: a capture can land between a latch command and
+ * its read, or between the lo and hi bytes of a lohi write, and
+ * reset-plus-fixups would hand the guest the wrong byte next read.
+ */
+export interface PitChannelState {
+  readonly mode: PITMode;
+  readonly accessMode: PITAccessMode;
+  readonly bcd: boolean;
+  readonly divisor: number;
+  readonly counter: number;
+  readonly output: boolean;
+  readonly gate: boolean;
+  readonly programmed: boolean;
+  readonly latchedCount: number | null;
+  readonly latchedStatus: number | null;
+  readonly writeFlipflop: 'awaitingLow' | 'awaitingHigh';
+  readonly readFlipflop: 'awaitingLow' | 'awaitingHigh';
+  readonly pendingDivisorLow: number;
+  readonly mode0Fired: boolean;
+  readonly mode3HighTicks: number;
+  readonly mode3LowTicks: number;
+  readonly mode3PhaseTick: number;
+  readonly pendingDivisor: number | null;
+}
+
+/** Serialized chip state: the three channels + the sub-tick residual. */
+export interface Pit8254State {
+  readonly v: 1;
+  readonly cyclesAccumulated: number;
+  readonly channels: readonly [PitChannelState, PitChannelState, PitChannelState];
+}
+
 export class PIT8254 implements PortHandler, ClockSubscriber {
   private readonly basePort: number;
   private readonly cyclesPerPitTick: number;
@@ -244,6 +279,74 @@ export class PIT8254 implements PortHandler, ClockSubscriber {
     this.channels[0] = makeChannel(0);
     this.channels[1] = makeChannel(1);
     this.channels[2] = makeChannel(2);
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): Pit8254State {
+    const ch = (c: Channel): PitChannelState => ({
+      mode: c.mode,
+      accessMode: c.accessMode,
+      bcd: c.bcd,
+      divisor: c.divisor,
+      counter: c.counter,
+      output: c.output,
+      gate: c.gate,
+      programmed: c.programmed,
+      latchedCount: c.latchedCount,
+      latchedStatus: c.latchedStatus,
+      writeFlipflop: c.writeFlipflop,
+      readFlipflop: c.readFlipflop,
+      pendingDivisorLow: c.pendingDivisorLow,
+      mode0Fired: c.mode0Fired,
+      mode3HighTicks: c.mode3HighTicks,
+      mode3LowTicks: c.mode3LowTicks,
+      mode3PhaseTick: c.mode3PhaseTick,
+      pendingDivisor: c.pendingDivisor,
+    });
+    return {
+      v: 1,
+      cyclesAccumulated: this.cyclesAccumulated,
+      channels: [ch(this.channels[0]), ch(this.channels[1]), ch(this.channels[2])],
+    };
+  }
+
+  /**
+   * Restore captured chip state verbatim. No rising-edge callbacks fire
+   * — an edge that was crossed before capture already asserted its IRQ
+   * into the captured PIC/controller state; re-firing here would
+   * double-deliver it.
+   */
+  restoreState(state: Pit8254State): void {
+    if (state.v !== 1) {
+      throw new Error(`PIT8254.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.cyclesAccumulated = state.cyclesAccumulated;
+    for (let i = 0 as 0 | 1 | 2; i <= 2; i = (i + 1) as 0 | 1 | 2) {
+      const s = state.channels[i];
+      const c = this.channels[i];
+      c.mode = s.mode;
+      c.accessMode = s.accessMode;
+      c.bcd = s.bcd;
+      c.divisor = s.divisor;
+      c.counter = s.counter;
+      c.output = s.output;
+      c.gate = s.gate;
+      c.programmed = s.programmed;
+      c.latchedCount = s.latchedCount;
+      c.latchedStatus = s.latchedStatus;
+      c.writeFlipflop = s.writeFlipflop;
+      c.readFlipflop = s.readFlipflop;
+      c.pendingDivisorLow = s.pendingDivisorLow;
+      c.mode0Fired = s.mode0Fired;
+      c.mode3HighTicks = s.mode3HighTicks;
+      c.mode3LowTicks = s.mode3LowTicks;
+      c.mode3PhaseTick = s.mode3PhaseTick;
+      c.pendingDivisor = s.pendingDivisor;
+      if (i === 2) break;
+    }
   }
 
   // ============================================================

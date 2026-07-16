@@ -84,6 +84,22 @@ export class Clock {
   }
 
   /**
+   * Restore the cycle counter to a captured value WITHOUT notifying
+   * subscribers (Phase 18 M1 — the brief's scoped rule-3 addition).
+   * Like `reset()`, this is a discontinuity, not an advance: notifying
+   * would tick the PIT for the whole restored span, double-counting time
+   * the captured machine already lived through. Devices restore their own
+   * clock-derived state (e.g. the PIT's sub-tick residual) from their own
+   * serialized form.
+   */
+  restoreCycles(cycles: number): void {
+    if (!Number.isInteger(cycles) || cycles < 0) {
+      throw new Error(`Clock.restoreCycles(${cycles}): cycles must be a non-negative integer`);
+    }
+    this.cycles = cycles;
+  }
+
+  /**
    * Advance virtual time by `cycles`. Notifies all subscribers in
    * registration order *after* the time has been bumped.
    *

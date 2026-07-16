@@ -163,6 +163,10 @@ reports; load-bearing subset here)
 
 ### M1 — the state plane + equivalence harness
 
+**LANDED 2026-07-16 — `PHASE18_M1_REPORT.md` is the record.** Every
+§1.2 pair exact-state (no D6 downgrades); harness green at two ELKS
+checkpoints including a post-prompt live-command continuation.
+
 Serialize/restore pairs for every §1.2 component; the CPUSnapshot
 interruptInhibit fix; PagedMemory page-bytes accessor + Clock
 silent cycle setter (the two rule-3 additions, scoped here);

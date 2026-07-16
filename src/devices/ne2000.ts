@@ -117,7 +117,47 @@ const ISR_RST = 0x80;
 /** DCR.WTS — word transfer select. */
 const DCR_WTS = 0x01;
 
-type RemoteMode = 'idle' | 'read' | 'write';
+export type RemoteMode = 'idle' | 'read' | 'write';
+
+/**
+ * Serialized chip state (Phase 18 M1): the full register file, the
+ * 16 KiB packet ring, the PROM, the remote-DMA engine, and the IRQ
+ * level tracker. The PROM rides along even though it's derived from the
+ * constructor MAC — a snapshot must be exact regardless of what MAC the
+ * restore-target machine was constructed with (the clone-identity
+ * question is D5's, not this layer's). The rx/irq diagnostics counters
+ * are included so a restored machine's `inspectRx()` story stays honest.
+ */
+export interface Ne2000State {
+  readonly v: 1;
+  readonly cr: number;
+  readonly isr: number;
+  readonly imr: number;
+  readonly dcr: number;
+  readonly tcr: number;
+  readonly rcr: number;
+  readonly rsr: number;
+  readonly tsr: number;
+  readonly pstart: number;
+  readonly pstop: number;
+  readonly bnry: number;
+  readonly curr: number;
+  readonly tpsr: number;
+  readonly tbcr: number;
+  readonly rsar: number;
+  readonly rbcr: number;
+  readonly par: Uint8Array;
+  readonly mar: Uint8Array;
+  readonly prom: Uint8Array;
+  readonly ram: Uint8Array;
+  readonly remoteMode: RemoteMode;
+  readonly dmaAddr: number;
+  readonly dmaRemaining: number;
+  readonly irqLevel: boolean;
+  readonly rxAccepted: number;
+  readonly rxDropped: number;
+  readonly irqEdges: number;
+}
 
 export interface NE2000Options {
   /** Base port. Default {@link NE2K_BASE}; claims `[base..base+0x1F]`. */
@@ -301,6 +341,86 @@ export class NE2000 implements PortHandler {
     return true;
   }
 
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): Ne2000State {
+    return {
+      v: 1,
+      cr: this.#cr,
+      isr: this.#isr,
+      imr: this.#imr,
+      dcr: this.#dcr,
+      tcr: this.#tcr,
+      rcr: this.#rcr,
+      rsr: this.#rsr,
+      tsr: this.#tsr,
+      pstart: this.#pstart,
+      pstop: this.#pstop,
+      bnry: this.#bnry,
+      curr: this.#curr,
+      tpsr: this.#tpsr,
+      tbcr: this.#tbcr,
+      rsar: this.#rsar,
+      rbcr: this.#rbcr,
+      par: new Uint8Array(this.#par),
+      mar: new Uint8Array(this.#mar),
+      prom: new Uint8Array(this.#prom),
+      ram: new Uint8Array(this.#ram),
+      remoteMode: this.#remoteMode,
+      dmaAddr: this.#dmaAddr,
+      dmaRemaining: this.#dmaRemaining,
+      irqLevel: this.#irqLevel,
+      rxAccepted: this.rxAccepted,
+      rxDropped: this.rxDropped,
+      irqEdges: this.irqEdges,
+    };
+  }
+
+  /**
+   * Restore captured chip state verbatim. `onIRQ` never fires here —
+   * `#irqLevel` is restored directly, so a level that was high at
+   * capture stays high without a duplicate edge (the original edge is
+   * in the captured PIC/controller state).
+   */
+  restoreState(state: Ne2000State): void {
+    if (state.v !== 1) {
+      throw new Error(`NE2000.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    if (state.ram.length !== RAM_SIZE || state.prom.length !== 32
+      || state.par.length !== 6 || state.mar.length !== 8) {
+      throw new Error('NE2000.restoreState: buffer length mismatch');
+    }
+    this.#cr = state.cr;
+    this.#isr = state.isr;
+    this.#imr = state.imr;
+    this.#dcr = state.dcr;
+    this.#tcr = state.tcr;
+    this.#rcr = state.rcr;
+    this.#rsr = state.rsr;
+    this.#tsr = state.tsr;
+    this.#pstart = state.pstart;
+    this.#pstop = state.pstop;
+    this.#bnry = state.bnry;
+    this.#curr = state.curr;
+    this.#tpsr = state.tpsr;
+    this.#tbcr = state.tbcr;
+    this.#rsar = state.rsar;
+    this.#rbcr = state.rbcr;
+    this.#par.set(state.par);
+    this.#mar.set(state.mar);
+    this.#prom.set(state.prom);
+    this.#ram.set(state.ram);
+    this.#remoteMode = state.remoteMode;
+    this.#dmaAddr = state.dmaAddr;
+    this.#dmaRemaining = state.dmaRemaining;
+    this.#irqLevel = state.irqLevel;
+    this.rxAccepted = state.rxAccepted;
+    this.rxDropped = state.rxDropped;
+    this.irqEdges = state.irqEdges;
+  }
 
   /** Diagnostic snapshot of receive-path state. */
   inspectRx(): {

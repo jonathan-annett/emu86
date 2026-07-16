@@ -51,6 +51,20 @@ export interface WriteBackOptions {
   intervalMs?: number;
 }
 
+/**
+ * Serialized RAM image (Phase 18 M1). Carries every resident RAM page;
+ * ROM pages are deliberately excluded — they are rebuilt deterministically
+ * at machine construction (`buildBiosRom()`), so serializing them would
+ * only bloat the snapshot and invite fingerprint drift.
+ */
+export interface PagedMemoryState {
+  readonly v: 1;
+  /** Page size the pages were captured at. Restore refuses a mismatch. */
+  readonly pageSize: number;
+  /** Non-ROM resident pages, sorted by pageId. Bytes are copies. */
+  readonly pages: ReadonlyArray<{ readonly pageId: number; readonly bytes: Uint8Array }>;
+}
+
 export class PagedMemory implements Memory {
   readonly pageSize: number;
   readonly pageMask: number;          // pageSize - 1, for offset-in-page
@@ -240,6 +254,94 @@ export class PagedMemory implements Memory {
    *  pages or pages that haven't been materialised. */
   isReadOnly(pageId: number): boolean {
     return this.pages.get(pageId)?.readonly ?? false;
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1 — the brief's scoped rule-3 addition)
+  // ============================================================
+
+  /**
+   * Copy the bytes of one resident page. Returns `null` for pages that
+   * have never been materialised (their content is all-zero by
+   * construction). The returned array is a copy — callers can't alias
+   * our slabs.
+   */
+  getPageBytes(pageId: number): Uint8Array | null {
+    const slab = this.pages.get(pageId);
+    return slab ? new Uint8Array(slab.data) : null;
+  }
+
+  /**
+   * Serialize every resident RAM page (ROM pages excluded — see
+   * {@link PagedMemoryState}). Pages are emitted sorted by pageId so two
+   * captures of identical memory compare byte-for-byte without a sort.
+   */
+  serializeState(): PagedMemoryState {
+    const pages: Array<{ pageId: number; bytes: Uint8Array }> = [];
+    const ids = Array.from(this.pages.keys()).sort((a, b) => a - b);
+    for (const pageId of ids) {
+      const slab = this.pages.get(pageId);
+      if (!slab || slab.readonly) continue;
+      pages.push({ pageId, bytes: new Uint8Array(slab.data) });
+    }
+    return { v: 1, pageSize: this.pageSize, pages };
+  }
+
+  /**
+   * Overwrite RAM with a serialized image:
+   *
+   *   - Every RAM page in `state` is materialised (if needed) and its
+   *     bytes replaced. Restored pages enter the dirty set — a backing
+   *     store, when present, must be told their contents changed.
+   *   - Resident RAM pages NOT in `state` are dropped entirely, so the
+   *     resident set matches the capture exactly (a later
+   *     `serializeState()` round-trips byte-identically).
+   *   - ROM pages are untouched. A `state` page that collides with a
+   *     resident ROM page is a configuration mismatch — fail loud.
+   *
+   * Validation runs before any mutation, so a thrown restore leaves
+   * memory in its prior state.
+   */
+  restoreState(state: PagedMemoryState): void {
+    if (state.v !== 1) {
+      throw new Error(`PagedMemory.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    if (state.pageSize !== this.pageSize) {
+      throw new Error(
+        `PagedMemory.restoreState: pageSize mismatch (state ${state.pageSize}, memory ${this.pageSize})`,
+      );
+    }
+    const maxPageId = (this.addressSpaceSize >>> this.pageShift) - 1;
+    for (const { pageId, bytes } of state.pages) {
+      if (!Number.isInteger(pageId) || pageId < 0 || pageId > maxPageId) {
+        throw new Error(`PagedMemory.restoreState: pageId ${pageId} out of range (max ${maxPageId})`);
+      }
+      if (bytes.length !== this.pageSize) {
+        throw new Error(
+          `PagedMemory.restoreState: page ${pageId} has ${bytes.length} bytes (pageSize ${this.pageSize})`,
+        );
+      }
+      if (this.pages.get(pageId)?.readonly) {
+        throw new Error(
+          `PagedMemory.restoreState: page ${pageId} is ROM here but RAM in the snapshot (config mismatch)`,
+        );
+      }
+    }
+
+    // Drop resident RAM pages absent from the snapshot (they were not
+    // resident at capture, i.e. all-zero to the guest).
+    const keep = new Set(state.pages.map((p) => p.pageId));
+    for (const [pageId, slab] of this.pages) {
+      if (slab.readonly || keep.has(pageId)) continue;
+      this.pages.delete(pageId);
+      this.dirty.delete(pageId);
+    }
+
+    for (const { pageId, bytes } of state.pages) {
+      const slab = this.pages.get(pageId) ?? this.#materialisePage(pageId);
+      slab.data.set(bytes);
+      this.dirty.add(pageId);
+    }
   }
 
   // ============================================================

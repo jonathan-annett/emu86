@@ -103,6 +103,25 @@ interface PendingQuery {
   buffer: Uint8Array;
 }
 
+/**
+ * Serialized DNS-host state (Phase 18 M1): the learned ARP table, the
+ * IP header ID counter, and the diagnostics counters. TCP connections,
+ * per-connection query buffers, and in-flight resolves are deliberately
+ * NOT carried — laptop-resume semantics (brief §1.3): the stack RSTs
+ * segments for unknown connections, the guest's own 2-second resolver
+ * alarm covers the rest.
+ */
+export interface DnsHostState {
+  readonly v: 1;
+  /** [dotted IP, MAC bytes] pairs. */
+  readonly arpTable: ReadonlyArray<readonly [string, readonly number[]]>;
+  readonly ipId: number;
+  readonly queriesResolved: number;
+  readonly servfailsSent: number;
+  readonly answersDropped: number;
+  readonly localAnswers: number;
+}
+
 export class DnsHost {
   readonly ip: Ipv4;
   readonly mac: Mac;
@@ -184,6 +203,41 @@ export class DnsHost {
   /** The transport engine — exposed for tests/diagnostics. */
   get tcp(): TcpStack {
     return this.#tcp;
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): DnsHostState {
+    const arpTable: Array<readonly [string, readonly number[]]> = [];
+    for (const [ip, mac] of this.#arpTable) arpTable.push([ip, [...mac]]);
+    return {
+      v: 1,
+      arpTable,
+      ipId: this.#ipId,
+      queriesResolved: this.queriesResolved,
+      servfailsSent: this.servfailsSent,
+      answersDropped: this.answersDropped,
+      localAnswers: this.localAnswers,
+    };
+  }
+
+  /**
+   * Restore captured state. Live TCP connections and buffered queries
+   * are dropped (see {@link DnsHostState}) — restore transmits nothing.
+   */
+  restoreState(state: DnsHostState): void {
+    if (state.v !== 1) {
+      throw new Error(`DnsHost.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.#arpTable.clear();
+    for (const [ip, mac] of state.arpTable) this.#arpTable.set(ip, [...mac]);
+    this.#ipId = state.ipId;
+    this.queriesResolved = state.queriesResolved;
+    this.servfailsSent = state.servfailsSent;
+    this.answersDropped = state.answersDropped;
+    this.localAnswers = state.localAnswers;
   }
 
   // ============================================================

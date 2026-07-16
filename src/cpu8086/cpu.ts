@@ -34,6 +34,16 @@ export interface CPUSnapshot {
   readonly flags: Word;
   readonly halted: boolean;
   readonly segOverride: SegmentOverride;
+  /**
+   * The one-instruction interrupt-inhibit window (STI / POP SS / MOV SS).
+   * Legal cross-boundary state — a snapshot taken right after an STI that
+   * set it must restore with it set, or the very next boundary check
+   * services an interrupt real silicon would have held off. Missing from
+   * the snapshot for 13 phases (found by Phase 18 recon); `repPrefix` by
+   * contrast is set and cleared inside a single `step()` dispatch and can
+   * never be non-null at a boundary, so it stays out.
+   */
+  readonly interruptInhibit: boolean;
 }
 
 export type SegmentOverride = 0 | 1 | 2 | 3 | null;  // ES | CS | SS | DS | none
@@ -293,6 +303,7 @@ export class CPU8086 {
       flags: this.flags.value,
       halted: this.halted,
       segOverride: this.segOverride,
+      interruptInhibit: this.interruptInhibit,
     };
   }
 
@@ -301,5 +312,6 @@ export class CPU8086 {
     this.flags.value = s.flags;
     this.halted = s.halted;
     this.segOverride = s.segOverride;
+    this.interruptInhibit = s.interruptInhibit;
   }
 }

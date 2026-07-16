@@ -61,9 +61,15 @@ repo is PUBLIC (MIT) as of 2026-07-16.** Read the incident section
 of `RELEASE_PROCEDURE.md` before trusting or running ANY deploy —
 a shadow CI once raced the CLI here. **The living plan is
 `emu86-phase18-brief.md`** ("frozen in amber" — whole-machine state
-capture); its §4 decisions D1-D6 await Jonathan, and the brief is
-self-contained (its recon detail is in §1-§2). The old list below
-stands as history.
+capture); D1 + D5 are decided, D2-D4 remain Jonathan's. **Phase 18 M1
+LANDED 2026-07-16** (`PHASE18_M1_REPORT.md`): every device has an
+exact-state serialize/restore pair, `CPUSnapshot.interruptInhibit` is
+fixed, `src/machine/machine-state.ts` composes whole-machine
+capture/restore, and the equivalence harness
+(`tests/integration/state-equivalence.test.ts`) is green over real
+ELKS boots. M2 (capture protocol + save-states + reload-resume, the
+hot-resume telnet crown) is next. The old list below stands as
+history.
 
 ## 2. Test baseline — read this before you think you broke something
 

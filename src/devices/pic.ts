@@ -53,7 +53,27 @@ export interface PIC8259Options {
   warn?: (msg: string) => void;
 }
 
-type InitState = 'idle' | 'awaitingIcw2' | 'awaitingIcw3' | 'awaitingIcw4';
+export type InitState = 'idle' | 'awaitingIcw2' | 'awaitingIcw3' | 'awaitingIcw4';
+
+/**
+ * Serialized chip state (Phase 18 M1). Everything mutable, including the
+ * mid-ICW init state machine — a capture can legally land between ICW1
+ * and ICW2, and reset-plus-fixups would replay init the guest already
+ * half-finished. Wiring (controller ref, ports, warn) is construction
+ * state and stays out.
+ */
+export interface Pic8259State {
+  readonly v: 1;
+  readonly irr: number;
+  readonly isr: number;
+  readonly imr: number;
+  readonly vectorBase: number;
+  readonly initState: InitState;
+  readonly expectIcw3: boolean;
+  readonly expectIcw4: boolean;
+  readonly levelTriggered: boolean;
+  readonly readSelector: 'irr' | 'isr';
+}
 
 export class PIC8259 implements PortHandler {
   // ---- programmer-visible registers ----
@@ -162,6 +182,48 @@ export class PIC8259 implements PortHandler {
     this.expectIcw4 = false;
     this.levelTriggered = false;
     this.readSelector = 'irr';
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): Pic8259State {
+    return {
+      v: 1,
+      irr: this.irr,
+      isr: this.isr,
+      imr: this.imr,
+      vectorBase: this.vectorBase,
+      initState: this.initState,
+      expectIcw3: this.expectIcw3,
+      expectIcw4: this.expectIcw4,
+      levelTriggered: this.levelTriggered,
+      readSelector: this.readSelector,
+    };
+  }
+
+  /**
+   * Restore captured chip state verbatim. Deliberately does NOT call
+   * `updatePending()`: an IRR bit that was pending at capture had not
+   * been forwarded to the CPU's controller, and forwarding it now would
+   * raise a vector the captured controller FIFO doesn't carry — the
+   * next `assertIRQ` / IMR write / EOI re-evaluates exactly as the
+   * original machine would have.
+   */
+  restoreState(state: Pic8259State): void {
+    if (state.v !== 1) {
+      throw new Error(`PIC8259.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.irr = state.irr & 0xFF;
+    this.isr = state.isr & 0xFF;
+    this.imr = state.imr & 0xFF;
+    this.vectorBase = state.vectorBase & 0xFF;
+    this.initState = state.initState;
+    this.expectIcw3 = state.expectIcw3;
+    this.expectIcw4 = state.expectIcw4;
+    this.levelTriggered = state.levelTriggered;
+    this.readSelector = state.readSelector;
   }
 
   // ============================================================

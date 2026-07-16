@@ -168,6 +168,29 @@ export interface UART16550Options {
 }
 
 /**
+ * Serialized chip state (Phase 18 M1) — every mutable register, the RX
+ * FIFO, and the IRQ engine. `thriArmed` / `irqPending` /
+ * `pendingIIRSource` are exactly the private trio `inspect()` doesn't
+ * expose: drop them and a restored guest either misses a THRI interrupt
+ * it was owed or reads a phantom IIR source.
+ */
+export interface Uart16550State {
+  readonly v: 1;
+  readonly ier: number;
+  readonly lcr: number;
+  readonly mcr: number;
+  readonly dll: number;
+  readonly dlm: number;
+  readonly scratch: number;
+  readonly fifoEnabled: boolean;
+  readonly rxFifo: readonly number[];
+  readonly overrun: boolean;
+  readonly irqPending: boolean;
+  readonly pendingIIRSource: number;
+  readonly thriArmed: boolean;
+}
+
+/**
  * Read-only inspection state, exposed for tests and diagnostics. Shape is
  * deliberately conservative — only fields tests need to assert on.
  */
@@ -307,6 +330,53 @@ export class UART16550 implements PortHandler {
     this.overrun = false;
     this.irqPending = false;
     this.pendingIIRSource = IIR_NO_INT;
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): Uart16550State {
+    return {
+      v: 1,
+      ier: this.ier,
+      lcr: this.lcr,
+      mcr: this.mcr,
+      dll: this.dll,
+      dlm: this.dlm,
+      scratch: this.scratch,
+      fifoEnabled: this.fifoEnabled,
+      rxFifo: [...this.rxFifo],
+      overrun: this.overrun,
+      irqPending: this.irqPending,
+      pendingIIRSource: this.pendingIIRSource,
+      thriArmed: this.thriArmed,
+    };
+  }
+
+  /**
+   * Restore captured chip state verbatim. Deliberately does NOT call
+   * `recomputeIRQ()`: an IRQ edge that fired before capture is already
+   * in the captured PIC/controller state, and `onIRQ4` re-firing here
+   * would double-assert it.
+   */
+  restoreState(state: Uart16550State): void {
+    if (state.v !== 1) {
+      throw new Error(`UART16550.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.ier = state.ier;
+    this.lcr = state.lcr;
+    this.mcr = state.mcr;
+    this.dll = state.dll;
+    this.dlm = state.dlm;
+    this.scratch = state.scratch;
+    this.fifoEnabled = state.fifoEnabled;
+    this.rxFifo.length = 0;
+    this.rxFifo.push(...state.rxFifo);
+    this.overrun = state.overrun;
+    this.irqPending = state.irqPending;
+    this.pendingIIRSource = state.pendingIIRSource;
+    this.thriArmed = state.thriArmed;
   }
 
   // ============================================================

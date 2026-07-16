@@ -1,10 +1,12 @@
 export { PIC8259 } from './pic.js';
-export type { PIC8259Options } from './pic.js';
+export type { PIC8259Options, Pic8259State, InitState } from './pic.js';
 export { PIT8254 } from './pit.js';
-export type { PIT8254Options, PITAccessMode, PITMode } from './pit.js';
+export type { PIT8254Options, PITAccessMode, PITMode, Pit8254State, PitChannelState } from './pit.js';
 export { KeyboardController8042 } from './keyboard-controller.js';
-export type { KeyboardController8042Options } from './keyboard-controller.js';
+export type { KeyboardController8042Options, KeyboardController8042State, NextDataWrite } from './keyboard-controller.js';
 export { UART16550, COM1_BASE, COM1_IRQ } from './uart-16550.js';
-export type { UART16550Options, UART16550InspectionState } from './uart-16550.js';
+export type { UART16550Options, UART16550InspectionState, Uart16550State } from './uart-16550.js';
 export { NE2000, NE2K_BASE, NE2K_IRQ, NE2K_DEFAULT_MAC } from './ne2000.js';
-export type { NE2000Options } from './ne2000.js';
+export type { NE2000Options, Ne2000State, RemoteMode } from './ne2000.js';
+export { RTC146818 } from './rtc.js';
+export type { Rtc146818State } from './rtc.js';

@@ -75,7 +75,26 @@ export interface KeyboardController8042Options {
  * value, NOT a keyboard scancode. After that single byte the state
  * machine returns to the default ("data going to the keyboard").
  */
-type NextDataWrite = 'keyboard' | 'commandByte' | 'outputPort' | 'aux';
+export type NextDataWrite = 'keyboard' | 'commandByte' | 'outputPort' | 'aux';
+
+/**
+ * Serialized controller state (Phase 18 M1). `nextDataWriteIs` is the
+ * multi-byte command state: a capture can land between a 0xD1 command
+ * and its data byte, and dropping it would route the guest's pending
+ * P2 write to the (headless) keyboard instead. `a20Enabled` is derived
+ * from `outputPort` on restore, not carried.
+ */
+export interface KeyboardController8042State {
+  readonly v: 1;
+  readonly outputBuffer: number;
+  readonly outputBufferFull: boolean;
+  readonly inputBufferFull: boolean;
+  readonly lastWriteWasCommand: boolean;
+  readonly nextDataWriteIs: NextDataWrite;
+  readonly commandByte: number;
+  readonly outputPort: number;
+  readonly scancodeQueue: readonly number[];
+}
 
 /**
  * Default command byte after reset. Bits chosen to look like a sane
@@ -214,6 +233,45 @@ export class KeyboardController8042 implements PortHandler {
     this._outputPort = DEFAULT_OUTPUT_PORT;
     this._a20Enabled = (DEFAULT_OUTPUT_PORT & 0x02) !== 0;
     this._scancodeQueue.length = 0;
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): KeyboardController8042State {
+    return {
+      v: 1,
+      outputBuffer: this._outputBuffer,
+      outputBufferFull: this._outputBufferFull,
+      inputBufferFull: this._inputBufferFull,
+      lastWriteWasCommand: this._lastWriteWasCommand,
+      nextDataWriteIs: this._nextDataWriteIs,
+      commandByte: this._commandByte,
+      outputPort: this._outputPort,
+      scancodeQueue: [...this._scancodeQueue],
+    };
+  }
+
+  /**
+   * Restore captured state verbatim. `onIRQ1` does not fire even when
+   * the restored output buffer is full — the edge for that byte already
+   * asserted into the captured PIC state.
+   */
+  restoreState(state: KeyboardController8042State): void {
+    if (state.v !== 1) {
+      throw new Error(`KeyboardController8042.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this._outputBuffer = state.outputBuffer & 0xFF;
+    this._outputBufferFull = state.outputBufferFull;
+    this._inputBufferFull = state.inputBufferFull;
+    this._lastWriteWasCommand = state.lastWriteWasCommand;
+    this._nextDataWriteIs = state.nextDataWriteIs;
+    this._commandByte = state.commandByte & 0xFF;
+    this._outputPort = state.outputPort & 0xFF;
+    this._a20Enabled = (this._outputPort & 0x02) !== 0;
+    this._scancodeQueue.length = 0;
+    this._scancodeQueue.push(...state.scancodeQueue);
   }
 
   // ============================================================

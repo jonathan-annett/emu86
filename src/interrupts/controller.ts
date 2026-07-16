@@ -37,6 +37,17 @@ export interface InterruptController {
 }
 
 /**
+ * Serialized controller state (Phase 18 M1). A PIC-raised vector can
+ * legally sit queued across a message boundary — dropping the FIFO at
+ * capture would lose a delivered-but-unserviced interrupt.
+ */
+export interface InterruptControllerState {
+  readonly v: 1;
+  readonly queue: readonly number[];
+  readonly nmiPending: boolean;
+}
+
+/**
  * Minimal interrupt-controller implementation: a FIFO queue of maskable
  * vectors plus a single boolean for NMI.
  *
@@ -93,6 +104,19 @@ export class BasicInterruptController implements InterruptController {
     // but cheap insurance) see the same array post-reset.
     this.queue.length = 0;
     this.nmiPending = false;
+  }
+
+  serializeState(): InterruptControllerState {
+    return { v: 1, queue: [...this.queue], nmiPending: this.nmiPending };
+  }
+
+  restoreState(state: InterruptControllerState): void {
+    if (state.v !== 1) {
+      throw new Error(`BasicInterruptController.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.queue.length = 0;
+    this.queue.push(...state.queue);
+    this.nmiPending = state.nmiPending;
   }
 }
 

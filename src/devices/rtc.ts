@@ -59,6 +59,18 @@ function bcd(value: number): number {
   return ((Math.floor(value / 10) << 4) | value % 10) & 0xff;
 }
 
+/**
+ * Serialized chip state (Phase 18 M1): the index register + the CMOS
+ * scratch RAM, nothing else. Time is wall-served from the injected
+ * HostClock on every read, so a restored RTC is resume-correct by
+ * construction — exactly the laptop-resume semantics the phase wants.
+ */
+export interface Rtc146818State {
+  readonly v: 1;
+  readonly index: number;
+  readonly cmos: Uint8Array;
+}
+
 export class RTC146818 implements PortHandler {
   readonly #hostClock: HostClock;
   #index = 0;
@@ -77,6 +89,23 @@ export class RTC146818 implements PortHandler {
     this.#index = 0;
     // Scratch CMOS survives reset — it's battery-backed RAM on real
     // hardware; the machine's power-on reset is not a battery pull.
+  }
+
+  serializeState(): Rtc146818State {
+    return { v: 1, index: this.#index, cmos: new Uint8Array(this.#cmos) };
+  }
+
+  restoreState(state: Rtc146818State): void {
+    if (state.v !== 1) {
+      throw new Error(`RTC146818.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    if (state.cmos.length !== this.#cmos.length) {
+      throw new Error(
+        `RTC146818.restoreState: cmos length ${state.cmos.length} (expected ${this.#cmos.length})`,
+      );
+    }
+    this.#index = state.index & 0x7f;
+    this.#cmos.set(state.cmos);
   }
 
   readByte(port: number): number {

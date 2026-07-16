@@ -88,6 +88,28 @@ interface PendingPing {
   readonly payload: Uint8Array;
 }
 
+/**
+ * Serialized gateway state (Phase 18 M1): the learned ARP table, the IP
+ * header ID counter, and the diagnostics counters. Pending pings are
+ * deliberately NOT carried — laptop-resume semantics (brief §1.3): they
+ * were queued behind an ARP whose reply belongs to the pre-capture
+ * wire, and the ping originator retries. TCP handlers are wiring, not
+ * state.
+ */
+export interface LanGatewayState {
+  readonly v: 1;
+  /** [dotted IP, MAC bytes] pairs. */
+  readonly arpTable: ReadonlyArray<readonly [string, readonly number[]]>;
+  readonly ipId: number;
+  readonly arpRepliesSent: number;
+  readonly echoRequestsSent: number;
+  readonly echoRepliesSent: number;
+  readonly echoRepliesReceived: number;
+  readonly tcpForwarded: number;
+  readonly tcpLocalDelivered: number;
+  readonly unreachablesSent: number;
+}
+
 export class LanGateway {
   readonly ip: Ipv4;
   readonly mac: Mac;
@@ -139,6 +161,48 @@ export class LanGateway {
   /** Read-only view of the learned IP→MAC table (dotted-IP keys). */
   get arpTable(): ReadonlyMap<string, Mac> {
     return this.#arpTable;
+  }
+
+  // ============================================================
+  // State plane (Phase 18 M1)
+  // ============================================================
+
+  serializeState(): LanGatewayState {
+    const arpTable: Array<readonly [string, readonly number[]]> = [];
+    for (const [ip, mac] of this.#arpTable) arpTable.push([ip, [...mac]]);
+    return {
+      v: 1,
+      arpTable,
+      ipId: this.#ipId,
+      arpRepliesSent: this.arpRepliesSent,
+      echoRequestsSent: this.echoRequestsSent,
+      echoRepliesSent: this.echoRepliesSent,
+      echoRepliesReceived: this.echoRepliesReceived,
+      tcpForwarded: this.tcpForwarded,
+      tcpLocalDelivered: this.tcpLocalDelivered,
+      unreachablesSent: this.unreachablesSent,
+    };
+  }
+
+  /**
+   * Restore captured state. Pending pings are dropped (see
+   * {@link LanGatewayState}) — restore does not transmit anything.
+   */
+  restoreState(state: LanGatewayState): void {
+    if (state.v !== 1) {
+      throw new Error(`LanGateway.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    this.#arpTable.clear();
+    for (const [ip, mac] of state.arpTable) this.#arpTable.set(ip, [...mac]);
+    this.#pendingPings.length = 0;
+    this.#ipId = state.ipId;
+    this.arpRepliesSent = state.arpRepliesSent;
+    this.echoRequestsSent = state.echoRequestsSent;
+    this.echoRepliesSent = state.echoRepliesSent;
+    this.echoRepliesReceived = state.echoRepliesReceived;
+    this.tcpForwarded = state.tcpForwarded;
+    this.tcpLocalDelivered = state.tcpLocalDelivered;
+    this.unreachablesSent = state.unreachablesSent;
   }
 
   /**

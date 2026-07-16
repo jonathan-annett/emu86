@@ -47,6 +47,22 @@ interface PortState {
   attached: boolean;
 }
 
+/**
+ * Serialized CAM table (Phase 18 M1). Ports are identified by their
+ * attach-time `name` — the wiring layer attaches with stable unique
+ * names ('ne2000', 'gateway', 'dns'), and a restored table only makes
+ * sense against the same port set. Recon hard problem 5 is why this
+ * exists at all: the CAM learns only from source MACs, a restored guest
+ * may never re-ARP, and an empty post-restore CAM kills its unicast
+ * delivery silently.
+ */
+export interface EthernetSwitchState {
+  readonly v: 1;
+  /** [macKey (lowercase hex), portName] pairs. */
+  readonly cam: ReadonlyArray<readonly [string, string]>;
+  readonly runtsDropped: number;
+}
+
 export class EthernetSwitch {
   readonly #ports: PortState[] = [];
   /** CAM table: MAC (as lowercase hex key) → port. */
@@ -76,6 +92,41 @@ export class EthernetSwitch {
   /** Frames dropped for being shorter than an ethernet header. */
   get runtsDropped(): number {
     return this.#runtsDropped;
+  }
+
+  serializeState(): EthernetSwitchState {
+    const cam: Array<readonly [string, string]> = [];
+    for (const [mac, port] of this.#cam) cam.push([mac, port.name]);
+    return { v: 1, cam, runtsDropped: this.#runtsDropped };
+  }
+
+  /**
+   * Restore a captured CAM against the CURRENT port set, matching by
+   * port name. An entry naming a port that isn't attached is a config
+   * mismatch — fail loud rather than drop it (a silently thinner CAM is
+   * exactly the failure mode this serialization exists to prevent).
+   * With duplicate port names the first attached match wins; the wiring
+   * layer keeps names unique.
+   */
+  restoreState(state: EthernetSwitchState): void {
+    if (state.v !== 1) {
+      throw new Error(`EthernetSwitch.restoreState: unsupported schema version ${String(state.v)}`);
+    }
+    const byName = new Map<string, PortState>();
+    for (const p of this.#ports) {
+      if (!byName.has(p.name)) byName.set(p.name, p);
+    }
+    const resolved: Array<[string, PortState]> = [];
+    for (const [mac, portName] of state.cam) {
+      const port = byName.get(portName);
+      if (port === undefined) {
+        throw new Error(`EthernetSwitch.restoreState: no attached port named '${portName}'`);
+      }
+      resolved.push([mac, port]);
+    }
+    this.#cam.clear();
+    for (const [mac, port] of resolved) this.#cam.set(mac, port);
+    this.#runtsDropped = state.runtsDropped;
   }
 
   /** Diagnostic snapshot: port names and the learned MAC table. */
