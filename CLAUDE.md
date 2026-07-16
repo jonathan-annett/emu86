@@ -61,17 +61,28 @@ repo is PUBLIC (MIT) as of 2026-07-16.** Read the incident section
 of `RELEASE_PROCEDURE.md` before trusting or running ANY deploy —
 a shadow CI once raced the CLI here. **The living plan is
 `emu86-phase18-brief.md`** ("frozen in amber" — whole-machine state
-capture); D1/D2/D4/D5 decided, D3 (clone transport) open for M3.
-**Phase 18 M1 + M2 LANDED 2026-07-16** (`PHASE18_M1_REPORT.md`,
-`PHASE18_M2_REPORT.md`): M1 = exact-state serialize/restore pairs for
-every device + `machine-state.ts` compose + the equivalence harness
-(LAW) green over real ELKS boots; M2 = capture-state/state-captured
-protocol, `BootConfig.restore` (embedded for named saves, hash-
-verified reference for the reload-resume slot — refusals cold-boot
-honestly), the `emu86-machines` IDB tenant, settings save-states UI,
-and the hidden-capture resume slot. NEXT: Jonathan's field pass (M4
-scenarios: the telnet crown, mid-compile save) on dev, then M3 the
-clone. The old list below stands as history.
+capture); ALL of D1–D6 are decided in it. **Phase 18 M1 + M2 + M3 ALL
+LANDED 2026-07-16** (`PHASE18_M1_REPORT.md`, `PHASE18_M2_REPORT.md`,
+`PHASE18_M3_REPORT.md`): M1 = exact-state serialize pairs + the
+equivalence harness (LAW); M2 = capture/restore protocol, named
+save-states, the reload-resume slot; then the M4 field loop hardened
+M2 in-session — **field fix #4** (the torn resume pair: the slot
+carries its own delta, two-phase everything; brief §6) and **§7 the
+0-stale capture** (input pinning via a store digest replaced the
+per-capture 32 MiB hash; the F5 capture now lands inside teardown) —
+and **M3 the clone** shipped last (D3(a) broadcast handshake, parent
+snapshots through the named-save path, child boots frozen-in-amber;
+D5(b) detached cable + no reload-resume until the clone's first
+reboot, recorded warts). Same session: XMS M3(a) proven (the
+equivalence law on the 4 MiB machine, resident pages above 1 MiB),
+the inspect popup grew guest-time-vs-uptime, elks-boot-phase4 tells
+the XMS-era truth, RELEASE_PROCEDURE.md warns about piped exit
+codes, and HUMANS_*.md files are Jonathan's out-of-band agent notes
+— gitignored, never committed. Baseline: **1,415 passed / 1
+skipped**. NEXT: Jonathan's field pass over the whole line
+(mid-tetris F5, the clone, date-vs-uptime, hello.sh with daemons —
+XMS M3(b)), then the un-scripted-machine brief ruling. The old list
+below stands as history.
 
 ## 2. Test baseline — read this before you think you broke something
 
