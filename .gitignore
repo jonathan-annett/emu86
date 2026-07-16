@@ -9,3 +9,6 @@ coverage/
 tests/sst/data/
 dl/
 dl
+
+# Jonathan's out-of-band notes to the agent — never repo content (his ruling, 2026-07-16)
+HUMANS_*.md
