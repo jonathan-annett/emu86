@@ -300,7 +300,11 @@ describe('WorkerHost — overlay in the paced loop', () => {
       host.handleMessage({ type: 'reset' });
       await host.whenIdle();
     }
-  });
+    // 20 s, not the 5 s default: this test runs a REAL paced loop and
+    // twice starved past 5 s when the full suite ran it alongside two
+    // 32 MB ELKS boot files (2026-07-16, both times green standalone).
+    // The budget is generous scheduling headroom, not a speed claim.
+  }, 20_000);
 
   it('the heartbeat sweeps under the 5 s throttle', async () => {
     const time = { t: 0 };
