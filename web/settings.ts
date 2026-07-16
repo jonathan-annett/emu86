@@ -120,6 +120,14 @@ export interface Settings {
    * next reload.
    */
   autoNet: boolean;
+  /**
+   * The demo has been played (field ask, 2026-07-17: the automatic
+   * first-boot show "has been making things complicated to test" —
+   * it now lives behind a ▶ button next to the gear, and once
+   * clicked "it can go away forever"). True hides the button
+   * permanently on this origin.
+   */
+  demoPlayed: boolean;
 }
 
 export const FONT_SIZE_MIN = 8;
@@ -235,6 +243,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activeBootScriptId: null,
   cpuSpeed: 'authentic',
   autologin: 'user1',
+  demoPlayed: false,
   autoNet: true,
 };
 
@@ -395,6 +404,8 @@ export function loadSettings(): Settings {
       ? obj.autologin
       : DEFAULT_SETTINGS.autologin;
   const autoNet = typeof obj.autoNet === 'boolean' ? obj.autoNet : DEFAULT_SETTINGS.autoNet;
+  const demoPlayed =
+    typeof obj.demoPlayed === 'boolean' ? obj.demoPlayed : DEFAULT_SETTINGS.demoPlayed;
 
   return {
     fontSize,
@@ -406,6 +417,7 @@ export function loadSettings(): Settings {
     cpuSpeed,
     autologin,
     autoNet,
+    demoPlayed,
   };
 }
 

@@ -95,6 +95,23 @@ header code {
   justify-content: center;
 }
 
+/* The ▶ demo button (field ask 2026-07-17): top panel, next to the
+   gear; retires forever after one click (settings.demoPlayed). */
+#demo-button {
+  position: fixed;
+  top: 0.5rem;
+  right: 2.9rem;
+  z-index: 30;
+  font: 0.8rem ui-monospace, Menlo, monospace;
+  background: #1d2a22;
+  color: #8ecfa8;
+  border: 1px solid #3a5a46;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+#demo-button:hover { border-color: #5a8a6a; color: #b8ecc8; }
+
 #settings-gear:hover,
 #settings-gear:focus-visible {
   background: #2a2a2a;
@@ -644,11 +661,12 @@ header code {
 
 #drive-banner {
   position: fixed;
-  /* Right-anchored (field request): bottom-left sits exactly where
-     the prompt lands once the terminal scrollback fills. Draggable
-     from any point except the button — see ensureDriveBanner. */
-  right: 0.75rem;
-  bottom: 0.75rem;
+  /* Right-anchored (field request), clearing the ☰/⏸ button row
+     (field ask 2026-07-17: "to the left of the system log and pause
+     buttons"). Still draggable from any point except the button —
+     see ensureDriveBanner. */
+  right: 8.4rem;
+  bottom: 1rem;
   cursor: grab;
   touch-action: none;
   user-select: none;

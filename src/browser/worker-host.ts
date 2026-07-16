@@ -63,7 +63,6 @@ import {
 } from '../disk/overlay.js';
 import {
   applyImageStamps,
-  showPending,
   type ImageStampOptions,
 } from './image-stamps.js';
 import { NodeHostClock, type HostClock } from '../host-clock/host-clock.js';
@@ -1023,8 +1022,6 @@ export class WorkerHost {
     let stamps: ImageStampOptions | undefined;
     let netLine: string[] = [];
     if (config.autologin !== undefined && embeddedRestore === undefined) {
-      const secondaryBytes =
-        secondary !== null ? snapshotDisk(secondary.disk) : null;
       stamps = {
         autologin: config.autologin,
         secondaryBlocks:
@@ -1032,7 +1029,14 @@ export class WorkerHost {
             ? (secondary.disk.sectorCount * SECTOR_SIZE) / 1024
             : null,
       };
-      if (config.autoNet === true && !showPending(secondaryBytes)) {
+      // The show-pending net suppression is GONE with the auto-show
+      // (field ask 2026-07-17): it existed so the auto-demo's compile
+      // never fought ktcp for the 640K, and with the demo now
+      // button-gated it only produced inexplicable netless first
+      // boots. The button demo compiling WITH daemons up is exactly
+      // the XMS M3(b) acceptance — if that fails in the field, the
+      // finding lands there, not here.
+      if (config.autoNet === true) {
         netLine = ['net=ne0'];
       }
     }

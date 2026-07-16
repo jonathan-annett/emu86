@@ -107,18 +107,14 @@ fi
 `;
 
 export const SKEL_PROFILE = `# seeded by emu86 to your home drive -- edit freely, it's yours
-if test -f $HOME/.welcome; then
-\trm -f $HOME/.welcome
-\tsync
-\techo '${HELLO_HUMAN_MARKER}'
-fi
 `;
-// ^ the sync between rm and the marker is load-bearing: without it
-// the deletion can sit in the guest buffer cache where the fork
-// auto-persist snapshot can't see it, and a quick refresh replays
-// the show (field, Jonathan). By marker time the deletion is
-// on-disk, and main force-persists the fork the moment it sees the
-// marker — the two ends of the same seam.
+// History (field ask 2026-07-17, "the automatic demo has been making
+// things complicated to test"): this profile used to consume
+// $HOME/.welcome and emit HELLO_HUMAN_MARKER, auto-playing the show
+// on a drive's first login. The show is button-gated now (main.ts's
+// ▶ next to the gear) and nothing is seeded to trigger it. Old forks
+// whose persisted .profile still carries the block will print the
+// marker line once — cosmetic, self-consuming, left alone.
 
 /** Build /etc/home.sh for this boot. Exported for tests. */
 export function homeShText(secondaryBlocks: number | null): string {
@@ -153,10 +149,8 @@ test -d /home/user1 || {
 \tmkdir /home/user1
 \tcp /etc/skel.profile /home/user1/.profile
 \tcp /etc/skel.hello /home/user1/hello.sh
-\ttouch /home/user1/.welcome
 }
 chown user1 /home/user1 /home/user1/.profile /home/user1/hello.sh 2>/dev/null
-chown user1 /home/user1/.welcome 2>/dev/null
 sync
 `;
 }

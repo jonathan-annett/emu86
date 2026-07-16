@@ -100,6 +100,7 @@ describe('settings', () => {
       cpuSpeed: 'authentic',
       autologin: 'user1',
       autoNet: true,
+      demoPlayed: false,
     };
     saveSettings(target);
     const loaded = loadSettings();
@@ -188,6 +189,7 @@ describe('settings', () => {
       cpuSpeed: 'authentic',
       autologin: 'user1',
       autoNet: true,
+      demoPlayed: false,
     };
     saveSettings(target);
     docTarget.removeEventListener(SETTINGS_CHANGED_EVENT, handler);
@@ -206,6 +208,7 @@ describe('settings', () => {
       cpuSpeed: 'authentic',
       autologin: 'user1',
       autoNet: true,
+      demoPlayed: false,
     });
     const original = loadSettings();
 
@@ -285,6 +288,7 @@ describe('settings', () => {
       cpuSpeed: 'authentic',
       autologin: 'user1',
       autoNet: true,
+      demoPlayed: false,
     });
     const stale = loadSettings();
     const fixed = await validateImageSourceAgainstLibrary(

@@ -1,5 +1,15 @@
 # The un-scripted machine — brief (draft for Jonathan's review)
 
+**Interim step landed 2026-07-17 (field ask, pre-promotion):** the
+AUTOMATIC show is retired — no marker/.welcome seeding, no first-boot
+performance, no show-boot net suppression (the XMS M3(b) question now
+answers itself whenever someone plays the demo on a net-up machine).
+The show plays from a one-shot ▶ button next to the gear
+(settings.demoPlayed retires it forever). The browser typing relay
+SURVIVES as the button's engine — M2/M3 below (slowtype, retiring the
+relay) are unchanged in scope, just smaller: the relay now has exactly
+one remaining customer.
+
 Drafted 2026-07-16, mid Phase 18 M4 field loop, from Jonathan's
 direction: "i was hoping to eliminate the concept of the browser
 injected script entirely. i'm happy to implement a clipboard paste

@@ -67,7 +67,6 @@ import {
 } from './clone-session.js';
 import { askCloneChoice } from './clone-choice.js';
 import { nameForOctet } from '../src/net/tan-names.js';
-import { HELLO_HUMAN_MARKER } from '../src/browser/image-stamps.js';
 import { OverlayStore } from './overlay-store.js';
 import { SECTOR_SIZE } from '../src/disk/disk.js';
 import {
@@ -953,18 +952,14 @@ async function init(): Promise<void> {
     .join('\n');
   const showDecoder = new TextDecoder();
   let showRunner: AutoexecRunner | null = null;
-  let showFired = false;
-  let showMarkerTail = '';
-  function maybeStartShow(text: string): void {
-    if (showFired) return;
-    showMarkerTail = (showMarkerTail + text).slice(-256);
-    if (!showMarkerTail.includes(HELLO_HUMAN_MARKER)) return;
-    showFired = true;
-    // Once-per-drive depends on the .welcome deletion being PERSISTED
-    // before any refresh. The seeded .profile syncs before emitting
-    // the marker, so the deletion is on the virtual disk right now —
-    // force-persist the fork past the 5 s throttle to pin it.
-    maybeAutoPersist(true);
+  // Field ask (2026-07-17): the AUTOMATIC show is gone — no marker
+  // watching, no first-boot performance ("has been making things
+  // complicated to test"). The show now plays from the ▶ button next
+  // to the gear, exactly once, then the button retires forever
+  // (settings.demoPlayed). Old forks' persisted .profile may print
+  // the legacy marker line once — cosmetic, ignored.
+  function playDemoShow(): void {
+    if (showRunner !== null) return;
     showRunner = new AutoexecRunner({
       script: showScriptText,
       send: (t) => {
@@ -985,6 +980,27 @@ async function init(): Promise<void> {
     });
   }
 
+  // The ▶ demo button (top panel, next to the gear). One click, one
+  // showing, gone forever — and it types into whatever is on screen,
+  // so it wants a shell prompt, same contract the auto-show had.
+  if (!settings.demoPlayed) {
+    const demoBtn = document.createElement('button');
+    demoBtn.id = 'demo-button';
+    demoBtn.type = 'button';
+    demoBtn.textContent = '▶ demo';
+    demoBtn.title = 'Play the "hello human" demo (types into the machine — best at a shell prompt). One showing; the button then retires.';
+    demoBtn.setAttribute('aria-label', 'Play the demo once');
+    document.body.appendChild(demoBtn);
+    demoBtn.addEventListener('click', () => {
+      demoBtn.remove();
+      settings = { ...settings, demoPlayed: true };
+      saveSettings(settings);
+      syslog.log('the show: playing once — the button retires (the machine types by itself now)');
+      playDemoShow();
+      term.focus();
+    });
+  }
+
   worker.addEventListener('message', (event: MessageEvent<WorkerToMainMessage>) => {
     const msg = event.data;
     if (msg.type === 'tx') {
@@ -994,7 +1010,6 @@ async function init(): Promise<void> {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
       }
       const showText = showDecoder.decode(msg.bytes, { stream: true });
-      maybeStartShow(showText);
       if (showRunner !== null && showRunner.active) {
         showRunner.feed(showText);
       }

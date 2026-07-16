@@ -152,19 +152,16 @@ describe('applyImageStamps on the real image', () => {
     expect(text.indexOf('chmod 4755 /bin/passwd')).toBeLessThan(text.indexOf('mount /dev/hdb'));
   });
 
-  it('the skel profile emits the marker exactly once, guarded by .welcome', () => {
-    expect(SKEL_PROFILE).toContain(HELLO_HUMAN_MARKER);
-    expect(SKEL_PROFILE).toContain('test -f $HOME/.welcome');
-    expect(SKEL_PROFILE).toContain('rm -f $HOME/.welcome');
-    // rm → sync → marker, in that order: by marker time the deletion
-    // is on the virtual disk, so main's forced persist pins it and a
-    // quick refresh cannot replay the show (field, 2026-07-15).
-    const rm = SKEL_PROFILE.indexOf('rm -f $HOME/.welcome');
-    const sync = SKEL_PROFILE.indexOf('sync');
-    const marker = SKEL_PROFILE.indexOf(HELLO_HUMAN_MARKER);
-    expect(rm).toBeGreaterThan(-1);
-    expect(sync).toBeGreaterThan(rm);
-    expect(marker).toBeGreaterThan(sync);
+  it('the skel profile seeds NO show machinery (button-gated since 2026-07-17)', () => {
+    // The automatic first-boot show is retired (field ask: "has been
+    // making things complicated to test") — the marker, the .welcome
+    // guard, and the seeded trigger must never reappear in a fresh
+    // drive's profile. The ▶ button in main.ts is the only way the
+    // show plays now.
+    expect(SKEL_PROFILE).not.toContain(HELLO_HUMAN_MARKER);
+    expect(SKEL_PROFILE).not.toContain('.welcome');
+    // …and home.sh no longer plants the trigger file either.
+    expect(homeShText(8086)).not.toContain('.welcome');
   });
 });
 
