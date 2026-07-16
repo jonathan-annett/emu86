@@ -1252,6 +1252,10 @@ async function init(): Promise<void> {
       }
       return reply.snapshot;
     },
+    // Save from the popup (Jonathan: "this would be a great place to
+    // add the save machine state button") — same flow as the settings
+    // modal's, capturing the frozen picture exactly.
+    saveState: (label: string) => saveNamedState(label),
   });
 
   // The system-level editor (Phase 16 M4): a panel over THIS tab's

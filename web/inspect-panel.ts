@@ -21,6 +21,13 @@ export interface InspectPanelDeps {
   setPaused: (paused: boolean) => void;
   /** One coherent machine inspection. */
   inspect: () => Promise<InspectSnapshot>;
+  /**
+   * Save the (frozen) machine as a named state — Jonathan's call: the
+   * popup is the natural home for the save button, because the state
+   * you are LOOKING at is exactly what gets captured. Wired to the
+   * same flow as the settings modal's save; absent in degraded boots.
+   */
+  saveState?: (label: string) => Promise<void>;
 }
 
 const PANEL_CSS = `
@@ -73,6 +80,23 @@ const PANEL_CSS = `
 }
 .emu86-inspect-panel pre { margin: 0; white-space: pre; }
 .emu86-inspect-panel .hint { color: #7c8790; font-size: 0.72rem; margin-top: 0.7rem; }
+.emu86-inspect-panel .save-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+.emu86-inspect-panel .save-row button {
+  font: inherit;
+  background: #1d2a22;
+  color: #8ecfa8;
+  border: 1px solid #3a5a46;
+  border-radius: 4px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+.emu86-inspect-panel .save-row button:hover { border-color: #5a8a6a; color: #b8ecc8; }
+.emu86-inspect-panel .save-row button:disabled { opacity: 0.5; cursor: default; }
 `;
 
 export function mountInspectPanel(deps: InspectPanelDeps): void {
@@ -95,7 +119,7 @@ export function mountInspectPanel(deps: InspectPanelDeps): void {
     deps.setPaused(true);
     void deps
       .inspect()
-      .then((snapshot) => showPanel(snapshot, close))
+      .then((snapshot) => showPanel(snapshot, close, deps.saveState))
       .catch((err: unknown) => {
         showError(String(err), close);
       });
@@ -108,7 +132,11 @@ export function mountInspectPanel(deps: InspectPanelDeps): void {
   }
 }
 
-function showPanel(s: InspectSnapshot, close: (b: HTMLDivElement) => void): void {
+function showPanel(
+  s: InspectSnapshot,
+  close: (b: HTMLDivElement) => void,
+  saveState?: (label: string) => Promise<void>,
+): void {
   const backdrop = document.createElement('div');
   backdrop.className = 'emu86-inspect-backdrop';
   const panel = document.createElement('div');
@@ -142,6 +170,43 @@ function showPanel(s: InspectSnapshot, close: (b: HTMLDivElement) => void): void
     pre(hexDump(s.stack.bytes, s.stack.linear)),
     heading('h3', 'devices'),
     pre(devices),
+  );
+
+  // Save the frozen machine as a named state — the capture happens at
+  // the message boundary while the paced loop is parked, so what lands
+  // in the library is exactly the picture on screen.
+  if (saveState !== undefined) {
+    const row = document.createElement('div');
+    row.className = 'save-row';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save machine state…';
+    const note = document.createElement('span');
+    note.className = 'hint';
+    row.append(saveBtn, note);
+    saveBtn.addEventListener('click', () => {
+      const label = prompt(
+        'Name this state:',
+        `frozen ${new Date().toLocaleString()}`,
+      );
+      if (label === null) return;
+      saveBtn.disabled = true;
+      note.textContent = 'capturing…';
+      void saveState(label).then(
+        () => {
+          saveBtn.disabled = false;
+          note.textContent = `saved '${label}' — restore from Settings → Machine state.`;
+        },
+        (err: unknown) => {
+          saveBtn.disabled = false;
+          note.textContent = `save failed: ${String(err)}`;
+        },
+      );
+    });
+    panel.appendChild(row);
+  }
+
+  panel.appendChild(
     hintEl('click anywhere outside this panel (or press Esc) to resume the CPU'),
   );
 
