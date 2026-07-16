@@ -818,14 +818,14 @@ async function init(): Promise<void> {
         }
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
-          term.writeln(`[resumed machine state from ${describeAge(age)} ago]`);
+          showMachineToast(`resumed machine state from ${describeAge(age)} ago`);
         }
         if (activeRestoreStateId !== null) {
           void machineStore.touch(activeRestoreStateId);
         }
       } else {
-        term.writeln(
-          `[couldn't resume saved state — ${msg.reason ?? 'unknown'}; cold-booting instead]`,
+        showMachineToast(
+          `couldn't resume saved state — ${msg.reason ?? 'unknown'}; cold-booting instead`,
         );
         if (activeRestoreStateId === ownResumeSlotId) {
           void machineStore.deleteState(ownResumeSlotId);
@@ -1141,11 +1141,11 @@ async function init(): Promise<void> {
         }
         activeRestoreStateId = pendingRestoreId;
         pendingTerminalRestore = rec.payload.terminal ?? null;
-        term.writeln(
-          `[restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…]`,
+        showMachineToast(
+          `restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…`,
         );
       } else {
-        term.writeln('[saved state unavailable or from a different era — cold-booting]');
+        showMachineToast('saved state unavailable or from a different era — cold-booting');
       }
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
       const rec = await machineStore.getState(ownResumeSlotId);
@@ -1589,6 +1589,38 @@ function ensureDriveBanner(onPromote: () => void): {
  * well under a second, so anything past this is a genuinely old state.
  */
 const RESTORE_NOTICE_AGE_MS = 10_000;
+
+/**
+ * Restore notices as a dismissable overlay, never terminal writes
+ * (Jonathan, field loop: "does that have to be as screen memory
+ * polluting?") — the restored screen is byte-faithful and must stay
+ * that way. Auto-fades after a while; × dismisses immediately.
+ */
+function showMachineToast(text: string): void {
+  const existing = document.getElementById('emu86-machine-toast');
+  existing?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'emu86-machine-toast';
+  toast.style.cssText =
+    'position:fixed;top:0.8rem;right:0.8rem;z-index:50;max-width:26rem;' +
+    'background:#1c2733;color:#cfe3f5;border:1px solid #3a556e;border-radius:6px;' +
+    'padding:0.5rem 0.75rem;font:0.8rem/1.4 ui-monospace,Menlo,monospace;' +
+    'display:flex;gap:0.6rem;align-items:baseline;box-shadow:0 2px 10px rgba(0,0,0,0.4);' +
+    'transition:opacity 0.6s;';
+  const span = document.createElement('span');
+  span.textContent = text;
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.style.cssText =
+    'background:none;border:none;color:#7fa3c5;cursor:pointer;font-size:1rem;padding:0;';
+  closeBtn.addEventListener('click', () => toast.remove());
+  toast.append(span, closeBtn);
+  document.body.appendChild(toast);
+  window.setTimeout(() => { toast.style.opacity = '0'; }, 12_000);
+  window.setTimeout(() => toast.remove(), 13_000);
+}
 
 /** Human-readable age for the restore notice. */
 function describeAge(ms: number): string {
