@@ -175,6 +175,11 @@ over a real ELKS boot checkpoint. No protocol, no UI, no IDB.
 
 ### M2 — capture/restore protocol + save-states + reload-resume
 
+**BUILT 2026-07-16 — `PHASE18_M2_REPORT.md` is the record; the
+in-repo acceptance (equivalence harness green across the protocol
+round trip, refusal honesty, the tenant) is met. The crown telnet
+scenario + mid-compile save are M4's field pass.**
+
 **The crown acceptance (Jonathan's scenario, 2026-07-16, verbatim
 goal): "mouse telnets to cat, mouse's browser is refreshed. on
 restore, timestamps are compared, and < 500ms, nothing breaks. the
@@ -201,6 +206,24 @@ automatic slot (D4 shapes ownership/GC). Acceptance: mid-compile
 save → reload → restore → the compile FINISHES; equivalence
 harness green across the protocol round trip; fingerprint mismatch
 refuses with the M2-overlay honesty.
+
+**M2 design addendum (2026-07-16, recon-driven, recorded before
+implementation):** named saves = D2(a) embedded disks, as decided;
+the reload-resume slot = D2(b) REFERENCE disks — machine state only
+(~1 MB), captured at `visibilitychange→hidden` (the overlay-flush
+hook), because a 32 MB embedded capture cannot reliably win the
+unload race at refresh. The slot's primary is reconstructed at boot
+by the NORMAL pipeline (base → overlay fold → bootopts patch → M3
+stamps) and verified against the capture-time SHA-256; the fork
+bytes ride in the capture reply itself (one snapshot, one truth —
+the row is written from the same bytes the hash was computed over).
+ANY mismatch — stamp drift, lost final sweep, changed autologin,
+different octet — refuses the resume and cold-boots with the
+honest notice. Same-tab-ness gates the slot: resume only when the
+overlay-session verdict is 'reload' (the Web-Lock duplicate detect);
+duplicates and degraded mode cold-boot. Restore of either shape
+rides one code path: a sessionStorage pending-restore pointer +
+`location.reload()`, threading `BootConfig.restore` at boot.
 
 ### M3 — the clone (headline, gated on D1/D5)
 

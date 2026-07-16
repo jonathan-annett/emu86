@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { gzipSync } from 'node:zlib';
-import { gunzipBytes, gunzipStream } from '../../web/gzip.js';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { gunzipBytes, gunzipStream, gzipBytes } from '../../web/gzip.js';
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -49,5 +49,24 @@ describe('gunzip', () => {
     const tail = packed.length - 5; // wreck the CRC/tail
     packed[tail] = (packed[tail] ?? 0) ^ 0xff;
     await expect(gunzipBytes(packed)).rejects.toThrow();
+  });
+});
+
+describe('gzip (Phase 18 M2 — the compress half)', () => {
+  it('gzipBytes → gunzipBytes round-trips, compressing the disk-image shape', async () => {
+    const original = new Uint8Array(256 * 1024);
+    original.fill(0x42, 500, 1500);
+    original.fill(0x99, 100_000, 100_777);
+    const packed = await gzipBytes(original);
+    expect(packed.length).toBeLessThan(original.length / 10); // the 10:1 class
+    const out = await gunzipBytes(packed);
+    expect(sameBytes(out, original)).toBe(true);
+  });
+
+  it('interoperates with node:zlib (real gzip format, not just self-consistent)', async () => {
+    const original = new Uint8Array([1, 2, 3, 4, 5, 250, 251, 252]);
+    const packed = await gzipBytes(original);
+    const viaZlib = new Uint8Array(gunzipSync(packed));
+    expect(sameBytes(viaZlib, original)).toBe(true);
   });
 });

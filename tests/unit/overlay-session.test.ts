@@ -109,6 +109,7 @@ function makeSession(initial?: Partial<SessionState>): {
     pendingBlankKb: null,
     overlayId: null,
     overlayResetPending: false,
+    pendingRestoreStateId: null,
     ...initial,
   };
   return {

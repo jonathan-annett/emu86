@@ -14,8 +14,9 @@
 
 import type { CpuSpeedMode } from './pacing.js';
 import type { OverlayChunk } from '../disk/overlay.js';
+import type { MachineState } from '../machine/machine-state.js';
 
-export type { CpuSpeedMode, OverlayChunk };
+export type { CpuSpeedMode, OverlayChunk, MachineState };
 
 /**
  * CHS geometries we recognise when inferring from image size. Mirrors
@@ -131,6 +132,46 @@ export interface BootConfig {
    * compiles. Meaningless without `autologin`.
    */
   autoNet?: boolean;
+  /**
+   * Phase 18 M2: boot as a RESTORE — reset is the clean baseline,
+   * then the captured machine state overwrites it (brief §1.1). Two
+   * disk shapes, one per D2 branch:
+   *
+   *   - `embedded` (named saves, D2(a)): the captured disk bytes ride
+   *     here VERBATIM and replace the whole resolve pipeline — no
+   *     overlay fold, no bootopts patch, no M3 stamps. Re-stamping
+   *     would fight the captured RAM's buffer cache (§1.4).
+   *   - `expected` (the reload-resume slot, D2(b) reference): the
+   *     NORMAL pipeline runs (base → overlay fold → patch → stamps)
+   *     and the result must hash to `primarySha` (secondary to
+   *     `secondarySha`) or the restore is REFUSED — the machine
+   *     cold-boots the resolved disk instead and a
+   *     {@link RestoreResultMessage} says so honestly. Any drift
+   *     (lost final sweep, changed autologin, different octet's
+   *     stamps) lands here by construction.
+   *
+   * Exactly one of `embedded` / `expected` should be set.
+   */
+  restore?: RestoreSpec;
+}
+
+/** See {@link BootConfig.restore}. */
+export interface RestoreSpec {
+  /** The captured whole-machine state (M1's structured form). */
+  state: MachineState;
+  /** Date.now() at capture — restore compares age for the honesty notice. */
+  capturedAt: number;
+  /** D2(a): captured disk bytes, verbatim. */
+  embedded?: {
+    primary: DiskSlotSpec & { imageBytes: Uint8Array };
+    secondary?: (DiskSlotSpec & { imageBytes: Uint8Array }) | null;
+  };
+  /** D2(b): SHA-256 hexes the normally-resolved disks must match. */
+  expected?: {
+    primarySha: string;
+    /** null = no secondary was attached at capture. */
+    secondarySha: string | null;
+  };
 }
 
 // ============================================================
@@ -222,6 +263,32 @@ export interface OverlayFlushMessage {
   type: 'overlay-flush';
 }
 
+/**
+ * Phase 18 M2: capture the running machine's complete state. The
+ * worker's synchronous part (machine + disk copies + the final
+ * overlay sweep) happens at the message boundary — coherent for free;
+ * hashing and the {@link StateCapturedMessage} reply complete async
+ * over the copies while the machine keeps running.
+ *
+ * Two-phase per §1.4: the handler first posts a final overlay sweep
+ * (all writes up to this boundary reach the store), then the reply.
+ * Main persists the sweep, writes the fork row from the reply's own
+ * secondary bytes (one snapshot, one truth), and only then declares
+ * the state saved.
+ */
+export interface CaptureStateMessage {
+  type: 'capture-state';
+  /** Correlates the {@link StateCapturedMessage} reply. */
+  requestId: number;
+  /**
+   * 'embedded' (named saves): the reply carries full primary bytes.
+   * 'reference' (reload-resume slot): hashes only — the primary is
+   * reconstructed at restore from base + overlay + stamps. Secondary
+   * bytes ride in BOTH modes (they feed the fork row).
+   */
+  disks: 'embedded' | 'reference';
+}
+
 export type MainToWorkerMessage =
   | BootMessage
   | RxMessage
@@ -231,7 +298,8 @@ export type MainToWorkerMessage =
   | WriteSecondaryMessage
   | ControlResponseMessage
   | OverlaySweptMessage
-  | OverlayFlushMessage;
+  | OverlayFlushMessage
+  | CaptureStateMessage;
 
 // ============================================================
 // Worker → Main
@@ -377,6 +445,54 @@ export interface OverlayIdentityMessage {
   chunksOffered: number;
 }
 
+/** One captured disk: bytes + enough identity to reconstruct the slot. */
+export interface CapturedDisk {
+  bytes: Uint8Array;
+  geometry: DiskGeometry;
+  diskClass: DiskClass;
+}
+
+/**
+ * Reply to {@link CaptureStateMessage}. `ok: false` (no machine, or a
+ * capture error) carries `reason`. On success: the machine state, the
+ * capture timestamp, this boot's base fingerprint (pairs the snapshot
+ * with its overlay era), SHA-256 of the primary/secondary images at
+ * capture, the secondary bytes (both modes — the fork row's truth),
+ * and — 'embedded' mode only — the primary bytes.
+ */
+export interface StateCapturedMessage {
+  type: 'state-captured';
+  requestId: number;
+  ok: boolean;
+  reason?: string;
+  state?: MachineState;
+  capturedAt?: number;
+  /** SHA-256 of the PRISTINE base this boot (the overlay identity), or null (no primary fingerprint era). */
+  baseFingerprint?: string | null;
+  /** SHA-256 of the primary's CURRENT image at capture (stamps + writes included). */
+  primarySha?: string;
+  /** SHA-256 of the secondary at capture, or null when none attached. */
+  secondarySha?: string | null;
+  /** 'embedded' mode only. */
+  primary?: CapturedDisk;
+  /** Both modes; null when no secondary is attached. */
+  secondary?: CapturedDisk | null;
+}
+
+/**
+ * Phase 18 M2: the outcome of a {@link BootConfig.restore}, posted
+ * just before `ready`. `ok: false` means the machine COLD-BOOTED the
+ * resolved disk instead (hash mismatch, state schema mismatch, or a
+ * restore error) — `reason` says why, main surfaces it honestly.
+ */
+export interface RestoreResultMessage {
+  type: 'restore-result';
+  ok: boolean;
+  /** Echo of the restored capture's timestamp (age = now - capturedAt). */
+  capturedAt?: number;
+  reason?: string;
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -388,4 +504,6 @@ export type WorkerToMainMessage =
   | SecondaryWrittenMessage
   | ControlRequestMessage
   | OverlaySweepMessage
-  | OverlayIdentityMessage;
+  | OverlayIdentityMessage
+  | StateCapturedMessage
+  | RestoreResultMessage;

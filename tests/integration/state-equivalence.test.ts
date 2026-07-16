@@ -39,6 +39,12 @@ import {
 import { InMemoryDisk, WriteTrackingDisk } from '../../src/disk/disk.js';
 import { InMemoryConsole } from '../../src/console/console.js';
 import { InMemoryHostClock } from '../../src/host-clock/host-clock.js';
+import { WorkerHost } from '../../src/browser/worker-host.js';
+import type {
+  BootConfig,
+  StateCapturedMessage,
+  WorkerToMainMessage,
+} from '../../src/browser/protocol.js';
 import { diffBytes, diffStates } from '../state-diff.js';
 
 const HD32_GEOMETRY = { cylinders: 63, heads: 16, sectorsPerTrack: 63 };
@@ -200,4 +206,74 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
     // …and every last bit of state + disk agrees.
     expect(diffRigs(a, b)).toEqual([]);
   }, 180_000);
+
+  it('M2 protocol round trip: capture-state → BootConfig.restore ≡ the straight run', () => {
+    // The same law, through the WORKER PROTOCOL: an embedded capture
+    // posted by one WorkerHost, fed as BootConfig.restore to a fresh
+    // one, continues in lockstep with the original — the acceptance
+    // line "equivalence harness green across the protocol round trip".
+    const N = 500_000;
+    const M = 250_000;
+    const image = loadHdImageBytes();
+
+    const bootHost = async (
+      config: BootConfig,
+    ): Promise<{ host: WorkerHost; messages: WorkerToMainMessage[] }> => {
+      const messages: WorkerToMainMessage[] = [];
+      const host = new WorkerHost({
+        post: (m) => messages.push(m),
+        autoRun: false,
+        hostClock: new InMemoryHostClock(),
+      });
+      host.handleMessage({ type: 'boot', config });
+      await host.whenIdle();
+      return { host, messages };
+    };
+
+    return (async () => {
+      const a = await bootHost({ imageBytes: image, diskClass: 'hard-disk' });
+      a.host.runUntil(N);
+
+      a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'embedded' });
+      let reply: StateCapturedMessage | undefined;
+      for (let i = 0; i < 400 && reply === undefined; i++) {
+        reply = a.messages.find(
+          (m): m is StateCapturedMessage => m.type === 'state-captured',
+        );
+        if (reply === undefined) await new Promise((r) => setTimeout(r, 5));
+      }
+      if (reply?.state === undefined || reply.capturedAt === undefined || reply.primary === undefined) {
+        throw new Error(`capture failed: ${reply?.reason ?? 'no reply'}`);
+      }
+
+      const b = await bootHost({
+        restore: {
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          embedded: {
+            primary: {
+              imageBytes: reply.primary.bytes,
+              geometry: reply.primary.geometry,
+              diskClass: reply.primary.diskClass,
+            },
+            secondary: null,
+          },
+        },
+      });
+      const result = b.messages.find((m) => m.type === 'restore-result');
+      expect(result).toMatchObject({ ok: true });
+
+      a.host.runUntil(M);
+      b.host.runUntil(M);
+      if (a.host.machine === null || b.host.machine === null) {
+        throw new Error('machine missing after run');
+      }
+      expect(
+        diffStates(
+          captureMachineState(a.host.machine),
+          captureMachineState(b.host.machine),
+        ),
+      ).toEqual([]);
+    })();
+  }, 120_000);
 });

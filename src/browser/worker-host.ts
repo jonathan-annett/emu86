@@ -38,15 +38,21 @@
 
 import type {
   BootConfig,
+  CaptureStateMessage,
   DiskClass,
   DiskGeometry,
   DiskSlotSpec,
   MainToWorkerMessage,
+  RestoreSpec,
   WorkerToMainMessage,
 } from './protocol.js';
 import { BrowserConsole } from './browser-console.js';
 import { IBMPCMachine } from '../machine/ibm-pc.js';
-import { InMemoryDisk, SECTOR_SIZE, WriteTrackingDisk } from '../disk/disk.js';
+import {
+  captureMachineState,
+  restoreMachineState,
+} from '../machine/machine-state.js';
+import { InMemoryDisk, SECTOR_SIZE, WriteTrackingDisk, type Disk } from '../disk/disk.js';
 import {
   FORCED_SWEEP_BYTES,
   OverlayDisk,
@@ -58,7 +64,7 @@ import {
   showPending,
   type ImageStampOptions,
 } from './image-stamps.js';
-import { NodeHostClock } from '../host-clock/host-clock.js';
+import { NodeHostClock, type HostClock } from '../host-clock/host-clock.js';
 import {
   installCGAMirror,
   type CGAMirrorSink,
@@ -199,6 +205,14 @@ export interface WorkerHostOptions {
    * deterministically.
    */
   pacerTimeSource?: () => number;
+  /**
+   * Host clock served to the machine (RTC + INT 1Ah). Default
+   * `NodeHostClock` (real wall time — the production truth). The
+   * Phase 18 M2 protocol equivalence tests inject an
+   * `InMemoryHostClock` so a straight run and a restored run can be
+   * compared byte-for-byte (same ground rule as the M1 harness).
+   */
+  hostClock?: HostClock;
 }
 
 interface ResolvedSlot {
@@ -229,9 +243,12 @@ export interface RunResult {
 const OVERLAY_SWEEP_THROTTLE_MS = 5_000;
 const OVERLAY_ACK_TIMEOUT_MS = 10_000;
 
-/** Full-image copy via the sector loop — boot-time only (Phase 17 M3
- *  reads the secondary to decide the show/net stamps). */
-function snapshotDisk(disk: InMemoryDisk): Uint8Array {
+/** Full-image copy via the sector loop. Boot-time (Phase 17 M3 reads
+ *  the secondary to decide the show/net stamps) and capture-time
+ *  (Phase 18 M2 — works through the OverlayDisk wrapper too: overlay
+ *  writes pass through to the inner disk, so this IS the current
+ *  image). */
+function snapshotDisk(disk: Disk): Uint8Array {
   const out = new Uint8Array(disk.sectorCount * SECTOR_SIZE);
   for (let lba = 0; lba < disk.sectorCount; lba++) {
     out.set(disk.readSector(lba), lba * SECTOR_SIZE);
@@ -278,9 +295,13 @@ export class WorkerHost {
   #overlayFlushWanted = false;
   #tanConfig: { channel: FrameChannel; hostOctet?: number } | null = null;
   #tan: TabAreaNetwork | null = null;
+  /** This boot's pristine-primary SHA-256 (Phase 18 M2 pairs captures with it). */
+  #bootFingerprint: string | null = null;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
+
+  readonly #hostClock: HostClock;
 
   // ---- Real-time pacing (pacing milestone) ----
   readonly #pacerNow: () => number;
@@ -300,6 +321,7 @@ export class WorkerHost {
     this.#haltSpinCycles = opts.haltSpinCycles ?? 1000;
     this.#maxHaltSpins = opts.maxHaltSpins ?? 1000;
     this.#tanConfig = opts.tan ?? null;
+    this.#hostClock = opts.hostClock ?? new NodeHostClock();
     this.#pacerNow = opts.pacerTimeSource ?? (() => performance.now());
     this.#pacer = new RealTimePacer({ now: this.#pacerNow });
     this.#adaptiveBatch = this.#batchSize;
@@ -443,6 +465,14 @@ export class WorkerHost {
         return;
       }
       this.#emitOverlaySweep(this.#pacerNow());
+      return;
+    }
+    if (msg.type === 'capture-state') {
+      // Phase 18 M2. The machine-touching part runs synchronously right
+      // here — messages land between run turns, so the machine is
+      // coherent (the snapshot-secondary precedent). Hashing + the
+      // reply complete async over the copies; the machine keeps running.
+      this.#captureState(msg);
       return;
     }
     if (msg.type === 'reset') {
@@ -804,19 +834,30 @@ export class WorkerHost {
       });
     }
 
+    // Phase 18 M2: an EMBEDDED restore (named save) replaces the whole
+    // resolve pipeline — captured bytes verbatim, no overlay fold, no
+    // bootopts patch, no M3 stamps (§1.4: re-stamping would fight the
+    // captured RAM's buffer cache). A REFERENCE restore (reload-resume
+    // slot) runs the normal pipeline below and hash-verifies after.
+    const embeddedRestore = config.restore?.embedded;
+
     // Phase 17 M3: the secondary resolves FIRST — the primary's stamp
     // set needs to know the drive (mkfs block count for /etc/home.sh)
     // and whether the first-boot show is pending on it (net=ne0 is
     // suppressed for the show boot: ktcp+telnetd+ftpd are the
     // recorded difference between c86 compiling and not).
     let secondary: ResolvedSlot | null = null;
-    if (config.secondary) {
+    if (embeddedRestore !== undefined) {
+      if (embeddedRestore.secondary != null) {
+        secondary = await this.#resolveSlot('secondary', embeddedRestore.secondary);
+      }
+    } else if (config.secondary) {
       secondary = await this.#resolveSlot('secondary', config.secondary);
     }
 
     let stamps: ImageStampOptions | undefined;
     let netLine: string[] = [];
-    if (config.autologin !== undefined) {
+    if (config.autologin !== undefined && embeddedRestore === undefined) {
       const secondaryBytes =
         secondary !== null ? snapshotDisk(secondary.disk) : null;
       stamps = {
@@ -833,14 +874,16 @@ export class WorkerHost {
 
     const primary = await this.#resolveSlot(
       'primary',
-      {
-        imageUrl: config.imageUrl,
-        imageBytes: config.imageBytes,
-        geometry: config.geometry,
-        diskClass: config.diskClass,
-      },
+      embeddedRestore !== undefined
+        ? embeddedRestore.primary
+        : {
+            imageUrl: config.imageUrl,
+            imageBytes: config.imageBytes,
+            geometry: config.geometry,
+            diskClass: config.diskClass,
+          },
       [
-        ...(tanIdentity !== null
+        ...(tanIdentity !== null && embeddedRestore === undefined
           ? [
               tanIdentity.localipLine,
               // The shell's who-am-I (API v1): stock /etc/profile does
@@ -850,15 +893,34 @@ export class WorkerHost {
           : []),
         ...netLine,
       ],
-      config.overlay,
+      embeddedRestore !== undefined ? undefined : config.overlay,
       stamps,
+      /* verbatim: */ embeddedRestore !== undefined,
     );
+
+    // Phase 18 M2, reference verification: the reconstructed disks
+    // must hash to what the capture recorded, or the restore is off.
+    let restoreRefusal: string | null = null;
+    const expected = config.restore?.expected;
+    if (expected !== undefined) {
+      const primarySha = await sha256Hex(snapshotDisk(primary.disk));
+      if (primarySha !== expected.primarySha) {
+        restoreRefusal = 'boot disk reconstruction does not match the capture';
+      } else {
+        const secondarySha =
+          secondary !== null ? await sha256Hex(snapshotDisk(secondary.disk)) : null;
+        if (secondarySha !== expected.secondarySha) {
+          restoreRefusal = 'secondary drive does not match the capture';
+        }
+      }
+    }
 
     // Phase 17 M2: report the base's identity every boot. Main stamps
     // the fingerprint into the overlay meta on future sweeps; applied
     // false with chunks offered = the fold was REFUSED (base changed
     // under the tab's machine state) and main moves sweeps to a fresh
     // overlayId.
+    this.#bootFingerprint = primary.overlayFingerprint ?? null;
     if (primary.overlayFingerprint !== undefined) {
       this.#post({
         type: 'overlay-identity',
@@ -963,7 +1025,7 @@ export class WorkerHost {
           }
         : {}),
       console: browserConsole,
-      hostClock: new NodeHostClock(),
+      hostClock: this.#hostClock,
       cyclesPerPitTick: 4,
       uartTransmit: (byte: number) => this.#txBuffer.push(byte),
       nicTransmit: (frame: Uint8Array) => nicPort.transmit(frame),
@@ -980,6 +1042,35 @@ export class WorkerHost {
 
     this.#machine = machine;
     machine.reset();
+
+    // Phase 18 M2: apply the captured state over the reset baseline
+    // (§1.1: reset-then-overwrite; RAM/devices/clock/CPU order lives in
+    // restoreMachineState). Refusals and failures COLD-BOOT the
+    // resolved disk instead — the machine the user gets is always a
+    // working one, and the restore-result message says which. The
+    // paced loop's opening pacer.skip() covers "stalled wall time must
+    // not become guest time" for the restore path exactly as for boot.
+    if (config.restore !== undefined) {
+      let outcome: { ok: boolean; reason?: string };
+      if (restoreRefusal !== null) {
+        outcome = { ok: false, reason: restoreRefusal };
+      } else {
+        try {
+          restoreMachineState(machine, config.restore.state);
+          outcome = { ok: true };
+        } catch (err) {
+          machine.reset(); // back to the clean cold-boot baseline
+          outcome = { ok: false, reason: String(err) };
+        }
+      }
+      this.#post({
+        type: 'restore-result',
+        ok: outcome.ok,
+        capturedAt: config.restore.capturedAt,
+        ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+      });
+    }
+
     this.#post({ type: 'ready' });
   }
 
@@ -997,6 +1088,7 @@ export class WorkerHost {
     extraBootoptsLines: readonly string[] = [],
     overlay?: BootConfig['overlay'],
     stamps?: ImageStampOptions,
+    verbatim = false,
   ): Promise<ResolvedSlot> {
     let bytes: Uint8Array;
     if (spec.imageBytes) {
@@ -1064,6 +1156,7 @@ export class WorkerHost {
     // never gates; factory reset is the escape hatch.
     if (
       slotName === 'primary' &&
+      !verbatim &&
       diskClass === 'hard-disk' &&
       (overlayApplied || !hasSerialConsole(bytes))
     ) {
@@ -1176,6 +1269,114 @@ export class WorkerHost {
     const pendingId = overlay.pendingEpochId;
     if (pendingId !== null) overlay.nackSweep(pendingId);
     this.#emitOverlaySweep(this.#pacerNow());
+  }
+
+  // ============================================================
+  // Whole-machine capture (Phase 18 M2)
+  // ============================================================
+
+  /**
+   * Capture the running machine (brief §1.4, two-phase): first flush
+   * the overlay hot map as one final epoch — the store plus that sweep
+   * then hold every boot-disk write up to this boundary, which is what
+   * makes the 'reference' reconstruction (base → fold → stamps) land on
+   * `primarySha` — then copy machine state + disk images synchronously.
+   * Hashes and the reply complete async over the copies.
+   *
+   * Secondary dirty-tracking: the snapshot here is a PEEK (keepDirty
+   * semantics) — main writes the fork row from these very bytes, but if
+   * that write loses a teardown race the dirty count must still drive
+   * the next auto-persist.
+   */
+  #captureState(msg: CaptureStateMessage): void {
+    const machine = this.#machine;
+    if (machine === null) {
+      this.#post({
+        type: 'state-captured',
+        requestId: msg.requestId,
+        ok: false,
+        reason: 'no machine is running',
+      });
+      return;
+    }
+    const primaryDisk = machine.disk;
+    if (primaryDisk === null) {
+      this.#post({
+        type: 'state-captured',
+        requestId: msg.requestId,
+        ok: false,
+        reason: 'machine has no primary disk',
+      });
+      return;
+    }
+    try {
+      // Phase 1: the final overlay sweep (a pending epoch folds back
+      // first so the sweep is complete — the reset-path precedent).
+      this.#overlayFlushNow();
+
+      // Phase 2, synchronous copies at this message boundary.
+      const state = captureMachineState(machine);
+      const capturedAt = Date.now();
+      const primaryBytes = snapshotDisk(primaryDisk);
+      const primaryGeometry = primaryDisk.geometry;
+      const secondaryDisk = this.#secondaryDisk;
+      const secondaryBytes = secondaryDisk !== null ? secondaryDisk.snapshot() : null;
+      const secondaryGeometry = secondaryDisk !== null ? secondaryDisk.geometry : null;
+      const baseFingerprint = this.#bootFingerprint;
+      const embedded = msg.disks === 'embedded';
+      const diskClass = machine.diskClass;
+      const secondaryDiskClass = machine.secondaryDiskClass;
+
+      // Async completion: hashes over the copies, then the reply.
+      void (async () => {
+        try {
+          const primarySha = await sha256Hex(primaryBytes);
+          const secondarySha =
+            secondaryBytes !== null ? await sha256Hex(secondaryBytes) : null;
+          this.#post({
+            type: 'state-captured',
+            requestId: msg.requestId,
+            ok: true,
+            state,
+            capturedAt,
+            baseFingerprint,
+            primarySha,
+            secondarySha,
+            ...(embedded
+              ? {
+                  primary: {
+                    bytes: primaryBytes,
+                    geometry: primaryGeometry,
+                    diskClass,
+                  },
+                }
+              : {}),
+            secondary:
+              secondaryBytes !== null && secondaryGeometry !== null
+                ? {
+                    bytes: secondaryBytes,
+                    geometry: secondaryGeometry,
+                    diskClass: secondaryDiskClass,
+                  }
+                : null,
+          });
+        } catch (err) {
+          this.#post({
+            type: 'state-captured',
+            requestId: msg.requestId,
+            ok: false,
+            reason: String(err),
+          });
+        }
+      })();
+    } catch (err) {
+      this.#post({
+        type: 'state-captured',
+        requestId: msg.requestId,
+        ok: false,
+        reason: String(err),
+      });
+    }
   }
 
   #postError(err: unknown): void {

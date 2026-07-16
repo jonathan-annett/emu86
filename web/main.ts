@@ -77,7 +77,15 @@ import {
   reconcileSeededScripts,
 } from './settings.js';
 import { listReleases, downloadAsset } from './github-releases.js';
-import { gunzipStream } from './gzip.js';
+import { gunzipStream, gunzipBytes, gzipBytes } from './gzip.js';
+import {
+  MACHINE_STATE_SCHEMA_VERSION,
+  MachineStore,
+  gcOrphanResumeSlots,
+  resumeSlotId,
+  resumeSlotLockName,
+  type MachineStateMeta,
+} from './machine-store.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -198,6 +206,18 @@ async function init(): Promise<void> {
     if (n > 0) console.debug(`[emu86] swept ${n} orphaned machine overlay${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
+  // Whole-machine save-states + the reload-resume slot (Phase 18 M2).
+  // The store is the fourth IDB tenant; this tab's resume slot is
+  // keyed by sessionId and guarded by a Web Lock so the GC's
+  // unheld-lock + staleness conjunction can tell abandoned slots from
+  // live ones. Named saves never age out (D4).
+  const machineStore = new MachineStore();
+  const ownResumeSlotId = resumeSlotId(loadSession().sessionId);
+  void forkLocks.acquireForever(resumeSlotLockName(ownResumeSlotId));
+  void gcOrphanResumeSlots(machineStore, forkLocks).then((n) => {
+    if (n > 0) console.debug(`[emu86] swept ${n} orphaned resume slot${n === 1 ? '' : 's'}`);
+  }).catch(() => { /* sweep is best-effort */ });
+
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
   term.writeln(`emu86 — ELKS in the browser [${buildLabel}]`);
@@ -240,6 +260,11 @@ async function init(): Promise<void> {
   // Latest pacing stats (worker posts ~1/sec) — read by the console
   // logger below and the dev agent bridge's /agent/stats endpoint.
   let latestStats: WorkerToMainMessage & { type: 'stats' } | null = null;
+
+  // Phase 18 M2: which stored state (if any) this boot is restoring —
+  // the restore-result handler touches it (success keeps the GC away)
+  // or deletes a refused resume slot.
+  let activeRestoreStateId: string | null = null;
 
   // Boot script (Phase 14 — autoexec): a prompt-aware runner types the
   // active script into the console as the guest becomes ready. Fed from
@@ -365,15 +390,87 @@ async function init(): Promise<void> {
         lastPersistAt = Date.now();
       });
   }
+  // Whole-machine capture round trips (Phase 18 M2). Keyed by
+  // requestId — the reference (resume slot) and embedded (named save)
+  // flows can overlap, so the FIFO idiom the snapshot path uses isn't
+  // enough here.
+  type CapturedReply = WorkerToMainMessage & { type: 'state-captured' };
+  const captureSinks = new Map<number, (reply: CapturedReply) => void>();
+  let nextCaptureId = 1;
+  function requestCapture(disks: 'embedded' | 'reference'): Promise<CapturedReply> {
+    return new Promise((resolve) => {
+      const requestId = nextCaptureId++;
+      captureSinks.set(requestId, resolve);
+      const msg: MainToWorkerMessage = { type: 'capture-state', requestId, disks };
+      worker.postMessage(msg);
+    });
+  }
+
+  /** Rough stored footprint for the meta row (UI only, not quota math). */
+  function roughStateSize(reply: CapturedReply, gzBytes = 0): number {
+    const ramBytes = (reply.state?.ram.pages.length ?? 0) * 4096;
+    return ramBytes + 64 * 1024 + gzBytes; // devices + NIC ring ride in the fudge
+  }
+
+  /**
+   * Refresh this tab's reload-resume slot (Phase 18 M2, D2(b)
+   * reference form): machine state + disk hashes ride the slot row;
+   * the fork row is written from the capture's OWN secondary bytes
+   * (one snapshot, one truth — a separate snapshot round trip could
+   * land newer bytes and break the hash pairing). The capture's
+   * worker-side final overlay sweep covers the primary. Any write
+   * that loses a teardown race surfaces at restore as a hash
+   * mismatch → honest cold boot.
+   */
+  async function refreshResumeSlot(): Promise<void> {
+    const reply = await requestCapture('reference');
+    if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) return;
+    if (drive !== null && reply.secondary != null) {
+      await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
+      driveBanner.autoSaved();
+      editorPanel?.driveUpdated(reply.secondary.bytes);
+    }
+    const now = Date.now();
+    await machineStore.putState({
+      meta: {
+        stateId: ownResumeSlotId,
+        label: null,
+        kind: 'resume',
+        createdAt: now,
+        lastTouched: now,
+        baseFingerprint: reply.baseFingerprint ?? null,
+        schemaVersion: MACHINE_STATE_SCHEMA_VERSION,
+        sizeBytes: roughStateSize(reply),
+      },
+      payload: {
+        stateId: ownResumeSlotId,
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        primary: null,
+        secondary: null,
+        primarySha: reply.primarySha ?? null,
+        secondarySha: reply.secondarySha ?? null,
+      },
+    });
+  }
+
   // Tab going to the background is the best predictor we get of a
-  // close/reload — flush regardless of the throttle window. The
-  // overlay flush is unconditional: the worker no-ops on a clean hot
-  // map, and main doesn't track the hot count.
+  // close/reload — flush regardless of the throttle window (the
+  // overlay flush now rides INSIDE the capture: its worker-side final
+  // sweep is the same epoch machinery). The Phase 18 M2 resume slot
+  // rides the same event, same best-effort assumption as the overlay
+  // flush: a hidden tab's event loop still runs; a genuine teardown
+  // race surfaces at restore as a hash mismatch and cold-boots
+  // honestly.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      if (latestDirtySectors > 0) maybeAutoPersist(true);
-      const flush: MainToWorkerMessage = { type: 'overlay-flush' };
-      worker.postMessage(flush);
+      void refreshResumeSlot().catch((err: unknown) => {
+        console.warn('[emu86] resume-slot capture failed:', err);
+        // Fall back to the pre-M2 flush pair so nothing is lost.
+        if (latestDirtySectors > 0) maybeAutoPersist(true);
+        const flush: MainToWorkerMessage = { type: 'overlay-flush' };
+        worker.postMessage(flush);
+      });
     }
   });
 
@@ -419,6 +516,73 @@ async function init(): Promise<void> {
     } catch (err) {
       driveBanner.error(String(err));
     }
+  }
+
+  /**
+   * Save a NAMED machine state (Phase 18 M2, D2(a) self-contained):
+   * capture with embedded disks, gzip the images (~10:1 on
+   * mostly-empty MINIX zones), store meta + payload in one
+   * transaction. The two-phase law (§1.4) holds by construction: the
+   * capture's worker-side final overlay sweep covers the boot disk,
+   * and the fork row is force-written here — awaited — from the
+   * capture's own secondary bytes before the state row lands.
+   */
+  async function saveNamedState(label: string): Promise<void> {
+    const reply = await requestCapture('embedded');
+    if (
+      !reply.ok ||
+      reply.state === undefined ||
+      reply.capturedAt === undefined ||
+      reply.primary === undefined
+    ) {
+      throw new Error(reply.reason ?? 'capture failed');
+    }
+    if (drive !== null && reply.secondary != null) {
+      await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
+    }
+    const primaryGz = await gzipBytes(reply.primary.bytes);
+    const secondaryGz =
+      reply.secondary != null ? await gzipBytes(reply.secondary.bytes) : null;
+    const stateId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `named-${crypto.randomUUID()}`
+        : `named-${Math.random().toString(36).slice(2)}`;
+    const now = Date.now();
+    await machineStore.putState({
+      meta: {
+        stateId,
+        label,
+        kind: 'named',
+        createdAt: now,
+        lastTouched: now,
+        baseFingerprint: reply.baseFingerprint ?? null,
+        schemaVersion: MACHINE_STATE_SCHEMA_VERSION,
+        sizeBytes: roughStateSize(
+          reply,
+          primaryGz.byteLength + (secondaryGz?.byteLength ?? 0),
+        ),
+      },
+      payload: {
+        stateId,
+        state: reply.state,
+        capturedAt: reply.capturedAt,
+        primary: {
+          gz: primaryGz,
+          geometry: reply.primary.geometry,
+          diskClass: reply.primary.diskClass,
+        },
+        secondary:
+          reply.secondary != null && secondaryGz !== null
+            ? {
+                gz: secondaryGz,
+                geometry: reply.secondary.geometry,
+                diskClass: reply.secondary.diskClass,
+              }
+            : null,
+        primarySha: reply.primarySha ?? null,
+        secondarySha: reply.secondarySha ?? null,
+      },
+    });
   }
 
   // Phase 17 M3 — the hello-human show. The fork's seeded .profile
@@ -499,6 +663,41 @@ async function init(): Promise<void> {
         ack({ ok: msg.ok, ...(msg.detail !== undefined ? { detail: msg.detail } : {}) });
       } else {
         console.warn('[emu86] unsolicited secondary-written ack:', msg);
+      }
+      return;
+    }
+    if (msg.type === 'state-captured') {
+      // Phase 18 M2: route by requestId — capture flows can overlap.
+      const sink = captureSinks.get(msg.requestId);
+      if (sink !== undefined) {
+        captureSinks.delete(msg.requestId);
+        sink(msg);
+      } else {
+        console.warn('[emu86] unsolicited state-captured reply:', msg.requestId);
+      }
+      return;
+    }
+    if (msg.type === 'restore-result') {
+      // Phase 18 M2 honesty: a fresh resume is silent (the crown's
+      // "nothing breaks"); a stale one says when it's from; a refusal
+      // says why the machine cold-booted instead. A refused RESUME
+      // slot is deleted — it describes a world that no longer exists,
+      // and the next hidden-capture rewrites it.
+      if (msg.ok) {
+        const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
+        if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
+          term.writeln(`[resumed machine state from ${describeAge(age)} ago]`);
+        }
+        if (activeRestoreStateId !== null) {
+          void machineStore.touch(activeRestoreStateId);
+        }
+      } else {
+        term.writeln(
+          `[couldn't resume saved state — ${msg.reason ?? 'unknown'}; cold-booting instead]`,
+        );
+        if (activeRestoreStateId === ownResumeSlotId) {
+          void machineStore.deleteState(ownResumeSlotId);
+        }
       }
       return;
     }
@@ -726,6 +925,81 @@ async function init(): Promise<void> {
       }
     }
   }
+
+  // Phase 18 M2 — restore carriage. Two sources, one BootConfig field:
+  //   1. A queued NAMED restore (settings → Restore…): embedded disks,
+  //      gunzipped here, fed to the worker verbatim.
+  //   2. This tab's reload-resume slot: reference form — the normal
+  //      pipeline reconstructs the disks and must hash to the capture.
+  //      Gated on origin === 'reload' (the Web-Lock duplicate detect):
+  //      a duplicated tab cold-boots, degraded mode cold-boots.
+  // Failures here NEVER block the boot — worst case is the cold boot
+  // the tab would have done before M2 existed.
+  try {
+    const pendingRestoreId = session.pendingRestoreStateId;
+    if (pendingRestoreId !== null) {
+      saveSession({ pendingRestoreStateId: null }); // consume the flag first
+      const rec = await machineStore.getState(pendingRestoreId);
+      if (
+        rec !== null &&
+        rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
+        rec.payload.primary !== null
+      ) {
+        const primaryBytes = await gunzipBytes(rec.payload.primary.gz);
+        const secondaryBytes =
+          rec.payload.secondary !== null ? await gunzipBytes(rec.payload.secondary.gz) : null;
+        boot.config.restore = {
+          state: rec.payload.state,
+          capturedAt: rec.payload.capturedAt,
+          embedded: {
+            primary: {
+              imageBytes: primaryBytes,
+              geometry: rec.payload.primary.geometry,
+              diskClass: rec.payload.primary.diskClass,
+            },
+            secondary:
+              secondaryBytes !== null && rec.payload.secondary !== null
+                ? {
+                    imageBytes: secondaryBytes,
+                    geometry: rec.payload.secondary.geometry,
+                    diskClass: rec.payload.secondary.diskClass,
+                  }
+                : null,
+          },
+        };
+        if (primaryBytes.buffer instanceof ArrayBuffer) bootTransfers.add(primaryBytes.buffer);
+        if (secondaryBytes !== null && secondaryBytes.buffer instanceof ArrayBuffer) {
+          bootTransfers.add(secondaryBytes.buffer);
+        }
+        activeRestoreStateId = pendingRestoreId;
+        term.writeln(
+          `[restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…]`,
+        );
+      } else {
+        term.writeln('[saved state unavailable or from a different era — cold-booting]');
+      }
+    } else if (overlaySession !== null && overlaySession.origin === 'reload') {
+      const rec = await machineStore.getState(ownResumeSlotId);
+      if (
+        rec !== null &&
+        rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
+        rec.payload.primarySha !== null
+      ) {
+        boot.config.restore = {
+          state: rec.payload.state,
+          capturedAt: rec.payload.capturedAt,
+          expected: {
+            primarySha: rec.payload.primarySha,
+            secondarySha: rec.payload.secondarySha,
+          },
+        };
+        activeRestoreStateId = ownResumeSlotId;
+      }
+    }
+  } catch (err) {
+    console.warn('[emu86] restore unavailable, cold-booting:', err);
+  }
+
   worker.postMessage(boot, [...bootTransfers]);
 
   // (The Phase 15 M2 single-writer Web Lock that used to live here is
@@ -765,6 +1039,22 @@ async function init(): Promise<void> {
             staleOverlayId = null;
           },
         };
+      },
+      // Phase 18 M2 — named save-states (D4: user-curated library
+      // semantics; never aged out, user-deletable). Restore = queue +
+      // reload, the overlayResetPending pattern: a running machine
+      // can't un-write its RAM.
+      savedStates: {
+        list: async (): Promise<MachineStateMeta[]> =>
+          (await machineStore.listMeta())
+            .filter((m) => m.kind === 'named')
+            .sort((a, b) => b.lastTouched - a.lastTouched),
+        save: (label: string) => saveNamedState(label),
+        restore: (stateId: string) => {
+          saveSession({ pendingRestoreStateId: stateId });
+          location.reload();
+        },
+        remove: (stateId: string) => machineStore.deleteState(stateId),
       },
     },
   });
@@ -1093,6 +1383,25 @@ function ensureDriveBanner(onPromote: () => void): {
 }
 
 /** The boot banner's provenance line for this tab's drive fork. */
+/**
+ * Age threshold for the restore honesty notice (Phase 18 M2): a resume
+ * younger than this is silent (the crown's fresh-reload case); older
+ * says when it's from. Field-tuned — a plain reload round-trips in
+ * well under a second, so anything past this is a genuinely old state.
+ */
+const RESTORE_NOTICE_AGE_MS = 10_000;
+
+/** Human-readable age for the restore notice. */
+function describeAge(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 90) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 36) return `${h}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
 function describeDrive(d: DriveSession): string {
   const blocks = Math.round(d.sizeBytes / 1024);
   switch (d.origin) {

@@ -60,6 +60,15 @@ export interface SessionState {
   overlayId: string | null;
   /** Queued factory reset (Phase 17 M2) — consumed at next boot. */
   overlayResetPending: boolean;
+  /**
+   * Queued restore of a named save-state (Phase 18 M2) — the
+   * `emu86-machines` stateId to restore, consumed at the tab's next
+   * boot (the overlayResetPending pattern: a running machine can't
+   * un-write its RAM, so restore = flag + reload). Additive field:
+   * archived builds drop it on their saves, which only costs a
+   * queued restore across a version hop — acceptable.
+   */
+  pendingRestoreStateId: string | null;
 }
 
 const STORAGE_KEY = 'emu86.session.v1';
@@ -75,6 +84,7 @@ function freshState(): SessionState {
     pendingBlankKb: null,
     overlayId: null,
     overlayResetPending: false,
+    pendingRestoreStateId: null,
   };
 }
 
@@ -102,6 +112,7 @@ export function loadSession(): SessionState {
           pendingBlankKb?: unknown;
           overlayId?: unknown;
           overlayResetPending?: unknown;
+          pendingRestoreStateId?: unknown;
         };
         if (typeof obj.sessionId === 'string' && obj.sessionId.length > 0) {
           state = {
@@ -123,6 +134,11 @@ export function loadSession(): SessionState {
                 ? obj.overlayId
                 : null,
             overlayResetPending: obj.overlayResetPending === true,
+            pendingRestoreStateId:
+              typeof obj.pendingRestoreStateId === 'string' &&
+              obj.pendingRestoreStateId.length > 0
+                ? obj.pendingRestoreStateId
+                : null,
           };
         }
       }

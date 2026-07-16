@@ -36,6 +36,22 @@ const post = (msg: WorkerToMainMessage): void => {
     self.postMessage(msg, msg.chunks.map((c) => c.bytes.buffer));
     return;
   }
+  // Captured disk images (Phase 18 M2): fresh sector-loop copies,
+  // referenced nowhere else worker-side — an embedded capture would
+  // otherwise structured-clone ~32 MB. The machine-state object's many
+  // small page buffers stay cloned (M1's capture already copied them;
+  // collecting every buffer isn't worth the bookkeeping).
+  if (msg.type === 'state-captured') {
+    const transfers: ArrayBuffer[] = [];
+    if (msg.primary !== undefined && msg.primary.bytes.buffer instanceof ArrayBuffer) {
+      transfers.push(msg.primary.bytes.buffer);
+    }
+    if (msg.secondary != null && msg.secondary.bytes.buffer instanceof ArrayBuffer) {
+      transfers.push(msg.secondary.bytes.buffer);
+    }
+    self.postMessage(msg, transfers);
+    return;
+  }
   self.postMessage(msg);
 };
 

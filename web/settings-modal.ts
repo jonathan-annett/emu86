@@ -82,7 +82,28 @@ export interface SettingsModalDeps {
   machineState?: {
     onFactoryReset: () => void;
     staleState: () => { discard: () => Promise<void> } | null;
+    /**
+     * Named save-states (Phase 18 M2, D4 library semantics). `save`
+     * captures the RUNNING machine (embedded disks, gzipped at rest);
+     * `restore` queues the state and reloads — the machine comes back
+     * exactly as saved, mid-compile included. Absent in degraded
+     * boots (no worker / no IDB).
+     */
+    savedStates?: {
+      list: () => Promise<SavedStateRow[]>;
+      save: (label: string) => Promise<void>;
+      restore: (stateId: string) => void;
+      remove: (stateId: string) => Promise<void>;
+    };
   };
+}
+
+/** What the saved-states list renders — mirrors MachineStateMeta. */
+export interface SavedStateRow {
+  stateId: string;
+  label: string | null;
+  lastTouched: number;
+  sizeBytes: number;
 }
 
 /** 100 MB cap on local uploads — aligned with GITHUB_DOWNLOAD_MAX_BYTES.
@@ -477,6 +498,97 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
         });
         stateSection.body.appendChild(staleRow);
       }
+
+      /* Named save-states (Phase 18 M2) --------------------------- */
+      const saved = ms.savedStates;
+      if (saved !== undefined) {
+        const savedHint = document.createElement('div');
+        savedHint.className = 'emu86-hint';
+        savedHint.textContent =
+          'Save the RUNNING machine — RAM, devices, and both disks — ' +
+          'as a named state. Restore reloads the tab and resumes ' +
+          'exactly where the save was taken, mid-command included.';
+        stateSection.body.appendChild(savedHint);
+
+        const saveRow = document.createElement('div');
+        saveRow.className = 'emu86-upload-row';
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'emu86-button';
+        saveBtn.textContent = 'Save machine state…';
+        const saveNote = document.createElement('span');
+        saveNote.className = 'emu86-hint';
+        saveRow.append(saveBtn, saveNote);
+        stateSection.body.appendChild(saveRow);
+
+        const savedList = document.createElement('div');
+        stateSection.body.appendChild(savedList);
+
+        const renderSavedList = async (): Promise<void> => {
+          const rows = await saved.list();
+          savedList.innerHTML = '';
+          for (const row of rows) {
+            const line = document.createElement('div');
+            line.className = 'emu86-upload-row';
+            const name = document.createElement('span');
+            name.textContent = row.label ?? row.stateId;
+            const detail = document.createElement('span');
+            detail.className = 'emu86-hint';
+            detail.textContent =
+              `${new Date(row.lastTouched).toLocaleString()} · ` +
+              `${(row.sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+            const restoreBtn = document.createElement('button');
+            restoreBtn.type = 'button';
+            restoreBtn.className = 'emu86-button';
+            restoreBtn.textContent = 'Restore';
+            restoreBtn.addEventListener('click', () => {
+              restoreBtn.textContent = 'Restoring…';
+              restoreBtn.disabled = true;
+              saved.restore(row.stateId);
+            });
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'emu86-button';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', () => {
+              deleteBtn.disabled = true;
+              void saved.remove(row.stateId).then(
+                () => renderSavedList(),
+                (err: unknown) => {
+                  deleteBtn.disabled = false;
+                  detail.textContent = `delete failed: ${String(err)}`;
+                },
+              );
+            });
+            line.append(name, detail, restoreBtn, deleteBtn);
+            savedList.appendChild(line);
+          }
+        };
+
+        saveBtn.addEventListener('click', () => {
+          const label = prompt(
+            'Name this state:',
+            `saved ${new Date().toLocaleString()}`,
+          );
+          if (label === null) return;
+          saveBtn.disabled = true;
+          saveNote.textContent = 'capturing…';
+          void saved.save(label).then(
+            () => {
+              saveBtn.disabled = false;
+              saveNote.textContent = 'saved.';
+              void renderSavedList();
+            },
+            (err: unknown) => {
+              saveBtn.disabled = false;
+              saveNote.textContent = `save failed: ${String(err)}`;
+            },
+          );
+        });
+
+        void renderSavedList();
+      }
+
       host.appendChild(stateSection.el);
     }
 

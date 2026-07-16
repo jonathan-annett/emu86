@@ -84,3 +84,49 @@ export async function gunzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([new Uint8Array(bytes)]).stream();
   return gunzipStream(stream);
 }
+
+/**
+ * Deflate in-memory bytes to gzip (Phase 18 M2 — the compress half the
+ * module never needed until save-states: a stored machine snapshot
+ * embeds its full disk images per D2(a), and 32 MB of mostly-empty
+ * MINIX zones squeezes ~10:1). `CompressionStream('gzip')` is native
+ * in every modern browser AND Node ≥18 — same zero-dependency ground
+ * the inflate half stands on. Same explicit feed/drain pump shape as
+ * {@link gunzipStream}, same typing rationale.
+ */
+export async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
+  const gzip = new CompressionStream('gzip');
+
+  const feed = async (): Promise<void> => {
+    const writer = gzip.writable.getWriter();
+    try {
+      await writer.write(new Uint8Array(bytes));
+      await writer.close();
+    } catch (err) {
+      await writer.abort(err).catch(() => { /* already errored */ });
+      throw err;
+    }
+  };
+
+  const drain = async (): Promise<Uint8Array> => {
+    const reader = gzip.readable.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(new Uint8Array(value));
+      total += value.byteLength;
+    }
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return out;
+  };
+
+  const [, out] = await Promise.all([feed(), drain()]);
+  return out;
+}

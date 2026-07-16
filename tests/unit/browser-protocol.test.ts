@@ -148,6 +148,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'control-response': return 'control-response';
       case 'overlay-swept': return 'overlay-swept';
       case 'overlay-flush': return 'overlay-flush';
+      case 'capture-state': return 'capture-state';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -168,6 +169,8 @@ describe('browser protocol — exhaustiveness', () => {
       case 'control-request': return 'control-request';
       case 'overlay-sweep': return 'overlay-sweep';
       case 'overlay-identity': return 'overlay-identity';
+      case 'state-captured': return 'state-captured';
+      case 'restore-result': return 'restore-result';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
