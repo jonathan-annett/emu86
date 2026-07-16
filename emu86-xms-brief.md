@@ -1,4 +1,13 @@
-# XMS for the browser PC — brief (draft for Jonathan's review)
+# XMS for the browser PC — brief
+
+**STATUS 2026-07-16 session close: M1 + M2 BUILT AND FIELD-VERIFIED**
+(commits da9e08d + 8865736; Jonathan's boot: "xms: 3072K, int 15/1F,
+500K xms buffers", ssd 2563K, main 212/483K used, ~186K largest hole,
+net + daemons up). OWED from M3: (a) the 4 MiB equivalence-harness
+run — snapshot fidelity on the big machine is design-argued, not yet
+test-proven; (b) the hello.sh-compiles-with-network acceptance —
+Jonathan's field pass; (c) if (b) holds, the show/net-suppression
+relaxation decision. Q1 (bigger-than-4 MiB sizing) stays open.
 
 Drafted 2026-07-16, Phase 18 M4 field loop, from Jonathan's meminfo
 report ("i'm curious why we are running out of memory anyhow") and his
