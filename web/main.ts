@@ -160,6 +160,19 @@ async function init(): Promise<void> {
     (id) => library.hasImage(id),
   );
 
+  // First visit installs the hard disk IMMEDIATELY (field ask,
+  // 2026-07-17: "now we have the hard drive loading fast, lets just
+  // install it immediately"). The old shape — boot the bundled floppy
+  // while the HD streams in the background, then break the news —
+  // gave every first-time visitor (and ghaerr) a floppy session with
+  // no toolchain, a different net-start failure mode, and a resume
+  // path no test exercises. Now: ~3 MB gzipped fetch, into the
+  // library, boot the real machine first. Offline/degraded keeps the
+  // floppy fallback honestly.
+  if (settings.imageSource.kind === 'bundled') {
+    settings = await installHardDiskNow(settings);
+  }
+
   // Seeded scripts: add ones the profile has never seen, and refresh
   // pristine copies of seeds we have since fixed. Scripts the user has
   // edited are never touched (see reconcileSeededScripts). Seeding used
@@ -997,6 +1010,12 @@ async function init(): Promise<void> {
       saveSettings(settings);
       syslog.log('the show: playing once — the button retires (the machine types by itself now)');
       playDemoShow();
+      // Kick (field: the button "did nothing"): the runner is
+      // TX-driven, and a machine idling at a prompt emits no TX to
+      // feed it. A bare newline makes the shell reprint its prompt —
+      // exactly the output the runner's first step matches on.
+      const kick: MainToWorkerMessage = { type: 'rx', bytes: new Uint8Array([0x0a]) };
+      worker.postMessage(kick);
       term.focus();
     });
   }
@@ -1713,53 +1732,43 @@ async function init(): Promise<void> {
     }
   })();
 
-  // Landing showcase (2026-07-15): while the bundled floppy runs,
-  // stream the 32 MB HD image through /gh-assets into the library in
-  // the background; when it lands, break the news and stage the next
-  // reload to boot it with the demo script. First-run shape only — a
-  // profile that already picked a boot image is never hijacked.
-  void stageShowcase();
+  // (The landing showcase's background-stream-then-break-the-news
+  // shape retired 2026-07-17 — the hard disk installs BEFORE the
+  // first boot now; see installHardDiskNow near the top of main.)
 
-  async function stageShowcase(): Promise<void> {
-    if (settings.imageSource.kind !== 'bundled') return;
-
+  async function installHardDiskNow(current: Settings): Promise<Settings> {
     const status = ensureShowcaseBanner();
     try {
-      let imageId: string | null = null;
+      let imageId: string;
       const existing = (await library.listImages()).find(
         (m) => m.name === 'hd32-minix.img',
       );
       if (existing !== undefined) {
-        imageId = existing.id; // downloaded on an earlier visit, never staged
+        imageId = existing.id; // installed on an earlier visit
       } else {
         // Same-origin gzipped image first (Phase 17 follow-on): ~3 MB
         // over the wire instead of ~31 MB, no GitHub API rate limit,
         // byte-pinned to the repo's verified image. The release flow
         // stays as the fallback for hosts without the asset.
         const bytes = await fetchBundledHd(status) ?? await fetchReleaseHd(status);
-        if (bytes === null) return;
+        if (bytes === null) {
+          status.hide();
+          return current; // offline/degraded: the floppy still boots
+        }
         imageId = await library.addImage('hd32-minix.img', bytes, 'github', 'likely-works');
       }
-
-      // Stage the machine — but re-check: the user may have chosen a
-      // machine while the download ran; their choice wins. Phase 17
-      // M3 (field, Jonathan spotting the old runner): the showcase no
-      // longer stages the keyboard demo script — the HD image's own
-      // first boot performs hello-human natively (seeded .profile →
-      // typing relay), so staging the typed show would double-bill
-      // the act and type `root` into an autologin'd user1 shell.
-      if (settings.imageSource.kind !== 'bundled') { status.hide(); return; }
-      settings = {
-        ...settings,
+      status.hide();
+      const next: Settings = {
+        ...current,
         imageSource: { kind: 'library', id: imageId },
       };
-      saveSettings(settings);
-      status.breakingNews();
+      saveSettings(next);
+      return next;
     } catch (err) {
-      // Rate limits / offline / quota: the showcase is a bonus, not a
-      // requirement. The floppy machine keeps running.
-      console.warn('[emu86] showcase staging failed:', err);
+      // Rate limits / offline / quota: degrade to the floppy honestly.
+      console.warn('[emu86] hard-disk install failed — floppy fallback:', err);
       status.hide();
+      return current;
     }
   }
 
