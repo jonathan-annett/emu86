@@ -65,6 +65,8 @@ import {
   mountCloneParent,
   requestCloneState,
 } from './clone-session.js';
+import { askCloneChoice } from './clone-choice.js';
+import { nameForOctet } from '../src/net/tan-names.js';
 import { HELLO_HUMAN_MARKER } from '../src/browser/image-stamps.js';
 import { OverlayStore } from './overlay-store.js';
 import { SECTOR_SIZE } from '../src/disk/disk.js';
@@ -223,17 +225,28 @@ async function init(): Promise<void> {
   // potential parent; a tab whose overlay session says 'duplicate'
   // ALSO dials as a child. The inherited sessionId is what names the
   // parent — grab it, then mint our own BEFORE anything keys off it
-  // (two tabs sharing an id fight over one resume-slot row).
+  // (two tabs sharing an id fight over one resume-slot row). The
+  // HANDSHAKE waits for the boot-choice modal (field ask: duplicating
+  // also mints new PCs — ask which one this is) so a fresh-PC pick
+  // never bothers the parent and a resume captures at decision time.
   const cloneChannel = new BroadcastChannel(CLONE_CHANNEL_NAME);
-  let cloneStatePromise: Promise<string | null> | null = null;
+  let cloneParentInfo: {
+    parentSessionId: string;
+    childSessionId: string;
+    parentName: string | null;
+  } | null = null;
   if (overlaySession?.origin === 'duplicate') {
-    const parentSessionId = loadSession().sessionId;
+    const inherited = loadSession();
     const childSessionId = mintSessionId();
     saveSession({ sessionId: childSessionId });
-    cloneStatePromise = requestCloneState(cloneChannel, parentSessionId, childSessionId, {
-      onAccepted: () =>
-        console.debug('[emu86] clone: the original tab answered — waiting for its snapshot'),
-    });
+    cloneParentInfo = {
+      parentSessionId: inherited.sessionId,
+      childSessionId,
+      // The copied session carries the parent's sticky octet — its
+      // name is a pure function of it. Null on degraded parents.
+      parentName:
+        inherited.tanHostOctet !== null ? nameForOctet(inherited.tanHostOctet) : null,
+    };
   }
 
   // Whole-machine save-states + the reload-resume slot (Phase 18 M2).
@@ -1394,28 +1407,50 @@ async function init(): Promise<void> {
       } else {
         syslog.log('saved state unavailable or from a different era — cold-booting', { toast: true });
       }
-    } else if (cloneStatePromise !== null) {
-      // Phase 18 M3: this tab is a duplicate — the parent may be
-      // serving a frozen-in-amber snapshot right now.
-      syslog.log('clone: duplicated tab — asking the original for its machine state…');
-      const cloneStateId = await cloneStatePromise;
-      if (cloneStateId === null) {
-        syslog.log(
-          'clone: no snapshot from the original tab — cold-booting instead',
-          { toast: true },
-        );
+    } else if (cloneParentInfo !== null) {
+      // Phase 18 M3: this tab is a duplicate. Ask WHICH thing the
+      // user meant (field ask): a new PC (the pre-M3 reboot — copied
+      // disks, own name, full network) or the parent's live session
+      // frozen in amber (detached until reboot). The handshake only
+      // runs on 'resume', so the snapshot is fresh at decision time.
+      const modal = askCloneChoice(cloneParentInfo.parentName);
+      const picked = await modal.choice;
+      if (picked === 'fresh') {
+        modal.close();
+        syslog.log('duplicated tab: booting as a new PC (disks copied, fresh machine)');
+        // fall through to the plain cold boot below
       } else {
-        const rec = await machineStore.getState(cloneStateId);
-        // One-shot courier: the row dies now whatever happens next
-        // (the boot-time age sweep is only the backstop).
-        void machineStore.deleteState(cloneStateId).catch(() => { /* best effort */ });
-        if (rec !== null && (await applyEmbeddedRestore(rec))) {
+        modal.setBusy('asking the original tab for its machine state…');
+        const cloneStateId = await requestCloneState(
+          cloneChannel,
+          cloneParentInfo.parentSessionId,
+          cloneParentInfo.childSessionId,
+          {
+            onAccepted: () =>
+              modal.setBusy('the original tab is capturing its machine…'),
+          },
+        );
+        if (cloneStateId === null) {
+          modal.close();
           syslog.log(
-            'clone: frozen in amber — resuming the original tab’s machine (its network re-leases on reboot)',
+            'clone: no snapshot from the original tab — booting as a new PC instead',
             { toast: true },
           );
         } else {
-          syslog.log('clone: snapshot unusable — cold-booting instead', { toast: true });
+          const rec = await machineStore.getState(cloneStateId);
+          // One-shot courier: the row dies now whatever happens next
+          // (the boot-time age sweep is only the backstop).
+          void machineStore.deleteState(cloneStateId).catch(() => { /* best effort */ });
+          if (rec !== null && (await applyEmbeddedRestore(rec))) {
+            modal.close();
+            syslog.log(
+              'clone: frozen in amber — resuming the original tab’s machine (its network re-leases on reboot)',
+              { toast: true },
+            );
+          } else {
+            modal.close();
+            syslog.log('clone: snapshot unusable — booting as a new PC instead', { toast: true });
+          }
         }
       }
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
