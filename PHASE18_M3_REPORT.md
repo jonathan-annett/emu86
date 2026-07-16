@@ -124,6 +124,13 @@ elk responder". On a future image bump, that supersedes the recorded
 interim path (guest-side ktcp restart with a fresh LOCALIP via the
 control endpoint).
 
+**DEFERRED (Jonathan, 2026-07-17): "we can do without it for now.
+the dhcp might make cloned pcs easier, but i'm not sure how much
+that is going to be useful for the editor project anyhow."** The
+anchor stands: emu86 is a means to the huxley/lite editor end —
+clone networking polish is off that critical path. No image bump,
+no DHCP responder, until the editor project asks for it.
+
 ## 4. Findings for the record
 
 - A duplicated tab shared its parent's sessionId from Phase 18 M2
