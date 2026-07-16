@@ -15,6 +15,7 @@
  */
 
 import type { InspectSnapshot } from '../src/browser/protocol.js';
+import { AUTHENTIC_CYCLES_PER_MS } from '../src/browser/pacing.js';
 
 export interface InspectPanelDeps {
   /** Freeze/unfreeze the CPU (posts set-paused). */
@@ -215,6 +216,14 @@ function showPanel(
     `NE2K  ISR=${hex2(d.nic.isr)} IMR=${hex2(d.nic.imr)} CURR=${hex2(d.nic.curr)} BNRY=${hex2(d.nic.bnry)} ${d.nic.running ? 'running' : 'stopped'}`,
   ].join('\n');
 
+  // Guest-time accounting (field ask 2026-07-16): the machine line
+  // should agree with `uptime` in the guest — across suspends,
+  // restores and clones — or the time plane has a bug to find.
+  const time = [
+    `machine  ${fmtGuestTime(s.time.cyclesSinceBoot)} since first cold boot (compare: uptime)`,
+    `session  ${fmtGuestTime(s.time.cyclesThisSession)} since this boot/restore`,
+  ].join('\n');
+
   panel.append(
     heading('h2', 'machine frozen — dismiss to resume'),
     heading('h3', 'registers'),
@@ -225,6 +234,8 @@ function showPanel(
     pre(hexDump(s.stack.bytes, s.stack.linear)),
     heading('h3', 'devices'),
     pre(devices),
+    heading('h3', 'guest time (4.77 MHz cycles)'),
+    pre(time),
   );
 
   // Save the frozen machine as a named state — the capture happens at
@@ -444,3 +455,12 @@ function decodeFlags(f: number): string {
 function hex2(n: number): string { return n.toString(16).padStart(2, '0'); }
 function hex4(n: number): string { return n.toString(16).padStart(4, '0'); }
 function hex5(n: number): string { return n.toString(16).padStart(5, '0'); }
+
+/** 4.77 MHz cycles → "1h 23m 45.6s" — guest time, not wall time. */
+function fmtGuestTime(cycles: number): string {
+  const totalS = cycles / AUTHENTIC_CYCLES_PER_MS / 1000;
+  const h = Math.floor(totalS / 3600);
+  const m = Math.floor((totalS % 3600) / 60);
+  const sec = (totalS % 60).toFixed(1);
+  return h > 0 ? `${h}h ${m}m ${sec}s` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}

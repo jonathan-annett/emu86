@@ -660,6 +660,22 @@ export interface InspectSnapshot {
     uart: { ier: number; lcr: number; mcr: number; rxQueued: number };
     nic: { isr: number; imr: number; curr: number; bnry: number; running: boolean };
   };
+  /**
+   * Guest-time accounting (field ask 2026-07-16: "compare against
+   * uptime to see if things really are working properly"). Units are
+   * machine clock cycles — authentic 4.77 MHz in the paced browser
+   * loop (AUTHENTIC_CYCLES_PER_MS), an ELKS jiffy being 47,728.
+   */
+  time: {
+    /**
+     * clock.now(): cycles since the machine's FIRST cold boot — the
+     * counter rides MachineState.clockCycles, so it survives every
+     * capture/restore in the chain. Guest `uptime` should track this.
+     */
+    cyclesSinceBoot: number;
+    /** Cycles run since THIS session's boot or restore. */
+    cyclesThisSession: number;
+  };
 }
 
 /** Reply to {@link InspectMachineMessage}. */

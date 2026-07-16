@@ -236,6 +236,9 @@ describe('WorkerHost — freeze-and-inspect (field-loop UI)', () => {
     );
     expect(reply.snapshot.code.bytes.length).toBe(64);
     expect(reply.snapshot.devices.pic.imr).toBeDefined();
+    // Guest-time accounting: a cold boot's session IS its lifetime.
+    expect(reply.snapshot.time.cyclesSinceBoot).toBeGreaterThan(0);
+    expect(reply.snapshot.time.cyclesThisSession).toBe(reply.snapshot.time.cyclesSinceBoot);
   });
 
   it('inspect with no machine replies ok:false; set-paused round-trips', () => {
@@ -324,6 +327,19 @@ describe('WorkerHost — restore round trips (the M1 law through the protocol)',
     });
     expect(restoreResult(b)).toMatchObject({ ok: true });
     expect(compareHosts(a.host, b.host)).toEqual([]);
+
+    // Guest-time accounting across the restore: the lineage counter
+    // survives (clockCycles rode the state), the session line resets.
+    b.host.handleMessage({ type: 'inspect-machine', requestId: 99 });
+    const inspected = b.messages.find((m) => m.type === 'machine-inspected');
+    if (inspected === undefined || inspected.type !== 'machine-inspected' ||
+        inspected.snapshot === undefined) {
+      throw new Error('no inspection after restore');
+    }
+    expect(inspected.snapshot.time.cyclesSinceBoot).toBe(
+      a.host.machine?.clock.now(),
+    );
+    expect(inspected.snapshot.time.cyclesThisSession).toBe(0);
 
     a.host.runUntil(300);
     b.host.runUntil(300);

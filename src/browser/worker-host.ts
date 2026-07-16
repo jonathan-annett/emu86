@@ -382,6 +382,12 @@ export class WorkerHost {
    */
   #pendingCleanRequestId: number | null = null;
   /**
+   * Machine-clock reading at THIS session's start (0 on a cold boot,
+   * the restored clockCycles after a resume) — the inspect popup's
+   * "this session" line subtracts it (field ask 2026-07-16).
+   */
+  #sessionStartCycles = 0;
+  /**
    * Whether a reference (base + fold) reconstruction can reproduce
    * this session's disk (field fix #3): false for embedded-restore
    * sessions (verbatim disks). Capture replies carry it so main never
@@ -1320,6 +1326,11 @@ export class WorkerHost {
       });
     }
 
+    // This session's guest-time baseline: 0 after a cold boot, the
+    // restored clockCycles after a resume (the clock was overwritten
+    // by restoreMachineState above).
+    this.#sessionStartCycles = machine.clock.now();
+
     this.#post({ type: 'ready' });
   }
 
@@ -1805,6 +1816,10 @@ export class WorkerHost {
               isr: nic.isr, imr: nic.imr, curr: nic.curr, bnry: nic.bnry,
               running: machine.nic.running,
             },
+          },
+          time: {
+            cyclesSinceBoot: machine.clock.now(),
+            cyclesThisSession: machine.clock.now() - this.#sessionStartCycles,
           },
         },
       });
