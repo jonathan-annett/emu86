@@ -59,7 +59,12 @@ import {
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
-import { loadSession, saveSession } from './session-store.js';
+import { loadSession, mintSessionId, saveSession } from './session-store.js';
+import {
+  CLONE_CHANNEL_NAME,
+  mountCloneParent,
+  requestCloneState,
+} from './clone-session.js';
 import { HELLO_HUMAN_MARKER } from '../src/browser/image-stamps.js';
 import { OverlayStore } from './overlay-store.js';
 import { SECTOR_SIZE } from '../src/disk/disk.js';
@@ -83,8 +88,11 @@ import {
   MACHINE_STATE_SCHEMA_VERSION,
   MachineStore,
   gcOrphanResumeSlots,
+  gcStaleCloneStates,
   resumeSlotId,
   resumeSlotLockName,
+  type MachineStateKind,
+  type MachineStateRecord,
   type MachineStateMeta,
 } from './machine-store.js';
 import { mountStatusLeds, type StatusLeds } from './status-leds.js';
@@ -210,6 +218,24 @@ async function init(): Promise<void> {
     if (n > 0) console.debug(`[emu86] swept ${n} orphaned machine overlay${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
+  // Phase 18 M3 — the clone ("tab duplicate = frozen in amber").
+  // One channel serves both roles: every tab answers requests as a
+  // potential parent; a tab whose overlay session says 'duplicate'
+  // ALSO dials as a child. The inherited sessionId is what names the
+  // parent — grab it, then mint our own BEFORE anything keys off it
+  // (two tabs sharing an id fight over one resume-slot row).
+  const cloneChannel = new BroadcastChannel(CLONE_CHANNEL_NAME);
+  let cloneStatePromise: Promise<string | null> | null = null;
+  if (overlaySession?.origin === 'duplicate') {
+    const parentSessionId = loadSession().sessionId;
+    const childSessionId = mintSessionId();
+    saveSession({ sessionId: childSessionId });
+    cloneStatePromise = requestCloneState(cloneChannel, parentSessionId, childSessionId, {
+      onAccepted: () =>
+        console.debug('[emu86] clone: the original tab answered — waiting for its snapshot'),
+    });
+  }
+
   // Whole-machine save-states + the reload-resume slot (Phase 18 M2).
   // The store is the fourth IDB tenant; this tab's resume slot is
   // keyed by sessionId and guarded by a Web Lock so the GC's
@@ -220,6 +246,9 @@ async function init(): Promise<void> {
   void forkLocks.acquireForever(resumeSlotLockName(ownResumeSlotId));
   void gcOrphanResumeSlots(machineStore, forkLocks).then((n) => {
     if (n > 0) console.debug(`[emu86] swept ${n} orphaned resume slot${n === 1 ? '' : 's'}`);
+  }).catch(() => { /* sweep is best-effort */ });
+  void gcStaleCloneStates(machineStore).then((n) => {
+    if (n > 0) console.debug(`[emu86] swept ${n} abandoned clone snapshot${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
   // The system log (Phase 18 field-loop UI): every HOST-side message
@@ -763,7 +792,17 @@ async function init(): Promise<void> {
    * and the fork row is force-written here — awaited — from the
    * capture's own secondary bytes before the state row lands.
    */
-  async function saveNamedState(label: string): Promise<void> {
+  /**
+   * The embedded-capture persistence core: capture → gzip → one
+   * machine-store row. Named saves and clone couriers (Phase 18 M3,
+   * D3(a): "one code path shared with save-states") differ only in
+   * row identity.
+   */
+  async function persistEmbeddedCapture(row: {
+    stateId: string;
+    kind: MachineStateKind;
+    label: string | null;
+  }): Promise<void> {
     const reply = await requestCapture('embedded');
     if (
       !reply.ok ||
@@ -779,16 +818,12 @@ async function init(): Promise<void> {
     const primaryGz = await gzipBytes(reply.primary.bytes);
     const secondaryGz =
       reply.secondary != null ? await gzipBytes(reply.secondary.bytes) : null;
-    const stateId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? `named-${crypto.randomUUID()}`
-        : `named-${Math.random().toString(36).slice(2)}`;
     const now = Date.now();
     await machineStore.putState({
       meta: {
-        stateId,
-        label,
-        kind: 'named',
+        stateId: row.stateId,
+        label: row.label,
+        kind: row.kind,
         createdAt: now,
         lastTouched: now,
         baseFingerprint: reply.baseFingerprint ?? null,
@@ -799,7 +834,7 @@ async function init(): Promise<void> {
         ),
       },
       payload: {
-        stateId,
+        stateId: row.stateId,
         state: reply.state,
         capturedAt: reply.capturedAt,
         primary: {
@@ -824,6 +859,34 @@ async function init(): Promise<void> {
       },
     });
   }
+
+  async function saveNamedState(label: string): Promise<void> {
+    const stateId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `named-${crypto.randomUUID()}`
+        : `named-${Math.random().toString(36).slice(2)}`;
+    await persistEmbeddedCapture({ stateId, kind: 'named', label });
+  }
+
+  // Phase 18 M3: every tab answers the clone channel as a potential
+  // parent. The child names its parent by the inherited sessionId;
+  // requests naming anyone else are ignored here. A pre-boot request
+  // fails honestly ("no machine is running") and the child cold-boots.
+  mountCloneParent(cloneChannel, {
+    sessionId: () => loadSession().sessionId,
+    saveCloneState: async (childSessionId: string) => {
+      const stateId = `clone-${childSessionId}`;
+      await persistEmbeddedCapture({ stateId, kind: 'clone', label: null });
+      return stateId;
+    },
+    onServed: (child, ok) => {
+      syslog.log(
+        ok
+          ? 'clone: a duplicated tab asked for this machine — snapshot served, frozen in amber'
+          : 'clone: failed to serve a duplicated tab (it cold-boots instead)',
+      );
+    },
+  });
 
   // Phase 17 M3 — the hello-human show. The fork's seeded .profile
   // emits the marker exactly once per drive (guest-initiated); the
@@ -1233,15 +1296,60 @@ async function init(): Promise<void> {
     }
   }
 
-  // Phase 18 M2 — restore carriage. Two sources, one BootConfig field:
+  // Phase 18 M2/M3 — restore carriage. Three sources, one BootConfig
+  // field:
   //   1. A queued NAMED restore (settings → Restore…): embedded disks,
   //      gunzipped here, fed to the worker verbatim.
-  //   2. This tab's reload-resume slot: reference form — the normal
-  //      pipeline reconstructs the disks and must hash to the capture.
-  //      Gated on origin === 'reload' (the Web-Lock duplicate detect):
-  //      a duplicated tab cold-boots, degraded mode cold-boots.
+  //   2. A CLONE handshake (M3, origin 'duplicate'): the parent wrote
+  //      an embedded snapshot to emu86-machines and broadcast its
+  //      stateId — same carriage as 1, one-shot row.
+  //   3. This tab's reload-resume slot: reference form — the pure
+  //      pipeline reconstructs the disks and the INPUTS must verify
+  //      (§7). Gated on origin === 'reload'.
   // Failures here NEVER block the boot — worst case is the cold boot
   // the tab would have done before M2 existed.
+
+  /** Wire one embedded row (named save or clone courier) into the
+   *  boot config. Returns false when the row can't be used. */
+  const applyEmbeddedRestore = async (
+    rec: MachineStateRecord,
+  ): Promise<boolean> => {
+    if (
+      rec.meta.schemaVersion !== MACHINE_STATE_SCHEMA_VERSION ||
+      rec.payload.primary === null
+    ) {
+      return false;
+    }
+    const primaryBytes = await gunzipBytes(rec.payload.primary.gz);
+    const secondaryBytes =
+      rec.payload.secondary !== null ? await gunzipBytes(rec.payload.secondary.gz) : null;
+    boot.config.restore = {
+      state: rec.payload.state,
+      capturedAt: rec.payload.capturedAt,
+      embedded: {
+        primary: {
+          imageBytes: primaryBytes,
+          geometry: rec.payload.primary.geometry,
+          diskClass: rec.payload.primary.diskClass,
+        },
+        secondary:
+          secondaryBytes !== null && rec.payload.secondary !== null
+            ? {
+                imageBytes: secondaryBytes,
+                geometry: rec.payload.secondary.geometry,
+                diskClass: rec.payload.secondary.diskClass,
+              }
+            : null,
+      },
+    };
+    if (primaryBytes.buffer instanceof ArrayBuffer) bootTransfers.add(primaryBytes.buffer);
+    if (secondaryBytes !== null && secondaryBytes.buffer instanceof ArrayBuffer) {
+      bootTransfers.add(secondaryBytes.buffer);
+    }
+    pendingTerminalRestore = rec.payload.terminal ?? null;
+    return true;
+  };
+
   try {
     // Queued reboot (field loop): consume the flag, skip the resume
     // once, drop the slot. RAM restarts; overlay + fork persist — a
@@ -1259,45 +1367,38 @@ async function init(): Promise<void> {
     } else if (pendingRestoreId !== null) {
       saveSession({ pendingRestoreStateId: null }); // consume the flag first
       const rec = await machineStore.getState(pendingRestoreId);
-      if (
-        rec !== null &&
-        rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
-        rec.payload.primary !== null
-      ) {
-        const primaryBytes = await gunzipBytes(rec.payload.primary.gz);
-        const secondaryBytes =
-          rec.payload.secondary !== null ? await gunzipBytes(rec.payload.secondary.gz) : null;
-        boot.config.restore = {
-          state: rec.payload.state,
-          capturedAt: rec.payload.capturedAt,
-          embedded: {
-            primary: {
-              imageBytes: primaryBytes,
-              geometry: rec.payload.primary.geometry,
-              diskClass: rec.payload.primary.diskClass,
-            },
-            secondary:
-              secondaryBytes !== null && rec.payload.secondary !== null
-                ? {
-                    imageBytes: secondaryBytes,
-                    geometry: rec.payload.secondary.geometry,
-                    diskClass: rec.payload.secondary.diskClass,
-                  }
-                : null,
-          },
-        };
-        if (primaryBytes.buffer instanceof ArrayBuffer) bootTransfers.add(primaryBytes.buffer);
-        if (secondaryBytes !== null && secondaryBytes.buffer instanceof ArrayBuffer) {
-          bootTransfers.add(secondaryBytes.buffer);
-        }
+      if (rec !== null && (await applyEmbeddedRestore(rec))) {
         activeRestoreStateId = pendingRestoreId;
-        pendingTerminalRestore = rec.payload.terminal ?? null;
         syslog.log(
           `restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…`,
           { toast: true },
         );
       } else {
         syslog.log('saved state unavailable or from a different era — cold-booting', { toast: true });
+      }
+    } else if (cloneStatePromise !== null) {
+      // Phase 18 M3: this tab is a duplicate — the parent may be
+      // serving a frozen-in-amber snapshot right now.
+      syslog.log('clone: duplicated tab — asking the original for its machine state…');
+      const cloneStateId = await cloneStatePromise;
+      if (cloneStateId === null) {
+        syslog.log(
+          'clone: no snapshot from the original tab — cold-booting instead',
+          { toast: true },
+        );
+      } else {
+        const rec = await machineStore.getState(cloneStateId);
+        // One-shot courier: the row dies now whatever happens next
+        // (the boot-time age sweep is only the backstop).
+        void machineStore.deleteState(cloneStateId).catch(() => { /* best effort */ });
+        if (rec !== null && (await applyEmbeddedRestore(rec))) {
+          syslog.log(
+            'clone: frozen in amber — resuming the original tab’s machine (its network re-leases on reboot)',
+            { toast: true },
+          );
+        } else {
+          syslog.log('clone: snapshot unusable — cold-booting instead', { toast: true });
+        }
       }
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
       const rec = await machineStore.getState(ownResumeSlotId);

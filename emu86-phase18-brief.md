@@ -249,10 +249,20 @@ field record. The promotion cadence stays his.
   including stamps, GC-safe, ~3-6 MB stored. (b) REFERENCE —
   base+overlay+re-stamp reconstruction — stays recorded for the
   auto reload-resume slot if quota bites.
-- **D3. Clone transport**: (a) parent writes the snapshot to
-  `emu86-machines`, broadcasts only the stateId, child reads IDB —
-  RECOMMENDED (no N-tab structured clones, one code path shared
-  with save-states); or (b) payload over the channel.
+- **D3. Clone transport — DECIDED (a) (Jonathan, 2026-07-16, "ok
+  lets do these in order" over the queue that named it)**: parent
+  writes the snapshot to `emu86-machines`, broadcasts only the
+  stateId, child reads IDB — no N-tab structured clones, one code
+  path shared with save-states. Implementation notes settled with
+  it: a two-phase handshake (request → accepted → ready, timeouts
+  on both phases, cold boot on any miss); the child MINTS A FRESH
+  sessionId at duplicate-detect (also fixes the standing wart of a
+  duplicate fighting its parent for one resume-slot row); clone
+  rows are kind 'clone', deleted by the child after the restore
+  reads them, age-swept at boot as a backstop; the clone session is
+  embedded-verbatim, so like a named-save restore it has NO
+  reload-resume until its first reboot — recorded v1 wart, heals on
+  reboot, consistent with D5(b)'s detached-cable posture.
 - **D4. Save-state ownership — DECIDED as recommended (Jonathan,
   2026-07-16, same go-ahead as D2)**: named saves = user-curated
   artifacts (never aged out, user-deletable — library semantics);

@@ -12,10 +12,12 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  CLONE_STATE_GC_MAX_AGE_MS,
   MACHINE_STATE_SCHEMA_VERSION,
   MachineStore,
   RESUME_SLOT_GC_MAX_AGE_MS,
   gcOrphanResumeSlots,
+  gcStaleCloneStates,
   resumeSlotId,
   resumeSlotLockName,
   type MachineStateRecord,
@@ -82,7 +84,11 @@ function pitChannel(): MachineState['pit']['channels'][0] {
   };
 }
 
-function record(stateId: string, kind: 'named' | 'resume', lastTouched: number): MachineStateRecord {
+function record(
+  stateId: string,
+  kind: 'named' | 'resume' | 'clone',
+  lastTouched: number,
+): MachineStateRecord {
   return {
     meta: {
       stateId,
@@ -201,5 +207,21 @@ describe('gcOrphanResumeSlots', () => {
     );
     expect(deleted).toBe(0);
     expect(await store.listMeta()).toHaveLength(1);
+  });
+});
+
+describe('gcStaleCloneStates (Phase 18 M3)', () => {
+  it('sweeps abandoned clone couriers; keeps fresh clones and other kinds', async () => {
+    const store = new MachineStore();
+    const now = CLONE_STATE_GC_MAX_AGE_MS * 5;
+    await store.putState(record('clone-dead-child', 'clone', now - CLONE_STATE_GC_MAX_AGE_MS - 1));
+    await store.putState(record('clone-fresh-child', 'clone', now - 1_000));
+    await store.putState(record('named-keep', 'named', 0)); // ancient, still kept
+    await store.putState(record(resumeSlotId('keep'), 'resume', 0)); // not this GC's job
+
+    const deleted = await gcStaleCloneStates(store, now);
+    expect(deleted).toBe(1);
+    const remaining = (await store.listMeta()).map((m) => m.stateId).sort();
+    expect(remaining).toEqual(['clone-fresh-child', 'named-keep', resumeSlotId('keep')].sort());
   });
 });

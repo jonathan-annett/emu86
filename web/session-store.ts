@@ -81,12 +81,21 @@ export interface SessionState {
 
 const STORAGE_KEY = 'emu86.session.v1';
 
+/**
+ * Mint a fresh per-tab id. Exposed for the clone path (Phase 18 M3):
+ * a duplicated tab inherits its parent's sessionId via sessionStorage
+ * and must re-mint BEFORE anything keys off it — two tabs sharing an
+ * id fight over one resume-slot row.
+ */
+export function mintSessionId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `s-${Math.random().toString(36).slice(2)}`;
+}
+
 function freshState(): SessionState {
   return {
-    sessionId:
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `s-${Math.random().toString(36).slice(2)}`,
+    sessionId: mintSessionId(),
     tanHostOctet: null,
     driveForkId: null,
     pendingBlankKb: null,

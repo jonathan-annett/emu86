@@ -43,7 +43,7 @@ const PAYLOAD_STORE = 'payload';
 /** The payload schema this build writes and accepts. */
 export const MACHINE_STATE_SCHEMA_VERSION = 1;
 
-export type MachineStateKind = 'named' | 'resume';
+export type MachineStateKind = 'named' | 'resume' | 'clone';
 
 export interface MachineStateMeta {
   stateId: string;
@@ -285,6 +285,30 @@ export async function gcOrphanResumeSlots(
     if (meta.kind !== 'resume') continue;
     if (now - meta.lastTouched < RESUME_SLOT_GC_MAX_AGE_MS) continue;
     if (!(await locks.probeFree(resumeSlotLockName(meta.stateId)))) continue;
+    await store.deleteState(meta.stateId);
+    deleted++;
+  }
+  return deleted;
+}
+
+/** A clone row unread for this long was abandoned mid-handshake. */
+export const CLONE_STATE_GC_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Sweep abandoned clone rows (Phase 18 M3). Clone rows are one-shot
+ * couriers: the child deletes its row right after the restore reads
+ * it, so anything older than the age cap is a handshake that died
+ * (child closed mid-wait, parent crashed post-put). No locks — the
+ * rows have no owner to probe. Returns the number deleted.
+ */
+export async function gcStaleCloneStates(
+  store: MachineStore,
+  now: number = Date.now(),
+): Promise<number> {
+  let deleted = 0;
+  for (const meta of await store.listMeta()) {
+    if (meta.kind !== 'clone') continue;
+    if (now - meta.lastTouched < CLONE_STATE_GC_MAX_AGE_MS) continue;
     await store.deleteState(meta.stateId);
     deleted++;
   }
