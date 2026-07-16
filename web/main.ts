@@ -581,6 +581,7 @@ async function init(): Promise<void> {
         leds?.set(
           'state', 'dim',
           'no reload-resume this session (restored from a named save; a reload cold-boots)',
+          null,
         );
         return;
       }
@@ -705,15 +706,18 @@ async function init(): Promise<void> {
         }
       }
       replyForNack = null; // every delta settled (acked or nacked)
+      // The ticking timestamp (field ask): the label reads
+      // STATE (hh:mm:ss) and updates every landed capture.
       leds?.set(
         'state', 'green',
-        `resume slot fresh — a reload resumes (captured ${new Date().toLocaleTimeString()})`,
+        'resume slot fresh — a reload resumes from this moment',
+        new Date().toLocaleTimeString(),
       );
     })()
       .catch((err: unknown) => {
         console.warn('[emu86] resume-slot capture failed:', err);
         resumeSlotBroken = true;
-        leds?.set('state', 'red', 'resume machinery degraded — reload cold-boots');
+        leds?.set('state', 'red', 'resume machinery degraded — reload cold-boots', null);
         // Degrade to the pre-M2 pair from here on (stats handler
         // checks resumeSlotBroken). Fold any unsettled deltas back
         // FIRST — the flush below re-sweeps them the moment the

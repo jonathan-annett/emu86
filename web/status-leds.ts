@@ -23,7 +23,14 @@
 export type LedTone = 'off' | 'dim' | 'green' | 'amber' | 'red' | 'blue';
 
 export interface StatusLeds {
-  set(name: LedName, tone: LedTone, title: string): void;
+  /**
+   * `detail` is the low-lighted bracketed suffix after the label —
+   * field ask 2026-07-16: "STATE hh:mm:ss so you see it ticking
+   * over". Undefined leaves the current detail untouched (so the
+   * amber capture-in-flight beat doesn't blink the timestamp away);
+   * null clears it; a string shows `(string)`.
+   */
+  set(name: LedName, tone: LedTone, title: string, detail?: string | null): void;
   /** One short flash (activity blip) layered over the current tone. */
   flash(name: LedName): void;
 }
@@ -58,6 +65,13 @@ const LED_CSS = `
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.6) inset;
   transition: background 0.25s, box-shadow 0.25s;
 }
+.emu86-led .detail {
+  opacity: 0.5;
+  text-transform: none;
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums;
+}
+.emu86-led .detail:empty { display: none; }
 .emu86-led[data-tone='dim'] .dot { background: #3a4a3a; }
 .emu86-led[data-tone='green'] .dot { background: #37d05c; box-shadow: 0 0 6px #37d05c; }
 .emu86-led[data-tone='amber'] .dot { background: #e0a83a; box-shadow: 0 0 6px #e0a83a; }
@@ -79,6 +93,7 @@ export function mountStatusLeds(host: HTMLElement): StatusLeds {
   const strip = document.createElement('span');
   strip.className = 'emu86-leds';
   const els = new Map<LedName, HTMLSpanElement>();
+  const details = new Map<LedName, HTMLSpanElement>();
   for (const name of LED_ORDER) {
     const led = document.createElement('span');
     led.className = 'emu86-led';
@@ -87,19 +102,26 @@ export function mountStatusLeds(host: HTMLElement): StatusLeds {
     dot.className = 'dot';
     const label = document.createElement('span');
     label.textContent = name;
-    led.append(dot, label);
+    const detail = document.createElement('span');
+    detail.className = 'detail';
+    led.append(dot, label, detail);
     strip.appendChild(led);
     els.set(name, led);
+    details.set(name, detail);
   }
   host.appendChild(strip);
 
   const flashTimers = new Map<LedName, number>();
   return {
-    set(name, tone, title) {
+    set(name, tone, title, detail) {
       const led = els.get(name);
       if (led === undefined) return;
       led.dataset.tone = tone;
       led.title = title;
+      if (detail !== undefined) {
+        const el = details.get(name);
+        if (el !== undefined) el.textContent = detail === null ? '' : `(${detail})`;
+      }
     },
     flash(name) {
       const led = els.get(name);
