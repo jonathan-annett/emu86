@@ -219,22 +219,22 @@ field record. The promotion cadence stays his.
 - **D1. Sequencing — DECIDED YES (Jonathan, 2026-07-16)**: same-tab
   shapes first ("the capture is sufficient for a tab to survive a
   refresh ... reasonable for the first step"), clone last.
-- **D2. Disk capture**: (a) SELF-CONTAINED — snapshot embeds the
+- **D2. Disk capture — DECIDED (a) (Jonathan, 2026-07-16: "go ahead
+  for m2" after the M1 report flagged D2/D4 as M2's needs; the
+  recommendations stand)**: SELF-CONTAINED — snapshot embeds the
   full primary image (+ fork bytes), gzip ~10:1, byte-exact
-  including stamps, GC-safe, ~3-6 MB stored; or (b) REFERENCE —
-  base+overlay+re-stamp reconstruction, small but subject to the
-  stamp-drift subtlety (§1.4) and coherent only if nothing diverges
-  after the save. RECOMMENDED: (a) for save-states/clone, with (b)
-  considered later for the auto reload-resume slot if quota bites.
+  including stamps, GC-safe, ~3-6 MB stored. (b) REFERENCE —
+  base+overlay+re-stamp reconstruction — stays recorded for the
+  auto reload-resume slot if quota bites.
 - **D3. Clone transport**: (a) parent writes the snapshot to
   `emu86-machines`, broadcasts only the stateId, child reads IDB —
   RECOMMENDED (no N-tab structured clones, one code path shared
   with save-states); or (b) payload over the channel.
-- **D4. Save-state ownership**: named saves = user-curated
+- **D4. Save-state ownership — DECIDED as recommended (Jonathan,
+  2026-07-16, same go-ahead as D2)**: named saves = user-curated
   artifacts (never aged out, user-deletable — library semantics);
   the reload-resume slot = tab-owned, lock+staleness GC'd (overlay
-  semantics). RECOMMENDED as stated; alternatives collapse one
-  into the other.
+  semantics).
 - **D5. Clone network identity, v1 — DECIDED (b), Jonathan,
   2026-07-16**: trunk-detached clones ("the duplicate tab problem is
   fine as (b) we can work on a rational plan to deal with that in a
