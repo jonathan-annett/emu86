@@ -571,8 +571,17 @@ async function init(): Promise<void> {
     }
   }
 
+  // A forced capture arriving mid-beat must not be dropped: at
+  // pagehide it is the FINAL word over a frozen machine (field find,
+  // 2026-07-16 — the in-flight beat's state predates the freeze, and
+  // the sliver between them is exactly a half-typed line).
+  let forceQueued = false;
   function maybeRefreshResumeSlot(force = false): void {
-    if (resumeCaptureInFlight || resumeSlotBroken) return;
+    if (resumeCaptureInFlight) {
+      if (force) forceQueued = true;
+      return;
+    }
+    if (resumeSlotBroken) return;
     if (!force && Date.now() - lastResumeCaptureAt < RESUME_CAPTURE_MS) return;
     resumeCaptureInFlight = true;
     leds?.set('state', 'amber', 'capturing resume slot…');
@@ -743,17 +752,43 @@ async function init(): Promise<void> {
       .finally(() => {
         resumeCaptureInFlight = false;
         lastResumeCaptureAt = Date.now();
+        if (forceQueued) {
+          forceQueued = false;
+          maybeRefreshResumeSlot(true);
+        }
       });
   }
 
   // Tab going to the background still forces a capture past the
   // throttle — the freshest slot we can manage before a likely
-  // close/reload. Best-effort by design (see the funnel's doc); the
-  // heartbeat captures are what make F5 resume reliably.
+  // close/reload. NO pause here: visibilitychange fires on plain tab
+  // switches, and a hidden tab must keep running (cat serves mouse's
+  // telnet from the background).
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       maybeRefreshResumeSlot(true);
     }
+  });
+
+  // REAL teardown (field find, 2026-07-16: "deliberately refreshed
+  // quickly" mid-line wedged the telnet — the machine kept running
+  // for the ~100-300 ms between the last capture and page death, and
+  // the keystroke's TCP round trip inside that sliver rewound the
+  // restored endpoint behind its peer). pagehide fires only on
+  // navigation/close, never on tab switches: FREEZE the machine
+  // first, then capture the frozen state — nothing moves in the
+  // sliver, so the restored state IS the death state and the peer's
+  // unACKed sends retransmit into the resumed session. pageshow
+  // (bfcache revival) thaws; the pacer's paused-turn skip keeps the
+  // frozen wall time out of guest time.
+  window.addEventListener('pagehide', () => {
+    const freeze: MainToWorkerMessage = { type: 'set-paused', paused: true };
+    worker.postMessage(freeze);
+    maybeRefreshResumeSlot(true);
+  });
+  window.addEventListener('pageshow', () => {
+    const thaw: MainToWorkerMessage = { type: 'set-paused', paused: false };
+    worker.postMessage(thaw);
   });
 
   async function promoteToBase(): Promise<void> {
