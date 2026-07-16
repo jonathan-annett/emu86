@@ -28,6 +28,11 @@ Deploys remain permission-gated for agents — Jonathan runs steps 3–4.
 2. **Build + verify**: `npm run build:browser`, confirm
    `dist-web/<stamp>/index.html` exists and the full suite is green
    (the cadence ruling: the full suite gates every deploy).
+   ⚠️ **Read the SUMMARY LINE, not the exit code, if you pipe.**
+   `npx vitest run | tail` reports tail's exit status — a gate run on
+   2026-07-16 printed `exit:0` over a `1 failed` suite this way and a
+   dev deploy went out over red. Pipe with
+   `npx vitest run | tee <log>; echo ${PIPESTATUS[0]}` or don't pipe.
 
 3. **Deploy stable**: `npm run deploy:prod` (Jonathan;
    `set -a; source ~/cf-token.env; set +a` first).

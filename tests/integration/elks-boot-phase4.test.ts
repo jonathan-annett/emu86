@@ -17,6 +17,22 @@
  *
  * The "what's the new stuck point" question is documented in
  * `PS2_A20_REPORT.md`; this test only proves we got past the old one.
+ *
+ * XMS-era rewrite (2026-07-16): the honest INT 15h AH=88h (the
+ * emu86-xms-brief M1 fix that killed the 0x8800 phantom) ended the
+ * A20 dance this test used to observe — and it went red for the
+ * right reason. On a 1 MiB machine ELKS now sees 0 extended KB and
+ * skips the 8042 A20 sequence entirely; on a >1 MiB machine A20 is
+ * already on (no 1 MB wrap under the wider address mask), so the
+ * test-first kernel never pokes the controller either. The 0xD1
+ * enable path is unreachable BY DESIGN now ("A20 always-on; the 8042
+ * flag stays decorative" — the xms brief superseding PS2_A20_REPORT).
+ *
+ * What this test guards TODAY: (1) the phantom stays dead — if
+ * AH=88h ever regresses to leaving AX untouched, ELKS believes in
+ * 34 MB again and resumes poking the 8042, which fails the
+ * no-A20-attempt assertions below; (2) the boot still makes it past
+ * the old Phase 3 wall.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -46,8 +62,8 @@ function iosOf(events: ReadonlyArray<TraceEvent>): IoEvent[] {
   return events.filter((e): e is IoEvent => e.type === 'io');
 }
 
-describe('ELKS boot — Phase 4: past the PS/2 drain + A20 setup', () => {
-  it('fd1440-minix.img: drains keyboard, issues A20 enable, prints further than Phase 3', () => {
+describe('ELKS boot — Phase 4 wall stays passed; the A20 dance stays retired (XMS era)', () => {
+  it('fd1440-minix.img: honest AH=88h means no 8042 A20 attempt, and boot prints past the Phase 3 wall', () => {
     const disk = loadImage('fd1440-minix.img');
     if (disk === null) {
       throw new Error(
@@ -80,28 +96,19 @@ describe('ELKS boot — Phase 4: past the PS/2 drain + A20 setup', () => {
     // we're proving forward progress, not that the kernel completes.
     expect(result.reason).not.toBe('error');
 
-    // ----- Drain loop polled port 0x64 -----
-    // Phase 3's stuck loop reads port 0x64 once per iteration. With the
-    // 8042 in place each read returns OBF=0 and the loop falls through.
-    // The trace still contains *at least one* read of 0x64 — Setup ran
-    // the polling loop at least once before falling through.
+    // ----- The phantom stays dead: no 8042 A20 attempt -----
+    // With AH=88h honestly reporting 0 extended KB on this 1 MiB
+    // machine, ELKS never issues the A20-enable command. A 0xD1 write
+    // to port 0x64 reappearing here means the honest sizing regressed
+    // (an unhandled AH=88h leaves AX = 0x8800 — the 34 MB phantom —
+    // and ELKS resumes the dance this test used to watch).
     const ios = iosOf(events);
-    const port64Reads = ios.filter((e) => e.dir === 'in' && e.port === 0x64);
-    expect(port64Reads.length).toBeGreaterThan(0);
-
-    // ----- Setup issued the A20-enable command (0xD1 → 0xDF) -----
-    // The interesting marker: a write of 0xD1 to port 0x64. After that,
-    // the next data write to port 0x60 carries the new P2 byte (0xDF
-    // for "A20 on"). Both events must appear in order.
     const writesTo64 = ios.filter((e) => e.dir === 'out' && e.port === 0x64);
     const d1Writes = writesTo64.filter((e) => e.value === 0xD1);
-    expect(d1Writes.length).toBeGreaterThan(0);
+    expect(d1Writes.length).toBe(0);
 
-    // ----- A20 ended up enabled -----
-    // The keyboard controller's flag is the source of truth here — it
-    // tracks the most recent output-port write. ELKS may flip it more
-    // than once during boot; "enabled at end" is the assertion ELKS Setup
-    // intends and the only one we can rely on across kernel versions.
+    // The decorative flag sits at its always-on default — the boot
+    // never needed to touch the output port to get there.
     expect(m.keyboardController.a20Enabled).toBe(true);
 
     // ----- Console captured more than Phase 3's 154 bytes -----
