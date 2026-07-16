@@ -109,11 +109,20 @@ between tabs. The reboot path re-attaches normally (regression test:
 lease-but-never-attach, then reboot rejoins).
 
 DHCP came up as the alternative (guest re-identifies itself): ruled
-out by source inspection — ktcp has NO UDP layer at all (arp / icmp
-/ ip / tcp only; the dhcpd man hits are MINIX-heritage docs), so
-DHCP has no transport to ride. The recorded future path for D5's
-"rational plan" is a guest-side ktcp restart with a fresh LOCALIP
-handed through the control endpoint — no reboot, no DHCP needed.
+out by source inspection FOR OUR IMAGE'S VINTAGE — this ktcp has no
+UDP layer at all (arp / icmp / ip / tcp only; the dhcpd man hits are
+MINIX-heritage docs), so DHCP has no transport to ride. CORRECTED
+2026-07-17, same evening: ghaerr reports upstream ELKS very recently
+gained `ping` AND basic UDP in ktcp, "enough to support DHCP"
+(discussion 2753). Receipts: PR #2692 (ping + ifconfig, June),
+#2739 (the DHCP implementation — udp.c/dhcp.c in ktcp), #2740
+(net.cfg refactor: DHCP is the FALLBACK whenever LOCALIP= is absent
+from /bootopts or env). That last design fits us exactly: the TAN's
+LOCALIP stamp keeps today's static behavior, and a future clone
+re-identity is "reboot without the stamp, let the guest DHCP from an
+elk responder". On a future image bump, that supersedes the recorded
+interim path (guest-side ktcp restart with a fresh LOCALIP via the
+control endpoint).
 
 ## 4. Findings for the record
 
