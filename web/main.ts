@@ -1113,8 +1113,20 @@ async function init(): Promise<void> {
   // Failures here NEVER block the boot — worst case is the cold boot
   // the tab would have done before M2 existed.
   try {
+    // Queued reboot (field loop): consume the flag, skip the resume
+    // once, drop the slot. RAM restarts; overlay + fork persist — a
+    // real PC's reset button, restored to existence after reload-
+    // resume took the old one (reloading the page) away.
+    const coldBootQueued = session.pendingColdBoot;
+    if (coldBootQueued) {
+      saveSession({ pendingColdBoot: false });
+      void machineStore.deleteState(ownResumeSlotId).catch(() => { /* best effort */ });
+      syslog.log('rebooting — machine state restarts, disk state kept');
+    }
     const pendingRestoreId = session.pendingRestoreStateId;
-    if (pendingRestoreId !== null) {
+    if (coldBootQueued) {
+      // fall through to a plain cold boot
+    } else if (pendingRestoreId !== null) {
       saveSession({ pendingRestoreStateId: null }); // consume the flag first
       const rec = await machineStore.getState(pendingRestoreId);
       if (
@@ -1207,6 +1219,10 @@ async function init(): Promise<void> {
     // next boot — a running machine can't un-write its RAM); the
     // stale-state discard appears only after a mismatch this session.
     machineState: {
+      onReboot: () => {
+        saveSession({ pendingColdBoot: true });
+        location.reload();
+      },
       onFactoryReset: () => {
         saveSession({ overlayResetPending: true });
       },
@@ -1276,6 +1292,12 @@ async function init(): Promise<void> {
         saveSession({ pendingRestoreStateId: stateId });
         location.reload();
       },
+    },
+    // The reset button (field loop: "there is now no way to reboot the
+    // pc" — reload-resume ate the old one). One-shot cold boot.
+    reboot: () => {
+      saveSession({ pendingColdBoot: true });
+      location.reload();
     },
   });
 

@@ -154,6 +154,7 @@ function makeSession(initial?: Partial<SessionState>): {
     overlayId: null,
     overlayResetPending: false,
     pendingRestoreStateId: null,
+    pendingColdBoot: false,
     ...initial,
   };
   return {

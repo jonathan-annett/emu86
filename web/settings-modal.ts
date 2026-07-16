@@ -80,6 +80,11 @@ export interface SettingsModalDeps {
    * callback discards it now).
    */
   machineState?: {
+    /**
+     * Plain reboot (Phase 18 field loop): one-shot cold boot, disk
+     * state kept — the reset button reload-resume took away.
+     */
+    onReboot?: () => void;
     onFactoryReset: () => void;
     staleState: () => { discard: () => Promise<void> } | null;
     /**
@@ -454,6 +459,25 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
         'again — the escape hatch if the guest wrecks its own root ' +
         'filesystem.';
       stateSection.body.appendChild(stateHint);
+
+      if (ms.onReboot !== undefined) {
+        const rebootRow = document.createElement('div');
+        rebootRow.className = 'emu86-upload-row';
+        const rebootBtn = document.createElement('button');
+        rebootBtn.type = 'button';
+        rebootBtn.className = 'emu86-button';
+        rebootBtn.textContent = 'Reboot machine';
+        const rebootNote = document.createElement('span');
+        rebootNote.className = 'emu86-hint';
+        rebootNote.textContent =
+          'cold boot — RAM restarts, disk state kept (a reload resumes instead)';
+        rebootRow.append(rebootBtn, rebootNote);
+        rebootBtn.addEventListener('click', () => {
+          rebootBtn.disabled = true;
+          ms.onReboot?.();
+        });
+        stateSection.body.appendChild(rebootRow);
+      }
 
       const resetBtn = document.createElement('button');
       resetBtn.type = 'button';

@@ -37,6 +37,12 @@ export interface InspectPanelDeps {
     list: () => Promise<Array<{ stateId: string; label: string | null; lastTouched: number }>>;
     restore: (stateId: string) => void;
   };
+  /**
+   * Reboot the machine (field loop: reload-resume removed the only
+   * reboot the machine had — reloading the page). Queues a one-shot
+   * cold boot and reloads; disk state (overlay + fork) persists.
+   */
+  reboot?: () => void;
 }
 
 const PANEL_CSS = `
@@ -128,7 +134,8 @@ export function mountInspectPanel(deps: InspectPanelDeps): void {
     deps.setPaused(true);
     void deps
       .inspect()
-      .then((snapshot) => showPanel(snapshot, close, deps.saveState, deps.savedStates))
+      .then((snapshot) =>
+        showPanel(snapshot, close, deps.saveState, deps.savedStates, deps.reboot))
       .catch((err: unknown) => {
         showError(String(err), close);
       });
@@ -146,6 +153,7 @@ function showPanel(
   close: (b: HTMLDivElement) => void,
   saveState?: (label: string) => Promise<void>,
   savedStates?: InspectPanelDeps['savedStates'],
+  reboot?: () => void,
 ): void {
   const backdrop = document.createElement('div');
   backdrop.className = 'emu86-inspect-backdrop';
@@ -263,6 +271,29 @@ function showPanel(
       restoreBtn.textContent = 'Restoring…';
       savedStates.restore(stateId); // queues + reloads the page
     });
+  }
+
+  // The reset button a frozen machine deserves. Disk state persists
+  // (overlay + fork); only RAM restarts. No confirm — real reset
+  // buttons don't, and nothing durable is lost.
+  if (reboot !== undefined) {
+    const row = document.createElement('div');
+    row.className = 'save-row';
+    const rebootBtn = document.createElement('button');
+    rebootBtn.type = 'button';
+    rebootBtn.textContent = 'Reboot machine';
+    rebootBtn.style.borderColor = '#6e4a3a';
+    rebootBtn.style.color = '#e0a83a';
+    const note = document.createElement('span');
+    note.className = 'hint';
+    note.textContent = 'cold boot — RAM restarts, disk state kept';
+    row.append(rebootBtn, note);
+    rebootBtn.addEventListener('click', () => {
+      rebootBtn.disabled = true;
+      rebootBtn.textContent = 'Rebooting…';
+      reboot();
+    });
+    panel.appendChild(row);
   }
 
   panel.appendChild(

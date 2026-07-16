@@ -69,6 +69,14 @@ export interface SessionState {
    * queued restore across a version hop — acceptable.
    */
   pendingRestoreStateId: string | null;
+  /**
+   * Queued REBOOT (Phase 18 field loop): reload-resume made a plain
+   * page reload resume instead of restart, which silently removed the
+   * only reboot affordance the machine had. Consumed at next boot:
+   * skip the resume once and drop the slot — RAM restarts, disk state
+   * (overlay + fork) persists, exactly a real PC's reset button.
+   */
+  pendingColdBoot: boolean;
 }
 
 const STORAGE_KEY = 'emu86.session.v1';
@@ -85,6 +93,7 @@ function freshState(): SessionState {
     overlayId: null,
     overlayResetPending: false,
     pendingRestoreStateId: null,
+    pendingColdBoot: false,
   };
 }
 
@@ -113,6 +122,7 @@ export function loadSession(): SessionState {
           overlayId?: unknown;
           overlayResetPending?: unknown;
           pendingRestoreStateId?: unknown;
+          pendingColdBoot?: unknown;
         };
         if (typeof obj.sessionId === 'string' && obj.sessionId.length > 0) {
           state = {
@@ -139,6 +149,7 @@ export function loadSession(): SessionState {
               obj.pendingRestoreStateId.length > 0
                 ? obj.pendingRestoreStateId
                 : null,
+            pendingColdBoot: obj.pendingColdBoot === true,
           };
         }
       }
