@@ -171,6 +171,24 @@ over a real ELKS boot checkpoint. No protocol, no UI, no IDB.
 
 ### M2 — capture/restore protocol + save-states + reload-resume
 
+**The crown acceptance (Jonathan's scenario, 2026-07-16, verbatim
+goal): "mouse telnets to cat, mouse's browser is refreshed. on
+restore, timestamps are compared, and < 500ms, nothing breaks. the
+telnet fake tcp connection is resumed."** Why this is sound, not
+hope: guest-to-guest TCP is real ktcp on BOTH ends and our fabric is
+pure L2 — the connection state lives in the two guests' RAMs, which
+is exactly what the snapshot carries. Cat's ktcp bridges the gap by
+ordinary retransmission (its RTO tolerates far more than 500 ms);
+mouse restores with seq/ack state intact, the SAME octet (the
+sticky-IP reload flow already re-offers it) and the same derived
+MAC; the rebuilt switch floods-then-learns. So §1.3's laptop-resume
+drops apply ONLY to HOST-terminated flows (gateway fetches, DoH,
+host TcpStack conns — their browser promises died with the page);
+guest↔guest TCP is deliberately NOT dropped. The capture carries a
+timestamp; restore compares age and gates messaging/expectations on
+it (fresh ⇒ silent resume; stale ⇒ honest "resumed from <when>"
+notice — thresholds field-tuned).
+
 `capture-state` / `state-captured` messages (two-phase with the
 overlay sweep + fork persist per §1.4); `BootConfig.restore`
 carriage; the `emu86-machines` tenant; settings "Machine state"
@@ -194,10 +212,9 @@ field record. The promotion cadence stays his.
 
 ## 4. Open decisions — Jonathan rules
 
-- **D1. Sequencing**: build in the M1→M2→M3 order above (same-tab
-  shapes first, clone last)? RECOMMENDED — it front-loads all the
-  value that has no identity problem, and the clone lands on a
-  proven state plane.
+- **D1. Sequencing — DECIDED YES (Jonathan, 2026-07-16)**: same-tab
+  shapes first ("the capture is sufficient for a tab to survive a
+  refresh ... reasonable for the first step"), clone last.
 - **D2. Disk capture**: (a) SELF-CONTAINED — snapshot embeds the
   full primary image (+ fork bytes), gzip ~10:1, byte-exact
   including stamps, GC-safe, ~3-6 MB stored; or (b) REFERENCE —
@@ -214,13 +231,12 @@ field record. The promotion cadence stays his.
   the reload-resume slot = tab-owned, lock+staleness GC'd (overlay
   semantics). RECOMMENDED as stated; alternatives collapse one
   into the other.
-- **D5. Clone network identity, v1**: (a) accept the recorded
-  ghost-until-reboot wart (fresh octet+MAC at the fabric, stale
-  identity inside the guest until it reboots; peers RST the ghost
-  conns) — RECOMMENDED for v1, matching §3.5's recorded position;
-  (b) trunk-detached clones (no TAN until reboot — quieter, less
-  magical); or (c) gate M3 on the TAN-NAT redesign (dissolves the
-  problem, doubles the phase).
+- **D5. Clone network identity, v1 — DECIDED (b), Jonathan,
+  2026-07-16**: trunk-detached clones ("the duplicate tab problem is
+  fine as (b) we can work on a rational plan to deal with that in a
+  later phase"). The clone is fully frozen-in-amber on disk and RAM;
+  its network cable hangs loose until a reboot re-leases fresh
+  identity. Options (a)/(c) stay recorded for that later phase.
 - **D6. v1 fidelity bar**: exact-state for EVERY §1.2 device, the
   harness enforcing — RECOMMENDED (reset-plus-fixups for "boring"
   devices is where heisenbugs breed); flag any device that proves
