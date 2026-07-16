@@ -292,7 +292,7 @@ export class LanGateway {
       return;
     }
     if (ethertype === ETHERTYPE_IPV4) {
-      this.#onIpv4(payload);
+      this.#onIpv4(payload, frame.subarray(6, 12));
     }
   }
 
@@ -318,9 +318,15 @@ export class LanGateway {
     }
   }
 
-  #onIpv4(payload: Uint8Array): void {
+  #onIpv4(payload: Uint8Array, srcMac: Uint8Array): void {
     const ip = parseIpv4(payload);
     if (ip === null) return;
+    // Learn from the data frame too (field find, 2026-07-17, the owl
+    // wedge — dns.ts has the full story): a RESUMED guest's warm ARP
+    // cache never ARPs again, and a fresh gateway that only learns
+    // from ARP would silently drop every reply — internet, control
+    // API, and pings alike — until a broadcast who-has happens by.
+    this.#learn(ip.srcIp, [...srcMac]);
     if (!ipEquals(Uint8Array.from(ip.dstIp), 0, this.ip)) {
       // Routed traffic — the guest's ktcp sends anything off-subnet to
       // the gateway MAC. TCP is terminated (M3d). ICMP echo gets an

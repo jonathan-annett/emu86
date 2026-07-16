@@ -231,9 +231,14 @@ describe('LanGateway — off-LAN echo gets host-unreachable (Phase 15 M3, D6)', 
     expect(icmp.length).toBe(8 + 20 + 8);
   });
 
-  it('stays silent for echo replies and for senders it cannot route back to', () => {
+  it('learns a sender from its own frame (no prior ARP) and still ignores off-LAN echo replies', () => {
     const l = makeLan();
-    // No gratuitous ARP: sender unknown — nothing goes out.
+    // No gratuitous ARP — but the data frame itself says who sent it.
+    // The resume ARP wedge (field, 2026-07-17) turned "sender unknown,
+    // stay silent" from caution into a black hole: a RESUMED guest's
+    // warm ARP cache never re-ARPs, so a fresh gateway that only
+    // learned from ARP dropped every reply. It now learns from any
+    // IPv4 frame addressed to (or routed through) it and answers.
     l.guest.transmit(
       buildEthernetFrame(
         Array.from(GATEWAY_MAC),
@@ -242,10 +247,10 @@ describe('LanGateway — off-LAN echo gets host-unreachable (Phase 15 M3, D6)', 
         buildIpv4(IPPROTO_ICMP, GUEST_IP, Array.from(FAR_IP), buildIcmpEcho(ICMP_ECHO_REQUEST, 1, 1, new Uint8Array(0))),
       ),
     );
-    expect(l.gateway.unreachablesSent).toBe(0);
-    expect(l.guestRx).toHaveLength(0);
-    // Echo REPLY to an off-LAN target: not answered either.
-    gratuitousArp(l);
+    expect(l.gateway.unreachablesSent).toBe(1);
+    expect(l.guestRx).toHaveLength(1);
+    // Echo REPLY to an off-LAN target: still not answered — that
+    // silence is about not faking ICMP conversations, not routing.
     l.guest.transmit(
       buildEthernetFrame(
         Array.from(GATEWAY_MAC),
@@ -254,6 +259,7 @@ describe('LanGateway — off-LAN echo gets host-unreachable (Phase 15 M3, D6)', 
         buildIpv4(IPPROTO_ICMP, GUEST_IP, Array.from(FAR_IP), buildIcmpEcho(ICMP_ECHO_REPLY, 1, 1, new Uint8Array(0))),
       ),
     );
-    expect(l.gateway.unreachablesSent).toBe(0);
+    expect(l.gateway.unreachablesSent).toBe(1);
+    expect(l.guestRx).toHaveLength(1);
   });
 });

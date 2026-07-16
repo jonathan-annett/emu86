@@ -329,7 +329,7 @@ export class DnsHost {
       return;
     }
     if (ethertype === ETHERTYPE_IPV4) {
-      this.#onIpv4(payload);
+      this.#onIpv4(payload, frame.subarray(6, 12));
     }
   }
 
@@ -349,10 +349,16 @@ export class DnsHost {
     }
   }
 
-  #onIpv4(payload: Uint8Array): void {
+  #onIpv4(payload: Uint8Array, srcMac: Uint8Array): void {
     const ip = parseIpv4(payload);
     if (ip === null) return;
     if (!ipEquals(Uint8Array.from(ip.dstIp), 0, this.ip)) return;
+    // Learn from the data frame too (field find, 2026-07-17: a RESUMED
+    // guest's restored ARP cache is warm, so it never ARPs us again —
+    // the fresh pseudo-host would drop every reply "without ARP
+    // knowledge" and the resolver's 2 s alarm reads as "Nameserver not
+    // found", healed only by ping's broadcast who-has).
+    this.#arpTable.set(formatIp(ip.srcIp), [...srcMac]);
     if (ip.protocol !== IPPROTO_TCP) return;
     this.#tcp.onSegment(ip.srcIp, ip.payload);
   }
