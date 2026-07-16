@@ -397,11 +397,19 @@ async function init(): Promise<void> {
   type CapturedReply = WorkerToMainMessage & { type: 'state-captured' };
   const captureSinks = new Map<number, (reply: CapturedReply) => void>();
   let nextCaptureId = 1;
-  function requestCapture(disks: 'embedded' | 'reference'): Promise<CapturedReply> {
+  function requestCapture(
+    disks: 'embedded' | 'reference',
+    opts: { markSecondaryClean?: boolean } = {},
+  ): Promise<CapturedReply> {
     return new Promise((resolve) => {
       const requestId = nextCaptureId++;
       captureSinks.set(requestId, resolve);
-      const msg: MainToWorkerMessage = { type: 'capture-state', requestId, disks };
+      const msg: MainToWorkerMessage = {
+        type: 'capture-state',
+        requestId,
+        disks,
+        ...(opts.markSecondaryClean === true ? { markSecondaryClean: true } : {}),
+      };
       worker.postMessage(msg);
     });
   }
@@ -418,59 +426,89 @@ async function init(): Promise<void> {
    * the fork row is written from the capture's OWN secondary bytes
    * (one snapshot, one truth — a separate snapshot round trip could
    * land newer bytes and break the hash pairing). The capture's
-   * worker-side final overlay sweep covers the primary. Any write
-   * that loses a teardown race surfaces at restore as a hash
-   * mismatch → honest cold boot.
+   * worker-side final overlay sweep covers the primary.
+   *
+   * FIELD FIX (Jonathan, 2026-07-16, first M2 test: "seems to just
+   * reboot the machine when I refresh"): capture-at-hidden alone
+   * loses the unload race on a plain F5 — visibilitychange fires
+   * DURING teardown and the worker round trip + IDB write rarely
+   * complete, so no slot exists and the boot is cold. The overlay
+   * survives that same race only because it persists CONTINUOUSLY;
+   * the resume slot now does too — this funnel rides the ~1 Hz stats
+   * heartbeat under a 5 s throttle (the auto-persist rhythm), with
+   * the hidden event forcing past the throttle as belt-and-braces.
+   * The slot is therefore ≤~5 s stale at any F5; the honesty notice
+   * covers the gap and TCP's retransmission tolerates it. It also
+   * REPLACES maybeAutoPersist while active: two independent snapshot
+   * paths would interleave and break the fork-row ↔ secondarySha
+   * pairing (the capture marks the drive clean, exactly the
+   * snapshot-secondary semantics).
    */
-  async function refreshResumeSlot(): Promise<void> {
-    const reply = await requestCapture('reference');
-    if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) return;
-    if (drive !== null && reply.secondary != null) {
-      await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
-      driveBanner.autoSaved();
-      editorPanel?.driveUpdated(reply.secondary.bytes);
-    }
-    const now = Date.now();
-    await machineStore.putState({
-      meta: {
-        stateId: ownResumeSlotId,
-        label: null,
-        kind: 'resume',
-        createdAt: now,
-        lastTouched: now,
-        baseFingerprint: reply.baseFingerprint ?? null,
-        schemaVersion: MACHINE_STATE_SCHEMA_VERSION,
-        sizeBytes: roughStateSize(reply),
-      },
-      payload: {
-        stateId: ownResumeSlotId,
-        state: reply.state,
-        capturedAt: reply.capturedAt,
-        primary: null,
-        secondary: null,
-        primarySha: reply.primarySha ?? null,
-        secondarySha: reply.secondarySha ?? null,
-      },
-    });
-  }
-
-  // Tab going to the background is the best predictor we get of a
-  // close/reload — flush regardless of the throttle window (the
-  // overlay flush now rides INSIDE the capture: its worker-side final
-  // sweep is the same epoch machinery). The Phase 18 M2 resume slot
-  // rides the same event, same best-effort assumption as the overlay
-  // flush: a hidden tab's event loop still runs; a genuine teardown
-  // race surfaces at restore as a hash mismatch and cold-boots
-  // honestly.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      void refreshResumeSlot().catch((err: unknown) => {
+  const RESUME_CAPTURE_MS = 5_000;
+  let resumeCaptureInFlight = false;
+  let lastResumeCaptureAt = 0;
+  let resumeSlotBroken = false; // IDB failed — stop hammering it
+  function maybeRefreshResumeSlot(force = false): void {
+    if (resumeCaptureInFlight || resumeSlotBroken) return;
+    if (!force && Date.now() - lastResumeCaptureAt < RESUME_CAPTURE_MS) return;
+    resumeCaptureInFlight = true;
+    void (async () => {
+      const reply = await requestCapture('reference', { markSecondaryClean: true });
+      if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) return;
+      if (
+        drive !== null &&
+        reply.secondary != null &&
+        ((reply.secondaryDirtySectors ?? 0) > 0 || force)
+      ) {
+        await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
+        driveBanner.autoSaved();
+        editorPanel?.driveUpdated(reply.secondary.bytes);
+      }
+      const now = Date.now();
+      await machineStore.putState({
+        meta: {
+          stateId: ownResumeSlotId,
+          label: null,
+          kind: 'resume',
+          createdAt: now,
+          lastTouched: now,
+          baseFingerprint: reply.baseFingerprint ?? null,
+          schemaVersion: MACHINE_STATE_SCHEMA_VERSION,
+          sizeBytes: roughStateSize(reply),
+        },
+        payload: {
+          stateId: ownResumeSlotId,
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          primary: null,
+          secondary: null,
+          primarySha: reply.primarySha ?? null,
+          secondarySha: reply.secondarySha ?? null,
+        },
+      });
+    })()
+      .catch((err: unknown) => {
         console.warn('[emu86] resume-slot capture failed:', err);
-        // Fall back to the pre-M2 flush pair so nothing is lost.
+        resumeSlotBroken = true;
+        // Degrade to the pre-M2 pair from here on (stats handler
+        // checks resumeSlotBroken); flush what this beat owed.
         if (latestDirtySectors > 0) maybeAutoPersist(true);
         const flush: MainToWorkerMessage = { type: 'overlay-flush' };
         worker.postMessage(flush);
+      })
+      .finally(() => {
+        resumeCaptureInFlight = false;
+        lastResumeCaptureAt = Date.now();
       });
+  }
+
+  // Tab going to the background still forces a capture past the
+  // throttle — the freshest slot we can manage before a likely
+  // close/reload. Best-effort by design (see the funnel's doc); the
+  // heartbeat captures are what make F5 resume reliably.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      maybeRefreshResumeSlot(true);
     }
   });
 
@@ -816,14 +854,21 @@ async function init(): Promise<void> {
       // are for the pacing report and the dev /agent/stats endpoint.
       latestStats = msg;
       // Fork auto-persist rides the same heartbeat: dirty sectors mean
-      // guest writes since the last snapshot; the throttle inside
-      // maybeAutoPersist keeps IDB writes to one per AUTO_PERSIST_MS.
+      // guest writes since the last snapshot. Phase 18 M2 field fix:
+      // while the resume machinery is healthy, the CAPTURE is the
+      // persistence path (one snapshot feeds fork row + slot row, so
+      // the hash pairing can't race); maybeAutoPersist is the
+      // degraded-mode fallback.
       if (typeof msg.secondaryDirtySectors === 'number') {
         latestDirtySectors = msg.secondaryDirtySectors;
         if (msg.secondaryDirtySectors > 0) {
           driveBanner.dirty(msg.secondaryDirtySectors);
-          maybeAutoPersist();
         }
+      }
+      if (!resumeSlotBroken) {
+        maybeRefreshResumeSlot();
+      } else if (latestDirtySectors > 0) {
+        maybeAutoPersist();
       }
       console.debug(
         `[emu86] ${msg.instrPerSec.toLocaleString()} instr/s ` +

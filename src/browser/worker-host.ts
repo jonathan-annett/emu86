@@ -297,6 +297,13 @@ export class WorkerHost {
   #tan: TabAreaNetwork | null = null;
   /** This boot's pristine-primary SHA-256 (Phase 18 M2 pairs captures with it). */
   #bootFingerprint: string | null = null;
+  /**
+   * Capture sha cache (Phase 18 M2 field fix): the heartbeat resume
+   * capture runs every ~5 s, and an idle machine's boot disk doesn't
+   * change — `writesSeen` unchanged means the last hash (and for
+   * reference captures, the skipped 32 MB copy) still holds.
+   */
+  #captureShaCache: { writesSeen: number; sha: string } | null = null;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -921,6 +928,9 @@ export class WorkerHost {
     // under the tab's machine state) and main moves sweeps to a fresh
     // overlayId.
     this.#bootFingerprint = primary.overlayFingerprint ?? null;
+    // A fresh boot's OverlayDisk restarts writesSeen at 0 over a
+    // possibly-different image — a stale cache entry would falsely hit.
+    this.#captureShaCache = null;
     if (primary.overlayFingerprint !== undefined) {
       this.#post({
         type: 'overlay-identity',
@@ -1314,23 +1324,51 @@ export class WorkerHost {
       // first so the sweep is complete — the reset-path precedent).
       this.#overlayFlushNow();
 
-      // Phase 2, synchronous copies at this message boundary.
+      // Phase 2, synchronous copies at this message boundary. The
+      // primary copy+hash is skipped when nothing wrote the boot disk
+      // since the last capture (the heartbeat-idle case — see the
+      // cache field); embedded captures always copy (bytes must ride).
       const state = captureMachineState(machine);
       const capturedAt = Date.now();
-      const primaryBytes = snapshotDisk(primaryDisk);
+      const embedded = msg.disks === 'embedded';
+      const writesSeen = this.#overlayDisk?.writesSeen ?? -1;
+      const cached =
+        this.#captureShaCache !== null &&
+        writesSeen >= 0 &&
+        this.#captureShaCache.writesSeen === writesSeen
+          ? this.#captureShaCache.sha
+          : null;
+      const primaryBytes = embedded || cached === null ? snapshotDisk(primaryDisk) : null;
       const primaryGeometry = primaryDisk.geometry;
       const secondaryDisk = this.#secondaryDisk;
+      const secondaryDirtySectors = secondaryDisk !== null ? secondaryDisk.dirtySectorCount : 0;
       const secondaryBytes = secondaryDisk !== null ? secondaryDisk.snapshot() : null;
+      if (secondaryDisk !== null && msg.markSecondaryClean === true) {
+        // This capture IS the persistence path (heartbeat resume) —
+        // snapshot-secondary semantics: main writes the fork row from
+        // these very bytes.
+        secondaryDisk.markClean();
+      }
       const secondaryGeometry = secondaryDisk !== null ? secondaryDisk.geometry : null;
       const baseFingerprint = this.#bootFingerprint;
-      const embedded = msg.disks === 'embedded';
       const diskClass = machine.diskClass;
       const secondaryDiskClass = machine.secondaryDiskClass;
 
       // Async completion: hashes over the copies, then the reply.
       void (async () => {
         try {
-          const primarySha = await sha256Hex(primaryBytes);
+          let primarySha: string;
+          if (primaryBytes !== null) {
+            primarySha = await sha256Hex(primaryBytes);
+          } else if (cached !== null) {
+            primarySha = cached;
+          } else {
+            // Unreachable: primaryBytes is only skipped when cached hit.
+            throw new Error('capture: no primary bytes and no cached sha');
+          }
+          if (writesSeen >= 0) {
+            this.#captureShaCache = { writesSeen, sha: primarySha };
+          }
           const secondarySha =
             secondaryBytes !== null ? await sha256Hex(secondaryBytes) : null;
           this.#post({
@@ -1342,7 +1380,8 @@ export class WorkerHost {
             baseFingerprint,
             primarySha,
             secondarySha,
-            ...(embedded
+            secondaryDirtySectors,
+            ...(embedded && primaryBytes !== null
               ? {
                   primary: {
                     bytes: primaryBytes,

@@ -147,10 +147,49 @@ describe('WorkerHost — capture-state', () => {
     expect(reply.primary).toBeUndefined(); // reference mode: hashes only
     expect(reply.secondary?.bytes[9 * SECTOR_SIZE]).toBe(0x77);
     expect(reply.secondarySha).toMatch(/^[0-9a-f]{64}$/);
-    // Peek semantics: capture must not starve the auto-persist trigger.
+    expect(reply.secondaryDirtySectors).toBe(1);
+    // Peek semantics (no markSecondaryClean): the auto-persist trigger survives.
     const tracked = rig.host.machine?.secondaryDisk;
     if (!(tracked instanceof WriteTrackingDisk)) throw new Error('no tracked secondary');
     expect(tracked.dirtySectorCount).toBe(1);
+  });
+
+  it('markSecondaryClean makes the capture the persistence path', async () => {
+    const rig = await boot({
+      imageBytes: haltImage(),
+      secondary: { imageBytes: new Uint8Array(1474560) },
+    });
+    rig.host.runUntil(200);
+    rig.host.machine?.secondaryDisk?.writeSector(3, sector(0x33));
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 1, disks: 'reference', markSecondaryClean: true,
+    });
+    const reply = await awaitCaptured(rig);
+    expect(reply.secondaryDirtySectors).toBe(1); // count BEFORE the clean
+    const tracked = rig.host.machine?.secondaryDisk;
+    if (!(tracked instanceof WriteTrackingDisk)) throw new Error('no tracked secondary');
+    expect(tracked.dirtySectorCount).toBe(0);
+  });
+
+  it('the sha cache serves idle repeat captures and invalidates on a disk write', async () => {
+    const rig = await boot({ imageBytes: haltImage() });
+    rig.host.runUntil(200);
+
+    rig.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const first = await awaitCaptured(rig);
+    rig.messages.length = 0;
+
+    // Idle: no writes since — the cached hash must be IDENTICAL.
+    rig.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
+    const second = await awaitCaptured(rig);
+    expect(second.primarySha).toBe(first.primarySha);
+    rig.messages.length = 0;
+
+    // A write invalidates: the hash must change.
+    rig.host.overlayDisk?.writeSector(50, sector(0x99));
+    rig.host.handleMessage({ type: 'capture-state', requestId: 3, disks: 'reference' });
+    const third = await awaitCaptured(rig);
+    expect(third.primarySha).not.toBe(first.primarySha);
   });
 });
 

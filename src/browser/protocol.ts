@@ -287,6 +287,14 @@ export interface CaptureStateMessage {
    * bytes ride in BOTH modes (they feed the fork row).
    */
   disks: 'embedded' | 'reference';
+  /**
+   * Phase 18 M2 field fix (the F5 race): when true, the secondary
+   * snapshot MARKS CLEAN — this capture IS the persistence path (the
+   * heartbeat resume flow writes the fork row from these very bytes),
+   * exactly the snapshot-secondary semantics. Absent/false = peek
+   * (named saves — the fork auto-persist keeps its own trigger).
+   */
+  markSecondaryClean?: boolean;
 }
 
 export type MainToWorkerMessage =
@@ -477,6 +485,12 @@ export interface StateCapturedMessage {
   primary?: CapturedDisk;
   /** Both modes; null when no secondary is attached. */
   secondary?: CapturedDisk | null;
+  /**
+   * Dirty-sector count at capture (before any markSecondaryClean) —
+   * lets the resume flow skip the fork-row IDB write when the guest
+   * hasn't touched the drive since the last persist.
+   */
+  secondaryDirtySectors?: number;
 }
 
 /**

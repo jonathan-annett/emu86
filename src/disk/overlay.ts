@@ -149,6 +149,13 @@ export class OverlayDisk implements Disk {
   #hot = new Map<number, Uint8Array>();
   /** The one in-flight epoch, between beginSweep and ack/nack. */
   #pending: { epochId: number; sectors: Map<number, Uint8Array> } | null = null;
+  /**
+   * Monotonic count of accepted writes over this wrapper's lifetime
+   * (Phase 18 M2): the capture path's staleness check — an unchanged
+   * count means the image bytes are unchanged, so the cached SHA-256
+   * still holds and a 32 MB copy+hash can be skipped.
+   */
+  #writesSeen = 0;
 
   constructor(inner: Disk, opts: OverlayDiskOptions = {}) {
     const chunkBytes = opts.chunkBytes ?? OVERLAY_CHUNK_BYTES;
@@ -199,6 +206,11 @@ export class OverlayDisk implements Disk {
     return this.#pending?.epochId ?? null;
   }
 
+  /** Lifetime accepted-write count — see the field's doc. Never resets. */
+  get writesSeen(): number {
+    return this.#writesSeen;
+  }
+
   readSector(lba: number): Uint8Array {
     // Runtime reads live entirely in RAM (hard rule 1) — the hot map
     // is a write-side artifact and never consulted here.
@@ -212,6 +224,7 @@ export class OverlayDisk implements Disk {
     const copy = new Uint8Array(SECTOR_SIZE);
     copy.set(data);
     this.#hot.set(lba, copy);
+    this.#writesSeen++;
   }
 
   /**
