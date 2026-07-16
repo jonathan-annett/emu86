@@ -43,7 +43,6 @@ import type {
   DiskGeometry,
   DiskSlotSpec,
   MainToWorkerMessage,
-  RestoreBootInputs,
   WorkerToMainMessage,
 } from './protocol.js';
 import { BrowserConsole } from './browser-console.js';
@@ -222,6 +221,14 @@ interface ResolvedSlot {
   overlayFingerprint?: string;
   /** Whether BootConfig.overlay chunks were folded in (primary only). */
   overlayApplied?: boolean;
+  /**
+   * Sectors the boot pipeline itself changed — the bootopts patch and
+   * M3 stamps, diffed against the post-fold bytes (field fix #3).
+   * The host seeds these into the overlay hot map so they sweep to the
+   * store like guest writes, which is what makes the reference
+   * reconstruction (pure base + fold) byte-exact.
+   */
+  bootDeltaLbas?: number[];
 }
 
 export interface RunResult {
@@ -324,13 +331,12 @@ export class WorkerHost {
   /** Pacer-time of the last 'reference' capture — gates maintenance sweeps. */
   #lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
   /**
-   * The per-boot image inputs THIS boot applied (field fix #2) — a
-   * reference capture carries them so its restore replays exactly this
-   * boot's patch + stamps instead of re-deriving from drifted state.
-   * null = disks were applied verbatim (embedded-restore session):
-   * reference reconstruction can never match, captures say so.
+   * Whether a reference (base + fold) reconstruction can reproduce
+   * this session's disk (field fix #3): false for embedded-restore
+   * sessions (verbatim disks). Capture replies carry it so main never
+   * stores a resume slot that is guaranteed to refuse.
    */
-  #bootInputs: RestoreBootInputs | null = null;
+  #referenceValid = true;
   #stopping = false;
   /** Last in-flight async work — boot fetch + autoRun loop. */
   #pending: Promise<void> = Promise.resolve();
@@ -889,14 +895,14 @@ export class WorkerHost {
       secondary = await this.#resolveSlot('secondary', config.secondary);
     }
 
-    // Per-boot image inputs, derived from CURRENT state — what a
-    // normal boot applies, and what a refused restore falls back to.
-    let derivedStamps: ImageStampOptions | undefined;
-    let derivedNetLine: string[] = [];
+    // Per-boot image inputs — what a normal boot applies (and what a
+    // refused reference restore falls back to).
+    let stamps: ImageStampOptions | undefined;
+    let netLine: string[] = [];
     if (config.autologin !== undefined && embeddedRestore === undefined) {
       const secondaryBytes =
         secondary !== null ? snapshotDisk(secondary.disk) : null;
-      derivedStamps = {
+      stamps = {
         autologin: config.autologin,
         secondaryBlocks:
           secondary !== null
@@ -904,10 +910,10 @@ export class WorkerHost {
             : null,
       };
       if (config.autoNet === true && !showPending(secondaryBytes)) {
-        derivedNetLine = ['net=ne0'];
+        netLine = ['net=ne0'];
       }
     }
-    const derivedLines: string[] = [
+    const bootLines: string[] = [
       ...(tanIdentity !== null && embeddedRestore === undefined
         ? [
             tanIdentity.localipLine,
@@ -916,19 +922,8 @@ export class WorkerHost {
             ...(tanIdentity.hostnameLine !== null ? [tanIdentity.hostnameLine] : []),
           ]
         : []),
-      ...derivedNetLine,
+      ...netLine,
     ];
-
-    // Field fix #2: a REFERENCE restore replays the CAPTURE boot's
-    // recorded inputs — re-deriving drifts (the first-boot show
-    // clearing net=ne0 suppression was the field case) and a drifted
-    // patch can never hash to the capture.
-    const expected = config.restore?.expected;
-    const replay = expected !== undefined && embeddedRestore === undefined;
-    const appliedLines = replay ? [...expected.inputs.lines] : derivedLines;
-    const appliedStamps = replay
-      ? expected.inputs.stamps ?? undefined
-      : derivedStamps;
 
     const primarySpec: DiskSlotSpec =
       embeddedRestore !== undefined
@@ -939,19 +934,24 @@ export class WorkerHost {
             geometry: config.geometry,
             diskClass: config.diskClass,
           };
-    let primary = await this.#resolveSlot(
-      'primary',
-      primarySpec,
-      appliedLines,
-      embeddedRestore !== undefined ? undefined : config.overlay,
-      appliedStamps,
-      /* verbatim: */ embeddedRestore !== undefined,
-    );
 
-    // Phase 18 M2, reference verification: the reconstructed disks
-    // must hash to what the capture recorded, or the restore is off.
+    // Field fix #3 — the reconstruction law: a REFERENCE restore is
+    // rebuilt as PURE base + overlay fold (no patch, no stamps — this
+    // boot's deltas already live in the store, seeded at the capture
+    // boot; see the bootDeltaLbas seeding below) and must hash to the
+    // capture. A refusal falls back to the normal pipeline: the cold
+    // boot gets fresh identity lines and stamps like any other boot.
+    const expected = config.restore?.expected;
+    let primary: ResolvedSlot;
     let restoreRefusal: string | null = null;
-    if (expected !== undefined) {
+    if (embeddedRestore !== undefined) {
+      primary = await this.#resolveSlot(
+        'primary', primarySpec, [], undefined, undefined, /* verbatim: */ true,
+      );
+    } else if (expected !== undefined) {
+      primary = await this.#resolveSlot(
+        'primary', primarySpec, [], config.overlay, undefined, /* verbatim: */ true,
+      );
       const primarySha = await sha256Hex(snapshotDisk(primary.disk));
       if (primarySha !== expected.primarySha) {
         restoreRefusal = 'boot disk reconstruction does not match the capture';
@@ -962,30 +962,20 @@ export class WorkerHost {
           restoreRefusal = 'secondary drive does not match the capture';
         }
       }
-      if (restoreRefusal !== null && replay) {
-        // The cold boot must NOT keep the replayed (possibly stale)
-        // identity lines — rebuild the primary with current inputs.
+      if (restoreRefusal !== null) {
         primary = await this.#resolveSlot(
-          'primary',
-          primarySpec,
-          derivedLines,
-          config.overlay,
-          derivedStamps,
+          'primary', primarySpec, bootLines, config.overlay, stamps,
         );
       }
+    } else {
+      primary = await this.#resolveSlot(
+        'primary', primarySpec, bootLines, config.overlay, stamps,
+      );
     }
 
-    // Record what THIS boot actually applied — the next reference
-    // capture carries it. Verbatim (embedded-restore) sessions record
-    // null: no reference reconstruction can match them.
-    this.#bootInputs =
-      embeddedRestore !== undefined
-        ? null
-        : {
-            lines: restoreRefusal !== null && replay ? derivedLines : appliedLines,
-            stamps:
-              (restoreRefusal !== null && replay ? derivedStamps : appliedStamps) ?? null,
-          };
+    // Reference reconstructability of THIS session (the capture reply
+    // carries it): true unless the disks were applied verbatim.
+    this.#referenceValid = embeddedRestore === undefined;
 
     // Phase 17 M2: report the base's identity every boot. Main stamps
     // the fingerprint into the overlay meta on future sweeps; applied
@@ -1091,6 +1081,16 @@ export class WorkerHost {
     // the field-accepted M0 fork system stays untouched (brief §0).
     const overlayPrimary = new OverlayDisk(primary.disk);
     this.#overlayDisk = overlayPrimary;
+    // Field fix #3: seed this boot's patch/stamp deltas into the hot
+    // map — content is already on the disk (write-through is a
+    // same-bytes no-op), but hot-mapping them makes the next sweep
+    // carry them to the store, so a reference reconstruction (pure
+    // base + fold) reproduces this boot's image byte-for-byte.
+    // Reference-restored boots have no deltas (their store already
+    // carries the capture boot's); embedded boots never reconstruct.
+    for (const lba of primary.bootDeltaLbas ?? []) {
+      overlayPrimary.writeSector(lba, primary.disk.readSector(lba));
+    }
 
     const machine = new IBMPCMachine({
       disk: overlayPrimary,
@@ -1217,6 +1217,14 @@ export class WorkerHost {
       }
     }
 
+    // Field fix #3: remember the post-fold bytes so the patch + stamp
+    // deltas below can be diffed out and seeded into the overlay hot
+    // map (sector granularity; boot-time only, one 32 MB compare).
+    const preDeltaBytes =
+      slotName === 'primary' && !verbatim && (diskClass === 'hard-disk' || stamps !== undefined)
+        ? new Uint8Array(bytes)
+        : null;
+
     // Phase 14 M2: HD images default to the CGA console, which the
     // browser can't render — auto-patch /bootopts to console=ttyS0 so
     // the xterm terminal works. In-memory copy only (the stored library
@@ -1254,12 +1262,30 @@ export class WorkerHost {
         console.warn(`WorkerHost: image stamp skipped — ${s}`);
       }
     }
+    // Diff the boot deltas (patch + stamps) against the post-fold
+    // bytes — the sectors a reference reconstruction cannot re-derive.
+    let bootDeltaLbas: number[] | undefined;
+    if (preDeltaBytes !== null) {
+      bootDeltaLbas = [];
+      const sectors = Math.floor(Math.min(preDeltaBytes.length, bytes.length) / SECTOR_SIZE);
+      for (let lba = 0; lba < sectors; lba++) {
+        const off = lba * SECTOR_SIZE;
+        for (let i = 0; i < SECTOR_SIZE; i++) {
+          if (preDeltaBytes[off + i] !== bytes[off + i]) {
+            bootDeltaLbas.push(lba);
+            break;
+          }
+        }
+      }
+    }
+
     const disk = new InMemoryDisk({ geometry, contents: bytes });
     return {
       disk,
       diskClass,
       ...(overlayFingerprint !== undefined ? { overlayFingerprint } : {}),
       ...(slotName === 'primary' ? { overlayApplied } : {}),
+      ...(bootDeltaLbas !== undefined ? { bootDeltaLbas } : {}),
     };
   }
 
@@ -1427,10 +1453,7 @@ export class WorkerHost {
       const baseFingerprint = this.#bootFingerprint;
       const diskClass = machine.diskClass;
       const secondaryDiskClass = machine.secondaryDiskClass;
-      const restoreInputs =
-        this.#bootInputs !== null
-          ? { lines: [...this.#bootInputs.lines], stamps: this.#bootInputs.stamps }
-          : null;
+      const referenceValid = this.#referenceValid;
 
       // Async completion: hashes over the copies, then the reply.
       void (async () => {
@@ -1459,7 +1482,7 @@ export class WorkerHost {
             primarySha,
             secondarySha,
             secondaryDirtySectors,
-            restoreInputs,
+            referenceValid,
             ...(embedded && primaryBytes !== null
               ? {
                   primary: {

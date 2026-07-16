@@ -458,7 +458,7 @@ async function init(): Promise<void> {
       // An embedded-restore session applies its disks verbatim — no
       // reference reconstruction can ever match it, so a slot written
       // now would be a guaranteed refusal at the next boot. Skip.
-      if (reply.restoreInputs == null) return;
+      if (reply.referenceValid !== true) return;
       if (
         drive !== null &&
         reply.secondary != null &&
@@ -488,7 +488,6 @@ async function init(): Promise<void> {
           secondary: null,
           primarySha: reply.primarySha ?? null,
           secondarySha: reply.secondarySha ?? null,
-          restoreInputs: reply.restoreInputs,
         },
       });
     })()
@@ -1033,8 +1032,7 @@ async function init(): Promise<void> {
       if (
         rec !== null &&
         rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
-        rec.payload.primarySha !== null &&
-        rec.payload.restoreInputs != null
+        rec.payload.primarySha !== null
       ) {
         boot.config.restore = {
           state: rec.payload.state,
@@ -1042,7 +1040,6 @@ async function init(): Promise<void> {
           expected: {
             primarySha: rec.payload.primarySha,
             secondarySha: rec.payload.secondarySha,
-            inputs: rec.payload.restoreInputs,
           },
         };
         activeRestoreStateId = ownResumeSlotId;

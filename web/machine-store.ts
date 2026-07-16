@@ -32,7 +32,7 @@
  * one-transaction writes over both stores.
  */
 
-import type { MachineState, RestoreBootInputs } from '../src/browser/protocol.js';
+import type { MachineState } from '../src/browser/protocol.js';
 import type { DiskClass, DiskGeometry } from '../src/browser/protocol.js';
 
 const DATABASE_NAME = 'emu86-machines';
@@ -79,13 +79,6 @@ export interface MachineStatePayload {
   /** Reference hashes (resume slot; also stored for named saves as integrity). */
   primarySha: string | null;
   secondarySha: string | null;
-  /**
-   * The capture boot's per-boot image inputs (resume slots) — the
-   * reference reconstruction replays these. null for named saves
-   * (embedded — no reconstruction) and rows from before the field fix
-   * (absence = skip the resume, cold-boot).
-   */
-  restoreInputs?: RestoreBootInputs | null;
 }
 
 export interface MachineStateRecord {

@@ -276,4 +276,109 @@ describe('Phase 18 M1 — whole-machine state equivalence over a real ELKS boot'
       ).toEqual([]);
     })();
   }, 120_000);
+
+  it('M2 REFERENCE round trip over ELKS with per-boot stamps (the field case)', () => {
+    // Jonathan's field failure, as a regression test: an autologin boot
+    // stamps the image through minix-fs (wall-clock mtimes, allocator
+    // state), so a restore that re-derives the stamps can never hash to
+    // the capture. Fix #3's law: boot deltas are seeded into the
+    // overlay store and the reconstruction is PURE base + fold. This
+    // test fails with 'restore-result ok:false' under the old scheme.
+    //
+    // Fixture: the RAW hd32-minix image — the worker must do its own
+    // bootopts patch + M3 stamps, exactly the browser flow (the fat
+    // helper above pre-patches bootopts, which would no-op the very
+    // pipeline under test).
+    const N = 500_000;
+    const M = 250_000;
+    const image = new Uint8Array(
+      readFileSync(resolve('reference/elks-images-hd', 'hd32-minix.img')),
+    );
+
+    const bootHost = async (
+      config: BootConfig,
+    ): Promise<{ host: WorkerHost; messages: WorkerToMainMessage[] }> => {
+      const messages: WorkerToMainMessage[] = [];
+      const host = new WorkerHost({
+        post: (m) => messages.push(m),
+        autoRun: false,
+        hostClock: new InMemoryHostClock(),
+      });
+      host.handleMessage({ type: 'boot', config });
+      await host.whenIdle();
+      return { host, messages };
+    };
+
+    return (async () => {
+      const a = await bootHost({
+        imageBytes: new Uint8Array(image),
+        diskClass: 'hard-disk',
+        autologin: 'user1',
+        autoNet: true,
+      });
+      a.host.runUntil(N);
+
+      a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+      let reply: StateCapturedMessage | undefined;
+      for (let i = 0; i < 400 && reply === undefined; i++) {
+        reply = a.messages.find(
+          (m): m is StateCapturedMessage => m.type === 'state-captured',
+        );
+        if (reply === undefined) await new Promise((r) => setTimeout(r, 5));
+      }
+      if (reply?.state === undefined || reply.capturedAt === undefined ||
+          reply.primarySha === undefined) {
+        throw new Error(`capture failed: ${reply?.reason ?? 'no reply'}`);
+      }
+      expect(reply.referenceValid).toBe(true);
+
+      // Main's role: the store accumulated every sweep (boot deltas
+      // seeded at boot + guest writes, all flushed by the capture).
+      const chunkMap = new Map<number, { chunkIndex: number; bytes: Uint8Array }>();
+      let chunkSizeBytes = 32 * 1024;
+      let fingerprint = '';
+      for (const m of a.messages) {
+        if (m.type === 'overlay-sweep') {
+          chunkSizeBytes = m.chunkSizeBytes;
+          for (const c of m.chunks) chunkMap.set(c.chunkIndex, c);
+        }
+        if (m.type === 'overlay-identity') fingerprint = m.fingerprint;
+      }
+      expect(chunkMap.size).toBeGreaterThan(0); // the stamps at minimum
+
+      const b = await bootHost({
+        imageBytes: new Uint8Array(image),
+        diskClass: 'hard-disk',
+        autologin: 'user1',
+        autoNet: true,
+        overlay: {
+          chunks: [...chunkMap.values()],
+          chunkSizeBytes,
+          fingerprint,
+        },
+        restore: {
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          expected: {
+            primarySha: reply.primarySha,
+            secondarySha: reply.secondarySha ?? null,
+          },
+        },
+      });
+      const result = b.messages.find((m) => m.type === 'restore-result');
+      expect(result).toMatchObject({ ok: true });
+
+      a.host.runUntil(M);
+      b.host.runUntil(M);
+      if (a.host.machine === null || b.host.machine === null) {
+        throw new Error('machine missing after run');
+      }
+      expect(
+        diffStates(
+          captureMachineState(a.host.machine),
+          captureMachineState(b.host.machine),
+        ),
+      ).toEqual([]);
+    })();
+  }, 120_000);
 });

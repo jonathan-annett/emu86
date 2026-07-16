@@ -166,27 +166,24 @@ export interface RestoreSpec {
     primary: DiskSlotSpec & { imageBytes: Uint8Array };
     secondary?: (DiskSlotSpec & { imageBytes: Uint8Array }) | null;
   };
-  /** D2(b): SHA-256 hexes the normally-resolved disks must match. */
+  /**
+   * D2(b): SHA-256 hexes the reference reconstruction must match.
+   *
+   * Field fix #3 (the reconstruction law): the reference rebuild is
+   * PURE `base + overlay fold` — no bootopts patch, no M3 stamps.
+   * The boot deltas (patch + stamp sectors) are seeded into the
+   * overlay hot map at boot time and ride the store like any guest
+   * write, so the fold reproduces the captured image byte-for-byte
+   * by construction. Re-applying them at restore can never be
+   * byte-stable: minix-fs writes stamp wall-clock mtimes, and the
+   * block allocator runs against a different filesystem state than
+   * the boot did (both found live, Jonathan's field pass).
+   */
   expected?: {
     primarySha: string;
     /** null = no secondary was attached at capture. */
     secondarySha: string | null;
-    /**
-     * The CAPTURE boot's per-boot inputs, replayed verbatim (field
-     * fix #2): the reconstruction must reproduce the image the hash
-     * was taken over, and re-deriving from current state drifts —
-     * the first-boot show clearing `net=ne0` suppression was the
-     * field case. `lines` = the exact extra bootopts lines that boot
-     * patched in; `stamps` = its M3 stamp set (null = none applied).
-     */
-    inputs: RestoreBootInputs;
   };
-}
-
-/** The per-boot image mutations a reference reconstruction replays. */
-export interface RestoreBootInputs {
-  lines: string[];
-  stamps: { autologin: 'off' | 'root' | 'user1'; secondaryBlocks: number | null } | null;
 }
 
 // ============================================================
@@ -507,15 +504,14 @@ export interface StateCapturedMessage {
    */
   secondaryDirtySectors?: number;
   /**
-   * This boot's per-boot image inputs — what a reference restore must
-   * replay to reconstruct the hashed image (see
-   * {@link RestoreSpec.expected}). null when this boot applied disks
-   * verbatim (an embedded-restore session): a reference reconstruction
-   * from the library base can never match such a session, so the
-   * resume flow must skip slot updates rather than store a slot that
-   * is guaranteed to refuse.
+   * True when a reference (base + overlay fold) reconstruction can
+   * reproduce this session's disk — i.e. this boot's image derives
+   * from the library base with every delta in the overlay store.
+   * False for embedded-restore sessions (verbatim disks): the resume
+   * flow must skip slot updates rather than store a slot that is
+   * guaranteed to refuse.
    */
-  restoreInputs?: RestoreBootInputs | null;
+  referenceValid?: boolean;
 }
 
 /**
