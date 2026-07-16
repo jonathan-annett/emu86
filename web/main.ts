@@ -88,6 +88,7 @@ import {
 } from './machine-store.js';
 import { mountStatusLeds, type StatusLeds } from './status-leds.js';
 import { mountInspectPanel } from './inspect-panel.js';
+import { mountSystemLog } from './system-log.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -220,12 +221,18 @@ async function init(): Promise<void> {
     if (n > 0) console.debug(`[emu86] swept ${n} orphaned resume slot${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
+  // The system log (Phase 18 field-loop UI): every HOST-side message
+  // lands here — the terminal is the machine's alone from this point
+  // on (Jonathan: "a system log that is totally detached from what the
+  // machine actually prints out").
+  const syslog = mountSystemLog();
+
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
-  term.writeln(`emu86 — ELKS in the browser [${buildLabel}]`);
-  term.writeln(`Image: ${sourceLabel}`);
+  syslog.log(`emu86 — ELKS in the browser [${buildLabel}]`);
+  syslog.log(`image: ${sourceLabel}`);
   if (drive !== null) {
-    term.writeln(`Secondary: ${describeDrive(drive)}`);
+    syslog.log(`secondary: ${describeDrive(drive)}`);
   }
   const activeScript = settings.bootScripts.find(
     (s) => s.id === settings.activeBootScriptId,
@@ -242,14 +249,13 @@ async function init(): Promise<void> {
       activeScript.id === SEED_BOOT_SCRIPT.id ||
       activeScript.id === SEED_PING_SCRIPT.id);
   if (activeScript !== undefined) {
-    term.writeln(
+    syslog.log(
       scriptSuppressed
-        ? `Boot script: ${activeScript.name} (skipped — autologin is on)`
-        : `Boot script: ${activeScript.name}`,
+        ? `boot script: ${activeScript.name} (skipped — autologin is on)`
+        : `boot script: ${activeScript.name}`,
     );
   }
-  term.writeln('Booting...');
-  term.writeln('');
+  syslog.log('booting…');
 
   // Vite picks up the worker via the `new URL(...) + { type: 'module' }`
   // pattern — keeps imports type-checked and lets the bundler emit the
@@ -818,14 +824,15 @@ async function init(): Promise<void> {
         }
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
-          showMachineToast(`resumed machine state from ${describeAge(age)} ago`);
+          syslog.log(`resumed machine state from ${describeAge(age)} ago`, { toast: true });
         }
         if (activeRestoreStateId !== null) {
           void machineStore.touch(activeRestoreStateId);
         }
       } else {
-        showMachineToast(
+        syslog.log(
           `couldn't resume saved state — ${msg.reason ?? 'unknown'}; cold-booting instead`,
+          { toast: true },
         );
         if (activeRestoreStateId === ownResumeSlotId) {
           void machineStore.deleteState(ownResumeSlotId);
@@ -918,9 +925,10 @@ async function init(): Promise<void> {
         activeOverlayId = mintOverlayId();
         saveSession({ overlayId: activeOverlayId });
         void forkLocks.acquireForever(overlayLockName(activeOverlayId));
-        term.writeln(
-          '[machine state was saved against a different base image — ' +
-            'kept unused; Settings → Machine state can discard it]',
+        syslog.log(
+          'machine state was saved against a different base image — ' +
+            'kept unused; Settings → Machine state can discard it',
+          { toast: true },
         );
       }
       return;
@@ -930,16 +938,19 @@ async function init(): Promise<void> {
       // it back to the lease; tell the user where they live — and WHO
       // they are. The tab's name IS its hostname on the .tabs network
       // (Phase 15 M4), so it titles the browser tab too: a row of open
-      // tabs reads mouse / cat / dog.
+      // tabs reads mouse / cat / dog. Toast only when the address
+      // CHANGED — a sticky re-lease on reload is old news.
+      const octetChanged = loadSession().tanHostOctet !== msg.hostOctet;
       saveSession({ tanHostOctet: msg.hostOctet });
       if (msg.name !== undefined) {
         document.title = `${msg.name}.tabs — emu86`;
-        term.writeln(
-          `[you are ${msg.name}.tabs at 10.0.2.${msg.hostOctet} — ` +
-            `the gateway is elk.tabs]`,
+        syslog.log(
+          `you are ${msg.name}.tabs at 10.0.2.${msg.hostOctet} — ` +
+            'the gateway is elk.tabs',
+          { toast: octetChanged },
         );
       } else {
-        term.writeln(`[TAN address: 10.0.2.${msg.hostOctet}]`);
+        syslog.log(`TAN address: 10.0.2.${msg.hostOctet}`, { toast: octetChanged });
       }
       return;
     }
@@ -1001,16 +1012,14 @@ async function init(): Promise<void> {
       return;
     }
     if (msg.type === 'halted') {
-      term.writeln('');
-      term.writeln(`[emu86: halted — ${msg.reason}]`);
+      syslog.log(`machine halted — ${msg.reason}`, { toast: true });
       return;
     }
     if (msg.type === 'error') {
-      term.writeln('');
-      term.writeln(`[emu86: error — ${msg.message}]`);
-      if (msg.stack) {
-        for (const line of msg.stack.split('\n')) term.writeln(line);
-      }
+      syslog.log(
+        `machine error — ${msg.message}${msg.stack ? `\n${msg.stack}` : ''}`,
+        { toast: true },
+      );
       return;
     }
   });
@@ -1141,11 +1150,12 @@ async function init(): Promise<void> {
         }
         activeRestoreStateId = pendingRestoreId;
         pendingTerminalRestore = rec.payload.terminal ?? null;
-        showMachineToast(
+        syslog.log(
           `restoring saved state${rec.meta.label !== null ? ` '${rec.meta.label}'` : ''}…`,
+          { toast: true },
         );
       } else {
-        showMachineToast('saved state unavailable or from a different era — cold-booting');
+        syslog.log('saved state unavailable or from a different era — cold-booting', { toast: true });
       }
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
       const rec = await machineStore.getState(ownResumeSlotId);
@@ -1256,6 +1266,17 @@ async function init(): Promise<void> {
     // add the save machine state button") — same flow as the settings
     // modal's, capturing the frozen picture exactly.
     saveState: (label: string) => saveNamedState(label),
+    // …and restore from it too ("click - restore - boom").
+    savedStates: {
+      list: async () =>
+        (await machineStore.listMeta())
+          .filter((m) => m.kind === 'named')
+          .sort((a, b) => b.lastTouched - a.lastTouched),
+      restore: (stateId: string) => {
+        saveSession({ pendingRestoreStateId: stateId });
+        location.reload();
+      },
+    },
   });
 
   // The system-level editor (Phase 16 M4): a panel over THIS tab's
@@ -1590,37 +1611,6 @@ function ensureDriveBanner(onPromote: () => void): {
  */
 const RESTORE_NOTICE_AGE_MS = 10_000;
 
-/**
- * Restore notices as a dismissable overlay, never terminal writes
- * (Jonathan, field loop: "does that have to be as screen memory
- * polluting?") — the restored screen is byte-faithful and must stay
- * that way. Auto-fades after a while; × dismisses immediately.
- */
-function showMachineToast(text: string): void {
-  const existing = document.getElementById('emu86-machine-toast');
-  existing?.remove();
-  const toast = document.createElement('div');
-  toast.id = 'emu86-machine-toast';
-  toast.style.cssText =
-    'position:fixed;top:0.8rem;right:0.8rem;z-index:50;max-width:26rem;' +
-    'background:#1c2733;color:#cfe3f5;border:1px solid #3a556e;border-radius:6px;' +
-    'padding:0.5rem 0.75rem;font:0.8rem/1.4 ui-monospace,Menlo,monospace;' +
-    'display:flex;gap:0.6rem;align-items:baseline;box-shadow:0 2px 10px rgba(0,0,0,0.4);' +
-    'transition:opacity 0.6s;';
-  const span = document.createElement('span');
-  span.textContent = text;
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.textContent = '×';
-  closeBtn.setAttribute('aria-label', 'Dismiss');
-  closeBtn.style.cssText =
-    'background:none;border:none;color:#7fa3c5;cursor:pointer;font-size:1rem;padding:0;';
-  closeBtn.addEventListener('click', () => toast.remove());
-  toast.append(span, closeBtn);
-  document.body.appendChild(toast);
-  window.setTimeout(() => { toast.style.opacity = '0'; }, 12_000);
-  window.setTimeout(() => toast.remove(), 13_000);
-}
 
 /** Human-readable age for the restore notice. */
 function describeAge(ms: number): string {

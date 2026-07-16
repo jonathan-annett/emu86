@@ -28,6 +28,15 @@ export interface InspectPanelDeps {
    * same flow as the settings modal's save; absent in degraded boots.
    */
   saveState?: (label: string) => Promise<void>;
+  /**
+   * Restore straight from the popup (Jonathan: "a drop down of
+   * previous saved states, click - restore - boom"). Same queue-and-
+   * reload flow as the settings modal's Restore.
+   */
+  savedStates?: {
+    list: () => Promise<Array<{ stateId: string; label: string | null; lastTouched: number }>>;
+    restore: (stateId: string) => void;
+  };
 }
 
 const PANEL_CSS = `
@@ -119,7 +128,7 @@ export function mountInspectPanel(deps: InspectPanelDeps): void {
     deps.setPaused(true);
     void deps
       .inspect()
-      .then((snapshot) => showPanel(snapshot, close, deps.saveState))
+      .then((snapshot) => showPanel(snapshot, close, deps.saveState, deps.savedStates))
       .catch((err: unknown) => {
         showError(String(err), close);
       });
@@ -136,6 +145,7 @@ function showPanel(
   s: InspectSnapshot,
   close: (b: HTMLDivElement) => void,
   saveState?: (label: string) => Promise<void>,
+  savedStates?: InspectPanelDeps['savedStates'],
 ): void {
   const backdrop = document.createElement('div');
   backdrop.className = 'emu86-inspect-backdrop';
@@ -204,6 +214,55 @@ function showPanel(
       );
     });
     panel.appendChild(row);
+  }
+
+  // Restore straight from the freeze: dropdown of named states,
+  // click → restore → boom (queue + reload; the machine being frozen
+  // makes "replace this machine" an easy decision to stand behind).
+  if (savedStates !== undefined) {
+    const row = document.createElement('div');
+    row.className = 'save-row';
+    const select = document.createElement('select');
+    select.style.cssText =
+      'font:inherit;background:#161d24;color:#d7e0e6;border:1px solid #394048;' +
+      'border-radius:4px;padding:0.2rem 0.4rem;max-width:16rem;';
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.textContent = 'Restore';
+    restoreBtn.disabled = true;
+    const note = document.createElement('span');
+    note.className = 'hint';
+    row.append(select, restoreBtn, note);
+    panel.appendChild(row);
+
+    void savedStates.list().then(
+      (rows) => {
+        select.innerHTML = '';
+        if (rows.length === 0) {
+          const opt = document.createElement('option');
+          opt.textContent = 'no saved states yet';
+          select.appendChild(opt);
+          return;
+        }
+        for (const r of rows) {
+          const opt = document.createElement('option');
+          opt.value = r.stateId;
+          opt.textContent =
+            `${r.label ?? r.stateId} (${new Date(r.lastTouched).toLocaleString()})`;
+          select.appendChild(opt);
+        }
+        restoreBtn.disabled = false;
+      },
+      (err: unknown) => { note.textContent = `list failed: ${String(err)}`; },
+    );
+
+    restoreBtn.addEventListener('click', () => {
+      const stateId = select.value;
+      if (stateId === '') return;
+      restoreBtn.disabled = true;
+      restoreBtn.textContent = 'Restoring…';
+      savedStates.restore(stateId); // queues + reloads the page
+    });
   }
 
   panel.appendChild(
