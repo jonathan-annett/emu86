@@ -21,15 +21,14 @@ cycle accounting — a standard no real 8086 met (a real XT was
 imitates; the authentic pacing mode exists to slow it DOWN to period
 feel. Speed was never the problem.
 
-## Status (2026-07-16)
+## Status (2026-07-17)
 
-Phases 1–17 complete and field-accepted; the live site runs the
-Phase 17 line. The suite is 1,342 tests (2 skipped: the
-SingleStepTests corpus when not fetched, and an env-gated binary
-generator). 59 phase reports and 34 briefs record how it got here —
-including the negative results. The current plan of record is
-`emu86-phase18-brief.md` (whole-machine state capture), decisions
-pending.
+Phases 1–18 complete, plus two post-phase feature lines (the network
+freeze and the multi-PC rack) landed and gated, awaiting their field
+pass before promotion; the live site runs the Phase 17 line. The
+suite is 1,465 tests (plus the SingleStepTests corpus when fetched,
+and an env-gated binary generator). 64 reports and 38 briefs record
+how it got here — including the negative results.
 
 What the machine does today:
 
@@ -58,6 +57,24 @@ What the machine does today:
   reads the running disk through our own MINIX v1 filesystem module,
   writes back with floppy-passing coherence (`resync` in the guest
   picks up edits), and follows the machine live.
+- **Frozen in amber** (Phase 18): the whole machine — RAM, CPU,
+  devices, clock, disks, even the terminal's screen — serializes to
+  an exact state. F5 mid-game resumes mid-game; named save states
+  restore from the inspector (a freeze-and-look popup with
+  registers, devices, and guest-time-vs-uptime accounting); a
+  duplicated tab can choose to clone the original's live session.
+- **The network freeze**: the TAN tracks its TCP connections now,
+  and when a tab dies its peers freeze their CPUs until it resumes
+  (10 s cap) — under "frozen wall time never becomes guest time," a
+  reload is invisible to both ends of a telnet session. tab-shark
+  (`/tabshark.html`) is the passive analyzer that watches it all:
+  decoded frames, live connection table, freeze/thaw events.
+- **The rack** (`/rack.html`): one tab, many machines — an
+  explorer-style rail of PCs, each the full app in an iframe on the
+  shared network. Adopt saved machines, migrate a running PC out of
+  its tab (open connections ride through the move), refresh the
+  whole rack and every machine resumes, and save the lot as one
+  infrastructure package.
 
 ## Quick start
 
@@ -78,7 +95,9 @@ version). The full suite gates every deploy.
 
 ```
 web/                    browser main thread: settings, image library (IDB),
-                        drive forks, overlay store, editor panel, show relay
+                        drive forks, overlay store, editor panel, show relay;
+                        extra pages: rack.html (multi-PC), tabshark.html
+                        (TAN analyzer), moved.html (migration stub)
 src/browser/            the worker: WorkerHost (boot/run/protocol), pacing,
                         bootopts patch, per-boot image stamps
 src/machine/            IBMPCMachine — composes everything below

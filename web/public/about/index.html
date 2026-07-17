@@ -138,8 +138,8 @@
   </p>
 
   <div class="numbers">
-    <div><b>1,342</b><span>tests in the always-on suite (plus the SingleStepTests 8088 corpus as the opcode oracle)</span></div>
-    <div><b>59</b><span>phase reports — the project's real memory, negative results included</span></div>
+    <div><b>1,465</b><span>tests in the always-on suite (plus the SingleStepTests 8088 corpus as the opcode oracle)</span></div>
+    <div><b>64</b><span>reports — the project's real memory, negative results included</span></div>
     <div><b>~4 months</b><span>March to July 2026, three machines, one consolidation</span></div>
     <div><b>0</b><span>lines of WASM, C, or hand-written assembly in the emulator</span></div>
   </div>
@@ -218,6 +218,44 @@
     field-testing later, the whole line was promoted; the previous
     version is archived one click away, as every outgoing version now
     is.</p>
+  </div>
+
+  <div class="milestone"><span class="date">JULY 16</span>
+    <p><em>Frozen in amber.</em> The whole machine — every register,
+    every byte of RAM, every device's mid-flight state, the clock,
+    the disks, even the pixels on the terminal — now serializes to an
+    exact state and comes back from one. Press F5 in the middle of a
+    Tetris piece falling and it resumes with the piece still falling;
+    the machine literally cannot tell that the universe blinked. The
+    same machinery gives you named save states (freeze the machine in
+    the inspector, name the moment, return to it whenever), and makes
+    duplicating a tab a real question: the copy asks whether you want
+    a fresh PC or <em>this exact running session</em>, cloned. The
+    inspector itself is a freeze-and-look popup — registers, devices,
+    and a guest-time-versus-uptime line that exists to catch the time
+    plane lying.</p>
+  </div>
+
+  <div class="milestone"><span class="date">JULY 17</span>
+    <p><em>The network learned to wait, and the machines got a
+    rack.</em> The tab network now tracks its own TCP connections —
+    the inspector lists who's talking to whom — and uses that
+    knowledge for a small marvel: when a tab dies, every machine with
+    an open connection to it <em>freezes its own CPU</em> until the
+    dead tab resumes (ten seconds, then it gives up honestly). Since
+    frozen wall time never becomes guest time, a mid-session reload
+    is invisible to both ends of a telnet login: no timeout, no
+    retransmit storm, the session just continues. Watching all of
+    this is <a href="/tabshark.html">tab-shark</a>, a passive network
+    analyzer for the tab LAN — decoded frames, live connections,
+    freeze events — that transmits nothing, ever. And above it all,
+    <a href="/rack.html">the rack</a>: one tab holding many machines
+    in an explorer-style rail, each a full PC on the shared network.
+    Adopt a saved machine into it, migrate a running PC out of its
+    tab (its open connections ride through the move), refresh the
+    whole rack and every machine resumes where it was — then save the
+    entire lot as one <em>infrastructure package</em> and load your
+    lab back tomorrow.</p>
   </div>
 
   <h2>Things learned the hard way</h2>
@@ -330,6 +368,25 @@
     <code>resync</code> in the guest picks it up; edit in the guest,
     and the drawer follows along — telling you, never overwriting
     you, when the file you have open changed underneath.</li>
+    <li>Start a game of Tetris and press F5 mid-piece. The machine
+    resumes exactly where it was — the piece still falling, the
+    cursor still hidden. The inspector (⚙ → Inspect) freezes the
+    machine for a look at its registers and lets you save the moment
+    as a named state to return to later.</li>
+    <li>Telnet from one tab into another, then reload the far end
+    mid-session. Your login survives: the other machine froze its own
+    CPU while the tab was away, so as far as either Unix is
+    concerned, no time passed. Open
+    <a href="/tabshark.html">tab-shark</a> in a third tab to watch
+    the whole thing on the wire — every frame decoded, every
+    connection tracked, every freeze announced.</li>
+    <li>Open <a href="/rack.html">the rack</a>: one tab, many
+    machines, an explorer-style rail on the left. Press [+] for a new
+    PC or a saved one; press “move to the rack” in an ordinary tab
+    and that running machine — open telnet sessions and all — slides
+    into the rack. Refresh the rack: every machine resumes. Then 💾
+    saves the whole arrangement as an infrastructure package you can
+    load back as a unit.</li>
   </ul>
 
   <h2>Honest limits</h2>
