@@ -59,6 +59,7 @@ import {
 import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
+import { modeSequence, TxModeTracker, type TxModeState } from './tx-modes.js';
 import { loadSession, mintSessionId, saveSession } from './session-store.js';
 import {
   CLONE_CHANNEL_NAME,
@@ -356,7 +357,15 @@ async function init(): Promise<void> {
     }
     return out;
   }
-  let pendingTerminalRestore: { tail: Uint8Array; viewportY: number } | null = null;
+  // Field fix #5: modes set BEFORE the tail window (invaders' hide-
+  // cursor at game start) are invisible to the tail replay — this
+  // tracker watches the same stream and carries their final state.
+  const txModes = new TxModeTracker();
+  let pendingTerminalRestore: {
+    tail: Uint8Array;
+    viewportY: number;
+    modes?: TxModeState[];
+  } | null = null;
 
   // Status LEDs (mounted onto the header once the DOM is settled).
   let leds: StatusLeds | null = null;
@@ -671,6 +680,7 @@ async function init(): Promise<void> {
           terminal: {
             tail: txTailSnapshot(),
             viewportY: term.buffer.active.viewportY,
+            modes: txModes.snapshot(),
           },
           carriedPrimary,
           carriedSecondary,
@@ -919,6 +929,7 @@ async function init(): Promise<void> {
         terminal: {
           tail: txTailSnapshot(),
           viewportY: term.buffer.active.viewportY,
+          modes: txModes.snapshot(),
         },
       },
     });
@@ -1025,6 +1036,7 @@ async function init(): Promise<void> {
     if (msg.type === 'tx') {
       term.write(msg.bytes);
       txTailAppend(msg.bytes);
+      txModes.feed(msg.bytes);
       if (autoexec !== null && autoexec.active) {
         autoexec.feed(txDecoder.decode(msg.bytes, { stream: true }));
       }
@@ -1095,6 +1107,15 @@ async function init(): Promise<void> {
               if (delta !== 0) term.scrollLines(delta);
             } catch { /* scroll restore is a nicety, never an error */ }
           });
+          // Field fix #5: the tail reproduces content, not modes whose
+          // set/reset predates its window — re-assert the captured
+          // final state AFTER the replay (queued writes keep order),
+          // and seed the live tracker so future captures carry it.
+          const modes = terminal.modes ?? [];
+          if (modes.length > 0) {
+            term.write(modeSequence(modes));
+            txModes.seed(modes);
+          }
         }
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {

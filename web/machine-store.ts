@@ -34,6 +34,7 @@
 
 import type { MachineState } from '../src/browser/protocol.js';
 import type { DiskClass, DiskGeometry } from '../src/browser/protocol.js';
+import type { TxModeState } from './tx-modes.js';
 
 const DATABASE_NAME = 'emu86-machines';
 const SCHEMA_VERSION = 1;
@@ -96,8 +97,12 @@ export interface MachineStatePayload {
    * looks like the one that was left — deliberately OUTSIDE the
    * machine state (it's xterm's history, not guest memory). Absent on
    * rows from before this field; restore just skips the replay.
+   * Field fix #5: `modes` carries the sticky DEC private modes
+   * (cursor visibility &c.) whose set/reset sequences may predate the
+   * tail window — re-asserted after the replay. Absent on older rows;
+   * restore then reproduces only what the tail contains, as before.
    */
-  terminal?: { tail: Uint8Array; viewportY: number } | null;
+  terminal?: { tail: Uint8Array; viewportY: number; modes?: TxModeState[] } | null;
   /**
    * Field fix #4 (the torn resume pair), resume slots only: the
    * capture's final overlay epoch — every boot-disk write since the

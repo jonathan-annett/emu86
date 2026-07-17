@@ -419,3 +419,42 @@ Consequences:
   (rare-to-never; 32 KB since Phase 17).
 - Fix #2's sweep suppression and fix #4's ordering stay
   load-bearing and unchanged.
+
+## 8. Field fix #5 — sticky terminal modes across restore
+## (addendum 2026-07-17, from the field: the invaders cursor)
+
+Field (Jonathan, 2026-07-17): restoring a saved session with a
+running invaders game brings the xterm cursor back — "all the
+bullets have big fat cursors flying with them."
+
+**Diagnosis (traced in source, this session).** The restored screen
+is the M4-loop tail replay (main.ts): the last 48 KiB of raw serial
+TX, written through xterm after a `term.reset()`. The replay
+reproduces exactly what the tail CONTAINS — but cursor visibility
+is a terminal MODE, set once by `ESC[?25l` when the game starts and
+never re-sent by its redraw loop. Seconds of invaders traffic push
+that sequence out of the 48 KiB window; reset() restores the
+default (visible) cursor and nothing in the tail corrects it. Same
+class: any sticky DEC private mode set before the tail window.
+
+**Fix — track the modes beside the tail.** A tiny incremental
+parser (`web/tx-modes.ts`, TxModeTracker) watches the same TX
+stream the tail is cut from and remembers the final h/l state of
+the sticky, side-effect-free-to-re-assert DEC private modes:
+DECCKM (?1, application cursor keys), DECAWM (?7, autowrap),
+DECTCEM (?25, cursor visibility). The snapshot rides the
+`terminal` payload (optional `modes` field — pre-fix rows restore
+exactly as before); restore re-asserts it AFTER the tail replay
+(final state wins wherever the setting sequence fell) and seeds
+the live tracker so future captures carry the state forward. One
+application point — the restore-result handler — covers
+reload-resume, named restores, and the clone.
+
+Deliberately NOT tracked: the alt screen (?47/?1047/?1049 —
+re-entering clears the just-replayed buffer) and origin mode (?6 —
+set/reset homes the cursor); both would fight the replay, and the
+ELKS serial console emits neither. Also out: DECKPAM/DECKPNM
+(ESC =/ESC >) and SGR carry-over — redraw self-corrects SGR, and
+nothing observed emits keypad modes. If a field case surfaces for
+any of these, extend TRACKED_MODES with its own side-effect
+analysis, don't blanket-track.
