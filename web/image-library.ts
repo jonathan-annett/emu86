@@ -125,6 +125,16 @@ export interface StoredImage {
   geometry?: StoredDiskGeometry;
   /** Date.now() of the last updateImageBytes write-back, if any. */
   modifiedAt?: number;
+  /**
+   * Fork-row generation (field fix #8 — the §7 escalation): a uuid
+   * stamped by each write-back. The resume slot pins the drive by
+   * naming the generation its carried delta reconstructs against,
+   * instead of hashing the whole image on every capture (the 8 MB
+   * copy+sha was what made teardown captures lose the page-death
+   * race). Additive-optional like `viability`: rows from before the
+   * field read as "no generation yet".
+   */
+  generation?: string;
 }
 
 /** Listing shape — same fields as StoredImage minus the bulk bytes. */
@@ -324,7 +334,7 @@ export class ImageLibrary {
    * grabbed the wrong disk. Rejects on a missing id for the same
    * staleness-surfacing reason as renameImage.
    */
-  async updateImageBytes(id: string, bytes: Uint8Array): Promise<void> {
+  async updateImageBytes(id: string, bytes: Uint8Array, generation?: string): Promise<void> {
     const db = await this.ready();
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
@@ -344,6 +354,17 @@ export class ImageLibrary {
       ...existing,
       bytes: new Uint8Array(bytes),
       modifiedAt: Date.now(),
+      // Fix #8: EVERY content write re-stamps the generation — a
+      // caller-supplied one (the resume funnel names its own so the
+      // slot row can pin it) or a fresh mint (explicit Save, editor
+      // write-back). An out-of-band write keeping the old generation
+      // would let a slot's carried delta fold over DIFFERENT bytes
+      // undetected; re-stamping turns that into an honest refusal.
+      generation:
+        generation ??
+        (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `g-${Math.random().toString(36).slice(2)}`),
     };
     store.put(updated);
     await awaitTransaction(tx);

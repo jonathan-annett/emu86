@@ -177,6 +177,7 @@ describe('browser protocol — exhaustiveness', () => {
       case 'machine-inspected': return 'machine-inspected';
       case 'tan-freeze': return 'tan-freeze';
       case 'tan-thaw': return 'tan-thaw';
+      case 'fork-snapshot': return 'fork-snapshot';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;

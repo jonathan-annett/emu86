@@ -117,11 +117,30 @@ export interface MachineStatePayload {
   } | null;
   /**
    * Field fix #4, resume slots only: the drive sectors unconfirmed
-   * against the fork row at capture, bytes sliced from the capture's
-   * own snapshot — the same superset-of-difference law as
-   * `carriedPrimary`, against `secondarySha`.
+   * against the fork row at capture — the same superset-of-difference
+   * law as `carriedPrimary`. Fix #8: sliced worker-side, and pinned
+   * by GENERATION (below) instead of `secondarySha`.
    */
   carriedSecondary?: Array<{ lba: number; bytes: Uint8Array }> | null;
+  /**
+   * Fix #8 (the §7 escalation), resume slots only: the fork-row
+   * generation this slot's carried delta reconstructs against — the
+   * last CONFIRMED fork write at capture time (null = the fork has
+   * never been written under fix #8, e.g. a fresh fork). Restore
+   * accepts when the fork row's generation matches this…
+   */
+  secondaryGeneration?: string | null;
+  /**
+   * …or this: the generation the fork write BEGUN BY THIS CAPTURE
+   * will stamp. If the teardown killed that write, the fork holds
+   * `secondaryGeneration`'s bytes (fold the delta over them); if the
+   * write won, it holds these — and re-folding the delta is
+   * idempotent (the fix-#4 invariant: the fold overwrites with
+   * capture-time bytes anyway). Rows WITHOUT this field predate
+   * fix #8: boot refuses them once, honestly, and deletes them (the
+   * §7 transition precedent).
+   */
+  pendingForkGeneration?: string | null;
 }
 
 export interface MachineStateRecord {

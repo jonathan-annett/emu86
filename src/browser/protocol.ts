@@ -485,6 +485,13 @@ export interface StatsMessage {
   /** Current adaptive per-turn instruction batch. */
   batch: number;
   /**
+   * Open TAN flows involving this guest (field fix #8, the Tetris
+   * staleness: main tightens the resume-capture cadence while a
+   * session is live, so a teardown's fallback slot is never very
+   * old). Absent on solo machines.
+   */
+  tanFlows?: number;
+  /**
    * Distinct secondary-disk sectors the guest has written since boot or
    * the last snapshot (Phase 15 M2). Present only while a secondary is
    * mounted; drives the main thread's "unsaved changes" indicator.
@@ -620,11 +627,19 @@ export interface StateCapturedMessage {
    * next boot cold-boots honestly.
    */
   storeDigest?: string;
-  /** SHA-256 of the secondary at capture, or null when none attached. */
+  /**
+   * 'embedded' mode only since fix #8: SHA-256 of the secondary at
+   * capture (named-save integrity). Reference captures stopped
+   * copying/hashing the drive — the §7 escalation, triggered by the
+   * Tetris field kill: the 8 MB copy+sha made teardown captures lose
+   * the page-death race. Reference slots pin the fork row by
+   * GENERATION instead (main's bookkeeping — see
+   * MachineStatePayload.secondaryGeneration).
+   */
   secondarySha?: string | null;
   /** 'embedded' mode only. */
   primary?: CapturedDisk;
-  /** Both modes; null when no secondary is attached. */
+  /** 'embedded' mode only since fix #8; null when no secondary. */
   secondary?: CapturedDisk | null;
   /**
    * Dirty-sector count at capture (before any markSecondaryClean) —
@@ -656,13 +671,29 @@ export interface StateCapturedMessage {
     chunks: OverlayChunk[];
   } | null;
   /**
-   * Field fix #4, with `markSecondaryClean`: the unconfirmed
-   * secondary sectors at capture (the pending-clean set). Main
-   * slices their bytes from `secondary.bytes` into the slot row's
-   * carried delta and confirms the fork write with
-   * {@link SecondaryPersistedMessage}.
+   * Field fix #4, REVISED by fix #8, with `markSecondaryClean`: the
+   * unconfirmed secondary sectors at capture (the pending-clean
+   * set), bytes ALREADY SLICED worker-side — the reply carries only
+   * this delta, never the full drive. Main stores it in the slot
+   * row verbatim; the fork-row write rides the separate (killable)
+   * {@link ForkSnapshotMessage} and is confirmed with
+   * {@link SecondaryPersistedMessage} as before.
    */
-  secondaryDirtyLbas?: number[];
+  carriedSecondary?: Array<{ lba: number; bytes: Uint8Array }>;
+}
+
+/**
+ * Fix #8: the full drive snapshot for the fork row, posted AFTER a
+ * markSecondaryClean reference reply — deliberately a separate
+ * message so the slot row never waits on 8 MB. A teardown that kills
+ * this message loses only the fork refresh; the slot's carried delta
+ * still reconstructs against the previous confirmed generation.
+ */
+export interface ForkSnapshotMessage {
+  type: 'fork-snapshot';
+  /** The capture this snapshot belongs to (pairs the clean epoch). */
+  requestId: number;
+  bytes: Uint8Array;
 }
 
 /**
@@ -768,6 +799,7 @@ export type WorkerToMainMessage =
   | OverlaySweepMessage
   | OverlayIdentityMessage
   | StateCapturedMessage
+  | ForkSnapshotMessage
   | RestoreResultMessage
   | MachineInspectedMessage
   | TanFreezeMessage

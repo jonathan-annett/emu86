@@ -131,7 +131,7 @@ describe('WorkerHost — capture-state', () => {
     expect(reply).toMatchObject({ requestId: 7, ok: false });
   });
 
-  it('captures state + hashes + secondary bytes, keeping the dirty count (peek)', async () => {
+  it('captures state + hashes, never copying disks in reference mode (peek)', async () => {
     const secondaryBytes = new Uint8Array(1474560).fill(0x11);
     const rig = await boot({
       imageBytes: haltImage(),
@@ -147,8 +147,11 @@ describe('WorkerHost — capture-state', () => {
     expect(reply.storeDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(reply.primarySha).toBeUndefined();
     expect(reply.primary).toBeUndefined(); // reference mode: no image bytes
-    expect(reply.secondary?.bytes[9 * SECTOR_SIZE]).toBe(0x77);
-    expect(reply.secondarySha).toMatch(/^[0-9a-f]{64}$/);
+    // Fix #8: no secondary bytes and no secondary sha either — the
+    // fork is pinned by generation main-side, and the drive's bytes
+    // only ever ride the (killable) fork-snapshot message.
+    expect(reply.secondary).toBeNull();
+    expect(reply.secondarySha).toBeNull();
     expect(reply.secondaryDirtySectors).toBe(1);
     // Peek semantics (no markSecondaryClean): the auto-persist trigger survives.
     const tracked = rig.host.machine?.secondaryDisk;
@@ -168,8 +171,11 @@ describe('WorkerHost — capture-state', () => {
     });
     const reply = await awaitCaptured(rig);
     expect(reply.secondaryDirtySectors).toBe(1);
-    // The reply names the unconfirmed sectors — the slot's carried delta.
-    expect(reply.secondaryDirtyLbas).toEqual([3]);
+    // Fix #8: the reply carries the delta PRE-SLICED (bytes included)
+    // and no full drive image at all — the slot never waits on 8 MB.
+    expect(reply.carriedSecondary?.map((s) => s.lba)).toEqual([3]);
+    expect(reply.carriedSecondary?.[0]?.bytes).toEqual(sector(0x33));
+    expect(reply.secondary).toBeNull();
     const tracked = rig.host.machine?.secondaryDisk;
     if (!(tracked instanceof WriteTrackingDisk)) throw new Error('no tracked secondary');
     // Still unconfirmed: the fork write hasn't been acknowledged.
@@ -182,13 +188,43 @@ describe('WorkerHost — capture-state', () => {
       type: 'capture-state', requestId: 2, disks: 'reference', markSecondaryClean: true,
     });
     const second = await awaitCaptured(rig);
-    expect(second.secondaryDirtyLbas).toEqual([3]);
+    expect(second.carriedSecondary?.map((s) => s.lba)).toEqual([3]);
     // The ack (fork write committed) makes it durable.
     rig.host.handleMessage({ type: 'secondary-persisted', requestId: 2, ok: true });
     expect(tracked.dirtySectorCount).toBe(0);
     // A stale confirmation for an old capture is ignored.
     rig.host.handleMessage({ type: 'secondary-persisted', requestId: 1, ok: true });
     expect(tracked.dirtySectorCount).toBe(0);
+  });
+
+  it('posts the fork snapshot AFTER the reply, never on a peek (fix #8)', async () => {
+    const rig = await boot({
+      imageBytes: haltImage(),
+      secondary: { imageBytes: new Uint8Array(1474560) },
+    });
+    rig.host.runUntil(200);
+    rig.host.machine?.secondaryDisk?.writeSector(5, sector(0x55));
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 1, disks: 'reference', markSecondaryClean: true,
+    });
+    await awaitCaptured(rig);
+    await new Promise((r) => setTimeout(r, 20)); // let the trailing post land
+    const types = rig.messages.map((m) => m.type);
+    const replyAt = types.indexOf('state-captured');
+    const snapAt = types.indexOf('fork-snapshot');
+    expect(replyAt).toBeGreaterThanOrEqual(0);
+    expect(snapAt).toBeGreaterThan(replyAt); // the slot row never waits on 8 MB
+    const snap = rig.messages.find((m) => m.type === 'fork-snapshot');
+    if (snap === undefined || snap.type !== 'fork-snapshot') throw new Error('no snapshot');
+    expect(snap.requestId).toBe(1);
+    expect(snap.bytes[5 * SECTOR_SIZE]).toBe(0x55);
+
+    // A PEEK (no markSecondaryClean) posts no snapshot at all.
+    rig.messages.length = 0;
+    rig.host.handleMessage({ type: 'capture-state', requestId: 2, disks: 'reference' });
+    await awaitCaptured(rig);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(rig.messages.some((m) => m.type === 'fork-snapshot')).toBe(false);
   });
 
   it('the store digest tracks acked epochs and excludes the carried delta (§7)', async () => {
@@ -629,19 +665,17 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     });
     const reply = await awaitCaptured(a);
     if (reply.state === undefined || reply.capturedAt === undefined ||
-        reply.storeDigest === undefined || reply.secondary == null ||
-        reply.secondaryDirtyLbas === undefined) {
+        reply.storeDigest === undefined ||
+        reply.carriedSecondary === undefined) {
       throw new Error('capture reply incomplete');
     }
-    expect(reply.secondaryDirtyLbas).toEqual([7, 2048]);
+    expect(reply.carriedSecondary.map((s) => s.lba)).toEqual([7, 2048]);
 
-    // Main's slot row: carried sectors sliced from the capture's own
-    // snapshot. The fork write never committed — boot B gets the OLD
-    // fork bytes.
-    const carriedSecondary = reply.secondaryDirtyLbas.map((lba) => ({
-      lba,
-      bytes: reply.secondary!.bytes.slice(lba * SECTOR_SIZE, (lba + 1) * SECTOR_SIZE),
-    }));
+    // Fix #8: the delta arrives pre-sliced; the fork write (whose
+    // bytes ride the separate fork-snapshot message) never committed
+    // — boot B gets the OLD fork bytes, and main's generation check
+    // accepted the pair before offering the restore.
+    const carriedSecondary = reply.carriedSecondary;
     const overlay = reply.overlayEpoch != null
       ? {
           chunks: reply.overlayEpoch.chunks,
@@ -658,7 +692,7 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
         capturedAt: reply.capturedAt,
         expected: {
           storeDigest: reply.storeDigest,
-          secondarySha: reply.secondarySha ?? null,
+          secondarySha: null, // fix #8: the generation pin lives main-side
         },
         ...(reply.overlayEpoch != null
           ? {

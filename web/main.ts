@@ -580,7 +580,7 @@ async function init(): Promise<void> {
     const ramBytes = (reply.state?.ram.pages.length ?? 0) * 4096;
     const carriedBytes =
       (reply.overlayEpoch?.chunks ?? []).reduce((n, c) => n + c.bytes.length, 0) +
-      (reply.secondaryDirtyLbas?.length ?? 0) * SECTOR_SIZE;
+      (reply.carriedSecondary?.length ?? 0) * SECTOR_SIZE;
     return ramBytes + carriedBytes + 64 * 1024 + gzBytes; // devices + NIC ring ride in the fudge
   }
 
@@ -609,8 +609,29 @@ async function init(): Promise<void> {
    * snapshot-secondary semantics).
    */
   const RESUME_CAPTURE_MS = 5_000;
+  /**
+   * Field fix #8 (the Tetris staleness): while the guest has open TAN
+   * flows, a teardown's FALLBACK slot (the last heartbeat, when the
+   * final capture loses the page-death race) must be young enough for
+   * the frozen peer to reconcile — ktcp never dup-ACKs, so a stale
+   * rewind mid-session ends in "max retries exceeded". Tighten the
+   * heartbeat while a session is live.
+   */
+  const RESUME_CAPTURE_ACTIVE_MS = 1_500;
+  let latestTanFlows = 0;
   let resumeCaptureInFlight = false;
   let lastResumeCaptureAt = 0;
+  /**
+   * Fix #8: the fork row's last CONFIRMED generation (seeded from the
+   * row at boot; advanced by each acked fork-snapshot write). Every
+   * slot row records it as the base its carried delta folds over.
+   */
+  let confirmedForkGeneration: string | null = null;
+  /** Fork writes awaiting their fork-snapshot message, by requestId. */
+  const pendingForkWrites = new Map<
+    number,
+    { generation: string; carriedCount: number; force: boolean }
+  >();
   let resumeSlotBroken = false; // IDB failed — stop hammering it
   /** Field fix #4: fold a capture's claimed deltas back worker-side —
    *  the epoch nack and the clean nack — when this beat can't (or
@@ -625,7 +646,8 @@ async function init(): Promise<void> {
       };
       worker.postMessage(nack);
     }
-    if (reply.secondaryDirtyLbas !== undefined) {
+    if (reply.carriedSecondary !== undefined) {
+      pendingForkWrites.delete(reply.requestId);
       const nack: MainToWorkerMessage = {
         type: 'secondary-persisted',
         requestId: reply.requestId,
@@ -650,7 +672,8 @@ async function init(): Promise<void> {
       return;
     }
     if (resumeSlotBroken) return;
-    if (!force && Date.now() - lastResumeCaptureAt < RESUME_CAPTURE_MS) return;
+    const cadence = latestTanFlows > 0 ? RESUME_CAPTURE_ACTIVE_MS : RESUME_CAPTURE_MS;
+    if (!force && Date.now() - lastResumeCaptureAt < cadence) return;
     resumeCaptureInFlight = true;
     leds?.set('state', 'amber', 'capturing resume slot…');
     let replyForNack: CapturedReply | null = null;
@@ -689,20 +712,21 @@ async function init(): Promise<void> {
               })),
             }
           : null;
+      // Fix #8: the delta arrives pre-sliced (the reply never hauls
+      // the full drive), and the slot pins the fork row by generation.
       const carriedSecondary =
-        reply.secondary != null &&
-        reply.secondaryDirtyLbas !== undefined &&
-        reply.secondaryDirtyLbas.length > 0
-          ? reply.secondaryDirtyLbas.map((lba) => ({
-              lba,
-              // slice() copies — a subarray view would drag the whole
-              // drive buffer into the IDB row per sector.
-              bytes: reply.secondary!.bytes.slice(
-                lba * SECTOR_SIZE,
-                (lba + 1) * SECTOR_SIZE,
-              ),
-            }))
+        reply.carriedSecondary !== undefined && reply.carriedSecondary.length > 0
+          ? reply.carriedSecondary
           : null;
+      const pendingForkGeneration =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `g-${Math.random().toString(36).slice(2)}`;
+      pendingForkWrites.set(reply.requestId, {
+        generation: pendingForkGeneration,
+        carriedCount: reply.carriedSecondary?.length ?? 0,
+        force,
+      });
       const now = Date.now();
       await machineStore.putState({
         meta: {
@@ -722,7 +746,7 @@ async function init(): Promise<void> {
           primary: null,
           secondary: null,
           primarySha: null, // §7: reference slots pin inputs, not the image
-          secondarySha: reply.secondarySha ?? null,
+          secondarySha: null, // fix #8: reference slots pin the fork by GENERATION
           storeDigest: reply.storeDigest,
           terminal: {
             tail: txTailSnapshot(),
@@ -731,45 +755,14 @@ async function init(): Promise<void> {
           },
           carriedPrimary,
           carriedSecondary,
+          secondaryGeneration: confirmedForkGeneration,
+          pendingForkGeneration,
         },
       });
-      // Fork row SECOND — a teardown here leaves fork(old) + the
-      // slot's carried delta, which still reconstructs.
-      if (
-        drive !== null &&
-        reply.secondary != null &&
-        ((reply.secondaryDirtySectors ?? 0) > 0 || force)
-      ) {
-        try {
-          await library.updateImageBytes(drive.imageId, reply.secondary.bytes);
-          driveBanner.autoSaved();
-          editorPanel?.driveUpdated(reply.secondary.bytes);
-          const confirm: MainToWorkerMessage = {
-            type: 'secondary-persisted',
-            requestId: reply.requestId,
-            ok: true,
-          };
-          worker.postMessage(confirm);
-        } catch (err) {
-          const nack: MainToWorkerMessage = {
-            type: 'secondary-persisted',
-            requestId: reply.requestId,
-            ok: false,
-          };
-          worker.postMessage(nack);
-          throw err;
-        }
-      } else if (reply.secondaryDirtyLbas !== undefined) {
-        // Nothing needed persisting this beat (clean drive) — confirm
-        // only when the pending set really was empty; anything else
-        // stays unconfirmed and re-carries.
-        const settle: MainToWorkerMessage = {
-          type: 'secondary-persisted',
-          requestId: reply.requestId,
-          ok: reply.secondaryDirtyLbas.length === 0,
-        };
-        worker.postMessage(settle);
-      }
+      // Fix #8: the fork row is no longer written here — the worker's
+      // fork-snapshot message (posted after this reply, killable by a
+      // teardown) carries the bytes, and its handler confirms the
+      // clean epoch. The slot above reconstructs either way.
       // Overlay chunks THIRD, then the ack that lets the worker drop
       // the epoch. A teardown before the commit leaves the slot's
       // carried copy as the only survivor — exactly what restore folds.
@@ -962,6 +955,12 @@ async function init(): Promise<void> {
         dbg(cmd.paused ? 'rack command — machine frozen' : 'rack command — machine resumed');
         const msg: MainToWorkerMessage = { type: 'set-paused', paused: cmd.paused };
         worker.postMessage(msg);
+        return;
+      }
+      if (cmd.emu86 === 'focus') {
+        // Rail selection (field ask 2026-07-18): the rack focuses the
+        // iframe window; the terminal inside needs it explicitly.
+        term.focus();
         return;
       }
       if (
@@ -1245,6 +1244,41 @@ async function init(): Promise<void> {
       }
       return;
     }
+    if (msg.type === 'fork-snapshot') {
+      // Fix #8: the fork row's bytes arrive AFTER the capture reply,
+      // on their own killable message. Persist when the beat had
+      // anything to persist (or was forced), stamp the generation the
+      // slot row already named, confirm the clean epoch either way.
+      const expected = pendingForkWrites.get(msg.requestId);
+      if (expected === undefined) return; // a nacked/abandoned beat
+      pendingForkWrites.delete(msg.requestId);
+      void (async () => {
+        let ok = false;
+        try {
+          if (drive !== null && (expected.carriedCount > 0 || expected.force)) {
+            await library.updateImageBytes(drive.imageId, msg.bytes, expected.generation);
+            driveBanner.autoSaved();
+            editorPanel?.driveUpdated(msg.bytes);
+            confirmedForkGeneration = expected.generation;
+            ok = true;
+          } else {
+            // Clean beat: confirm only a truly-empty pending set;
+            // anything else stays unconfirmed and re-carries.
+            ok = expected.carriedCount === 0;
+          }
+        } catch (err) {
+          console.warn('[emu86] fork-snapshot persist failed:', err);
+          ok = false;
+        }
+        const settle: MainToWorkerMessage = {
+          type: 'secondary-persisted',
+          requestId: msg.requestId,
+          ok,
+        };
+        worker.postMessage(settle);
+      })();
+      return;
+    }
     if (msg.type === 'state-captured') {
       // Phase 18 M2: route by requestId — capture flows can overlap.
       const sink = captureSinks.get(msg.requestId);
@@ -1484,6 +1518,8 @@ async function init(): Promise<void> {
       // Pacing telemetry (~1/sec). Console-only by design — the numbers
       // are for the pacing report and the dev /agent/stats endpoint.
       latestStats = msg;
+      // Field fix #8: live TAN flows tighten the resume-slot cadence.
+      latestTanFlows = msg.tanFlows ?? 0;
       // Fork auto-persist rides the same heartbeat: dirty sectors mean
       // guest writes since the last snapshot. Phase 18 M2 field fix:
       // while the resume machinery is healthy, the CAPTURE is the
@@ -1689,6 +1725,18 @@ async function init(): Promise<void> {
     return true;
   };
 
+  // Fix #8: read the fork row's current generation once — it seeds
+  // the confirmed-generation bookkeeping every slot row records, and
+  // it is the pin the reload-resume acceptance below checks.
+  let bootForkGeneration: string | null = null;
+  if (drive !== null) {
+    try {
+      const meta = (await library.listImages()).find((m) => m.id === drive.imageId);
+      bootForkGeneration = meta?.generation ?? null;
+    } catch { /* no generation → fresh-fork semantics below */ }
+  }
+  confirmedForkGeneration = bootForkGeneration;
+
   try {
     // Queued reboot (field loop): consume the flag, skip the resume
     // once, drop the slot. RAM restarts; overlay + fork persist — a
@@ -1771,12 +1819,39 @@ async function init(): Promise<void> {
       const rec = await machineStore.getState(ownResumeSlotId);
       // §7: only storeDigest slots can be verified now. A pre-§7 row
       // (primarySha era) cold-boots once, honestly, and is deleted —
-      // the next heartbeat writes a new-style slot.
-      if (rec !== null && (rec.payload.storeDigest ?? null) === null) {
+      // the next heartbeat writes a new-style slot. Fix #8 repeats
+      // the transition: a secondarySha-era row (no generation pin)
+      // also refuses once and is deleted.
+      const preFix8 =
+        rec !== null &&
+        drive !== null &&
+        rec.payload.pendingForkGeneration === undefined;
+      if (rec !== null && ((rec.payload.storeDigest ?? null) === null || preFix8)) {
+        void machineStore.deleteState(ownResumeSlotId).catch(() => { /* best effort */ });
+      }
+      // Fix #8, the drive pin: the fork row's generation must be one
+      // of the two the slot names — the confirmed base its delta
+      // folds over, or the write its own capture began (either tear
+      // arm reconstructs; anything else means the fork was rewritten
+      // out from under the slot, e.g. by the editor, and folding the
+      // delta over foreign bytes would corrupt silently).
+      const forkGenerationOk =
+        drive === null ||
+        (rec !== null &&
+          rec.payload.pendingForkGeneration !== undefined &&
+          (bootForkGeneration === (rec.payload.secondaryGeneration ?? null) ||
+            bootForkGeneration === rec.payload.pendingForkGeneration));
+      if (rec !== null && !preFix8 && !forkGenerationOk) {
+        syslog.log(
+          'saved state does not match this drive (rewritten since the capture?) — cold-booting',
+          { toast: true },
+        );
         void machineStore.deleteState(ownResumeSlotId).catch(() => { /* best effort */ });
       }
       if (
         rec !== null &&
+        !preFix8 &&
+        forkGenerationOk &&
         rec.meta.schemaVersion === MACHINE_STATE_SCHEMA_VERSION &&
         typeof rec.payload.storeDigest === 'string' &&
         // Field fix #4: a carried delta needs the slot's base identity

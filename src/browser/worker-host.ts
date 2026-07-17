@@ -946,6 +946,13 @@ export class WorkerHost {
           realTimeRatio: instrPerSec / (AUTHENTIC_CYCLES_PER_MS * 1000),
           mode: this.#pacer.mode,
           batch: this.#adaptiveBatch,
+          ...(this.#tan !== null && this.#tan.identity !== null
+            ? {
+                tanFlows: this.#tan.conntrack.connectionsFor(
+                  this.#tan.identity.hostOctet,
+                ).length,
+              }
+            : {}),
           ...(this.#secondaryDisk !== null
             ? { secondaryDirtySectors: this.#secondaryDisk.dirtySectorCount }
             : {}),
@@ -1194,19 +1201,38 @@ export class WorkerHost {
         if (digest !== expected.storeDigest) {
           restoreRefusal = 'boot disk reconstruction does not match the capture';
         } else {
-          let secondarySha: string | null = null;
-          let secOk = true;
-          if (secondary !== null) {
-            const secSnap = snapshotDisk(secondary.disk);
-            if (carriedSec !== null && !applyCarriedSectors(secSnap, carriedSec)) {
-              restoreRefusal = 'saved machine state carried a corrupt drive delta';
-              secOk = false;
-            } else {
-              secondarySha = await sha256Hex(secSnap);
+          if (expected.secondarySha != null) {
+            // Pre-fix-#8 slot rows: full-image sha verification.
+            let secondarySha: string | null = null;
+            let secOk = true;
+            if (secondary !== null) {
+              const secSnap = snapshotDisk(secondary.disk);
+              if (carriedSec !== null && !applyCarriedSectors(secSnap, carriedSec)) {
+                restoreRefusal = 'saved machine state carried a corrupt drive delta';
+                secOk = false;
+              } else {
+                secondarySha = await sha256Hex(secSnap);
+              }
             }
-          }
-          if (secOk && secondarySha !== expected.secondarySha) {
-            restoreRefusal = 'secondary drive does not match the capture';
+            if (secOk && secondarySha !== expected.secondarySha) {
+              restoreRefusal = 'secondary drive does not match the capture';
+            }
+          } else if (secondary !== null && carriedSec !== null) {
+            // Fix #8 rows: MAIN verified the fork-row GENERATION
+            // before offering this restore — the delta is right by
+            // construction against those bytes (the fix-#4 superset
+            // law). Here only the delta's shape is checked.
+            const sectorCount = secondary.disk.sectorCount;
+            const inBounds = carriedSec.every(
+              (s) =>
+                Number.isInteger(s.lba) &&
+                s.lba >= 0 &&
+                s.lba < sectorCount &&
+                s.bytes.length === SECTOR_SIZE,
+            );
+            if (!inBounds) {
+              restoreRefusal = 'saved machine state carried a corrupt drive delta';
+            }
           }
           if (restoreRefusal === null) {
             acceptedCarried = carried;
@@ -1857,15 +1883,24 @@ export class WorkerHost {
       const primaryGeometry = primaryDisk.geometry;
       const secondaryDisk = this.#secondaryDisk;
       const secondaryDirtySectors = secondaryDisk !== null ? secondaryDisk.dirtySectorCount : 0;
-      const secondaryBytes = secondaryDisk !== null ? secondaryDisk.snapshot() : null;
-      let secondaryDirtyLbas: number[] | undefined;
+      // Fix #8 (the §7 escalation): a REFERENCE capture never copies
+      // or hashes the drive — the 8 MB snapshot+sha was what made
+      // teardown captures lose the page-death race (the Tetris field
+      // kill). Only embedded (named-save) captures still carry it.
+      const secondaryBytes =
+        embedded && secondaryDisk !== null ? secondaryDisk.snapshot() : null;
+      let carriedSecondary: Array<{ lba: number; bytes: Uint8Array }> | undefined;
       if (secondaryDisk !== null && msg.markSecondaryClean === true) {
-        // This capture IS the persistence path (heartbeat resume) —
-        // main writes the fork row from these very bytes. Field fix
-        // #4: two-phase — the dirty set moves to pending (its LBAs
-        // ride the reply as the carried delta) and only main's
-        // secondary-persisted confirmation makes them durable.
-        secondaryDirtyLbas = secondaryDisk.beginClean();
+        // This capture IS the persistence path (heartbeat resume).
+        // Field fix #4: two-phase — the dirty set moves to pending
+        // and only main's secondary-persisted confirmation makes it
+        // durable. Fix #8: the delta's BYTES are sliced here, sector
+        // by sector, so the reply stays delta-sized; the full fork
+        // snapshot follows as its own killable message below.
+        carriedSecondary = secondaryDisk.beginClean().map((lba) => ({
+          lba,
+          bytes: new Uint8Array(secondaryDisk.readSector(lba)),
+        }));
         this.#pendingCleanRequestId = msg.requestId;
       }
       const secondaryGeometry = secondaryDisk !== null ? secondaryDisk.geometry : null;
@@ -1905,7 +1940,7 @@ export class WorkerHost {
             secondaryDirtySectors,
             referenceValid,
             overlayEpoch,
-            ...(secondaryDirtyLbas !== undefined ? { secondaryDirtyLbas } : {}),
+            ...(carriedSecondary !== undefined ? { carriedSecondary } : {}),
             ...(embedded && primaryBytes !== null
               ? {
                   primary: {
@@ -1924,6 +1959,17 @@ export class WorkerHost {
                   }
                 : null,
           });
+          // Fix #8: the fork row's full snapshot rides AFTER the
+          // reply, as its own message — the slot row never waits on
+          // 8 MB, and a teardown that kills this loses only the fork
+          // refresh (the carried delta reconstructs regardless).
+          if (carriedSecondary !== undefined && secondaryDisk !== null) {
+            this.#post({
+              type: 'fork-snapshot',
+              requestId: msg.requestId,
+              bytes: secondaryDisk.snapshot(),
+            });
+          }
         } catch (err) {
           this.#foldBackCaptureEpochs(msg.requestId, overlayEpoch?.epochId ?? null);
           this.#post({

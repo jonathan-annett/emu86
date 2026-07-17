@@ -255,3 +255,47 @@ incremented by pause/hibernation time — and, once the conntrack
 shows NO open connections, decayed back toward zero so the clock
 re-approaches real time when nobody's TCP could notice. Not built;
 needs its own scope.
+
+## 9. Field fix #8 — the 0-stale teardown capture, for real
+## (2026-07-18: "tetris really is a fuzzer")
+
+Field: first telnet refresh survived (fix #7 confirmed); a refresh
+MID-TETRIS died with ktcp's "tcp retrans: max retries exceeded". The
+export's trace convicted in one line: "restore resumed ok (state
+from 8s ago)" — the pagehide teardown capture lost the page-death
+race AGAIN, the machine rewound 5.7 s while the frozen peer held the
+death point, and ktcp (strictly in-order, never dup-ACKing) can't
+reconcile a rewound sender: mutual retransmit exhaustion. The trace
+also measured the cause: forced captures took 600–950 ms under
+Tetris — the 8 MB drive snapshot + sha riding EVERY reference
+capture, exactly the "v1 compromise" §7 recorded together with its
+escalation. The field said the window is tight; this is that
+escalation, landed:
+
+- **Reference captures never touch the drive.** The worker slices
+  only the unconfirmed sectors (the fix-#4 pending set) into the
+  reply — delta-sized, never 8 MB — and posts the fork row's full
+  snapshot AFTERWARDS as its own `fork-snapshot` message, killable
+  by teardown without harm.
+- **The fork row is pinned by GENERATION, not hash.** Every
+  `updateImageBytes` stamps a uuid (out-of-band writers get a fresh
+  mint, so an editor write-back honestly breaks the pin instead of
+  silently corrupting a fold). The slot row records the confirmed
+  generation its delta folds over PLUS the generation its own
+  capture's fork write will stamp; restore accepts either (both tear
+  arms reconstruct — the fold is idempotent over the newer bytes,
+  the fix-#4 invariant). Anything else refuses honestly.
+- **Transition** (the §7 precedent): secondarySha-era slot rows
+  refuse once and are deleted; the next heartbeat writes a pinned
+  row. The worker still honors old-style expected.secondarySha for
+  named-save flows that keep full-image integrity.
+- **Active-flow cadence** (the companion half): stats now carry the
+  guest's open TAN flow count, and main tightens the heartbeat from
+  5 s to 1.5 s while a session is live — the fallback slot, if the
+  race is ever lost again, is at most ~1.5 s stale instead of ~6.
+
+NOT fixed here, recorded: ktcp cannot reconcile ANY rewind while
+data is in flight, however small — the true guarantee needs the
+teardown capture to always win (the incremental dirty-page slot,
+next brief) and until then a lost race mid-session still costs the
+session, just with a much smaller window.
