@@ -185,3 +185,27 @@ merged, timestamped story across every involved tab.
 Rules kept: nothing in the app ever LISTENS on the channel; no
 behavior depends on a trace arriving; tracing failures are swallowed
 (the trace must never break the machine it narrates).
+
+## 7. Addendum — the diagnostic export (field ask 2026-07-18)
+
+Field (Jonathan): "a button in tab shark which downloads a zip file
+with all the events in a format you can analyze … since you are
+already capturing the screen memory in indexedDb for each
+hibernation this will give you a concrete view of what the resumed
+pc was displaying … better for you to have the raw data, right?"
+(This is §4's recorded pcap-style follow-on, asked for by name.)
+
+Scope: an ⬇ export button producing one zip (dependency-free
+STORE-only writer, web/zip.ts, validated against the real unzip):
+- events.json — census, live flows, both rendered logs, counters,
+  build stamp;
+- frames.pcap — a 2,000-frame raw ring in classic pcap
+  (LINKTYPE_ETHERNET), tcpdump/tshark-readable;
+- states/ — every `emu86-machines` row (IDB is origin-global, so
+  every tab's slots and saves): meta + capture provenance in
+  states.json, and per state the stored terminal snapshot as
+  terminal.bin (the byte-exact TX tail a restore replays — the
+  "screen memory") and terminal.txt (escape-stripped for eyeballs).
+Assembly is DOM-free (web/tabshark-export.ts) with an injected
+state source; full machine RAM/disk payloads stay OUT of the export
+(size — the meta says they exist and how big).

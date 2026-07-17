@@ -22,6 +22,11 @@ import { TanConntrack } from '../src/net/conntrack.js';
 import { decodeFrame, octetName } from './tabshark-decode.js';
 import { DEBUG_CHANNEL_NAME, type DebugTraceMsg } from './debug-log.js';
 import { ETHERTYPE_IPV4, parseIpv4, type Ipv4 } from '../src/net/wire.js';
+import { MachineStore } from './machine-store.js';
+import { assembleExport, type CapturedFrame } from './tabshark-export.js';
+import { buildZip } from './zip.js';
+
+declare const __EMU86_BUILD__: string;
 
 /** Same literal as web/worker.ts — the TAN's channel name. */
 const TAN_CHANNEL_NAME = 'emu86-tan-v1';
@@ -32,12 +37,15 @@ const FREEZE_CHIP_FALLBACK_MS = 10_000;
 
 const FRAME_LOG_CAP = 400;
 const EVENT_LOG_CAP = 500; // debug traces are chatty on purpose
+/** Raw frames kept for the pcap export — bytes, not just decodes. */
+const RAW_FRAME_CAP = 2000;
 
 // ---- state ----------------------------------------------------------
 
 const conntrack = new TanConntrack();
 const frameLines: string[] = [];
 const eventLines: string[] = [];
+const rawFrames: CapturedFrame[] = [];
 const members = new Set<number>();
 const frozen = new Map<number, number>(); // octet → chip-clear fallback deadline
 let framesSeen = 0;
@@ -149,6 +157,8 @@ channel.onmessage = (ev: MessageEvent<unknown>) => {
     if (bytes === null) return;
     framesSeen++;
     bytesSeen += bytes.byteLength;
+    rawFrames.push({ tMs: Date.now(), bytes: new Uint8Array(bytes) });
+    if (rawFrames.length > RAW_FRAME_CAP) rawFrames.shift();
     conntrack.observe(bytes);
     if (bytes.length >= 34 && (((bytes[12] ?? 0) << 8) | (bytes[13] ?? 0)) === ETHERTYPE_IPV4) {
       const ip = parseIpv4(bytes.subarray(14));
@@ -208,6 +218,46 @@ debugChannel.onmessage = (ev: MessageEvent<unknown>) => {
   logEvent(`[${who}] ${d.text}`);
   render();
 };
+
+// The export (brief §7): one zip with events.json, frames.pcap, and
+// every stored machine state's terminal snapshot — raw data for the
+// analyst instead of pasted fragments.
+const exportBtn = document.getElementById('export-zip') as HTMLButtonElement | null;
+exportBtn?.addEventListener('click', () => {
+  void (async () => {
+    exportBtn.disabled = true;
+    try {
+      const entries = await assembleExport({
+        build: __EMU86_BUILD__,
+        framesSeen,
+        bytesSeen,
+        members: [...members].sort((a, b) => a - b),
+        frozenOctets: [...frozen.keys()],
+        flows: conntrack.flows(),
+        frameLog: frameLines,
+        eventLog: eventLines,
+        frames: rawFrames,
+        states: new MachineStore(),
+      });
+      const zip = buildZip(entries);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const url = URL.createObjectURL(
+        new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }),
+      );
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tabshark-${stamp}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      logEvent(`exported ${entries.length} files (${(zip.length / 1024).toFixed(0)} KiB zip)`);
+    } catch (err) {
+      logEvent(`export FAILED — ${String(err)}`);
+    } finally {
+      exportBtn.disabled = false;
+      render();
+    }
+  })();
+});
 
 // The ❄ fallback needs an occasional repaint even with a silent wire.
 setInterval(() => {
