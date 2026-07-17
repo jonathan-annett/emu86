@@ -145,6 +145,10 @@ export default defineConfig({
         // entry needs no routing changes.
         main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
         tabshark: fileURLToPath(new URL('./web/tabshark.html', import.meta.url)),
+        // The rack (multi-PC brief M1): one tab, many machines.
+        rack: fileURLToPath(new URL('./web/rack.html', import.meta.url)),
+        // Where a migrated tab lands (M2) — "this PC has moved".
+        moved: fileURLToPath(new URL('./web/moved.html', import.meta.url)),
       },
     },
   },

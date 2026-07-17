@@ -60,7 +60,14 @@ import { mountSettingsModal } from './settings-modal.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { modeSequence, TxModeTracker, type TxModeState } from './tx-modes.js';
-import { loadSession, mintSessionId, saveSession } from './session-store.js';
+import {
+  loadSession,
+  mintSessionId,
+  sanitizePcId,
+  saveSession,
+  storageKeyFor,
+} from './session-store.js';
+import { RACK_CHANNEL_NAME, mountMoveToRack } from './migrate.js';
 import {
   CLONE_CHANNEL_NAME,
   mountCloneParent,
@@ -357,6 +364,25 @@ async function init(): Promise<void> {
     }
     return out;
   }
+  // Rack M1: when embedded (?pc= present), report identity/status to
+  // the parent so the rail can name this machine and dot its state.
+  // Post-only — the rack binds rows by message SOURCE, so nothing in
+  // the payload is security-relevant.
+  const embeddedPcId = sanitizePcId(new URLSearchParams(location.search).get('pc'));
+  const rackStatus: {
+    name: string | null;
+    octet: number | null;
+    state: 'booting' | 'running' | 'frozen' | 'halted';
+  } = { name: null, octet: null, state: 'booting' };
+  function postRackStatus(patch: Partial<typeof rackStatus>): void {
+    if (embeddedPcId === null || window.parent === window) return;
+    Object.assign(rackStatus, patch);
+    window.parent.postMessage(
+      { emu86: 'pc-status', pc: embeddedPcId, ...rackStatus },
+      location.origin,
+    );
+  }
+
   // Field fix #5: modes set BEFORE the tail window (invaders' hide-
   // cursor at game start) are invisible to the tail replay — this
   // tracker watches the same stream and carries their final state.
@@ -597,6 +623,10 @@ async function init(): Promise<void> {
   // 2026-07-16 — the in-flight beat's state predates the freeze, and
   // the sliver between them is exactly a half-typed line).
   let forceQueued = false;
+  // Multi-PC brief M2: the migrate dance must WAIT for the slot row
+  // to be durable before handing the session to a rack — F5 gets this
+  // from the teardown grace; a live handover has to await it.
+  let resumeCaptureSettled: Promise<void> = Promise.resolve();
   function maybeRefreshResumeSlot(force = false): void {
     if (resumeCaptureInFlight) {
       if (force) forceQueued = true;
@@ -607,7 +637,7 @@ async function init(): Promise<void> {
     resumeCaptureInFlight = true;
     leds?.set('state', 'amber', 'capturing resume slot…');
     let replyForNack: CapturedReply | null = null;
-    void (async () => {
+    resumeCaptureSettled = (async () => {
       const reply = await requestCapture('reference', { markSecondaryClean: true });
       replyForNack = reply;
       if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) {
@@ -819,6 +849,116 @@ async function init(): Promise<void> {
     worker.postMessage(thaw);
   });
 
+  // Multi-PC brief M2: the tab→rack move. The affordance appears only
+  // while a rack tab is announcing, and never inside a rack iframe
+  // (an embedded PC has nowhere further to move). The dance is the F5
+  // path aimed elsewhere: freeze (+ TAN freeze), await a durable slot
+  // row, hand the session record to the rack, navigate to moved.html.
+  const moveBtn = document.getElementById('move-to-rack') as HTMLButtonElement | null;
+  if (moveBtn !== null && embeddedPcId === null) {
+    // The literal bridges DOM BroadcastChannel to the module's
+    // structural channel shape (the worker.ts onmessage-setter trick).
+    const rackChannelRaw = new BroadcastChannel(RACK_CHANNEL_NAME);
+    const mover = mountMoveToRack({
+      channel: {
+        postMessage: (data: unknown) => rackChannelRaw.postMessage(data),
+        set onmessage(handler: ((ev: { data: unknown }) => void) | null) {
+          rackChannelRaw.onmessage = handler;
+        },
+      },
+      onRackPresence: (present) => {
+        moveBtn.hidden = !present;
+      },
+      freeze: () => {
+        const msg: MainToWorkerMessage = {
+          type: 'set-paused',
+          paused: true,
+          reason: 'teardown',
+        };
+        worker.postMessage(msg);
+      },
+      unfreeze: () => {
+        const msg: MainToWorkerMessage = { type: 'set-paused', paused: false };
+        worker.postMessage(msg);
+        term.focus();
+      },
+      settleResumeSlot: async () => {
+        // Drain any in-flight beat, then capture the frozen machine.
+        await resumeCaptureSettled.catch(() => { /* that beat already reported */ });
+        maybeRefreshResumeSlot(true);
+        await resumeCaptureSettled;
+      },
+      slotFreshSince: async (since) => {
+        const meta = await machineStore.getMeta(ownResumeSlotId);
+        return meta !== null && meta.lastTouched >= since;
+      },
+      currentRecord: () => loadSession(),
+      currentName: () => {
+        const octet = loadSession().tanHostOctet;
+        return octet !== null ? nameForOctet(octet) : null;
+      },
+      clearOwnSession: () => {
+        // A later visit to ./ in this tab must mint a fresh PC, not
+        // fight the rack over the one that just moved.
+        try {
+          sessionStorage.removeItem(storageKeyFor(null));
+        } catch { /* nothing to clear */ }
+      },
+      report: (text) => syslog.log(text, { toast: true }),
+      navigateToMoved: (name) => {
+        location.replace(
+          `./moved.html${name !== null ? `?name=${encodeURIComponent(name)}` : ''}`,
+        );
+      },
+    });
+    moveBtn.addEventListener('click', () => {
+      void mover.requestMove();
+    });
+  }
+
+  // Rack M3: an embedded PC obeys two parent commands — freeze/thaw
+  // (the package capture holds the whole rack still) and save-named
+  // (a member capture, answered with its stateId for the manifest).
+  // Source-gated to the parent window; nothing else may drive us.
+  if (embeddedPcId !== null) {
+    window.addEventListener('message', (e: MessageEvent<unknown>) => {
+      if (e.origin !== location.origin || e.source !== window.parent) return;
+      const data = e.data;
+      if (typeof data !== 'object' || data === null) return;
+      const cmd = data as {
+        emu86?: unknown;
+        paused?: unknown;
+        label?: unknown;
+        requestId?: unknown;
+      };
+      if (cmd.emu86 === 'set-paused' && typeof cmd.paused === 'boolean') {
+        const msg: MainToWorkerMessage = { type: 'set-paused', paused: cmd.paused };
+        worker.postMessage(msg);
+        return;
+      }
+      if (
+        cmd.emu86 === 'save-named' &&
+        typeof cmd.label === 'string' &&
+        typeof cmd.requestId === 'number'
+      ) {
+        const requestId = cmd.requestId;
+        void saveNamedState(cmd.label)
+          .then((stateId) => {
+            window.parent.postMessage(
+              { emu86: 'named-saved', pc: embeddedPcId, requestId, ok: true, stateId },
+              location.origin,
+            );
+          })
+          .catch((err: unknown) => {
+            window.parent.postMessage(
+              { emu86: 'named-saved', pc: embeddedPcId, requestId, ok: false, error: String(err) },
+              location.origin,
+            );
+          });
+      }
+    });
+  }
+
   async function promoteToBase(): Promise<void> {
     if (drive === null) return;
     driveBanner.promoting();
@@ -941,12 +1081,13 @@ async function init(): Promise<void> {
     });
   }
 
-  async function saveNamedState(label: string): Promise<void> {
+  async function saveNamedState(label: string): Promise<string> {
     const stateId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? `named-${crypto.randomUUID()}`
         : `named-${Math.random().toString(36).slice(2)}`;
     await persistEmbeddedCapture({ stateId, kind: 'named', label });
+    return stateId; // rack M3: the package manifest needs the id
   }
 
   // Phase 18 M3: every tab answers the clone channel as a potential
@@ -1056,6 +1197,7 @@ async function init(): Promise<void> {
       // Boot started. The ELKS Setup banner (BIOS INT 10h teletype)
       // and the post-set_console UART traffic both stream via `tx`
       // messages — see worker-host.ts shared txBuffer.
+      postRackStatus({ state: 'running' });
       return;
     }
     if (msg.type === 'secondary-snapshot') {
@@ -1109,6 +1251,7 @@ async function init(): Promise<void> {
         `machine frozen — waiting for ${peer}${services !== '' ? ` (${services})` : ''} to reload`,
         { toast: true },
       );
+      postRackStatus({ state: 'frozen' });
       return;
     }
     if (msg.type === 'tan-thaw') {
@@ -1119,6 +1262,7 @@ async function init(): Promise<void> {
           : `machine resumed — gave up waiting for ${peer}`,
         { toast: true },
       );
+      postRackStatus({ state: 'running' });
       return;
     }
     if (msg.type === 'restore-result') {
@@ -1167,6 +1311,11 @@ async function init(): Promise<void> {
           void machineStore.deleteState(ownResumeSlotId);
         }
       }
+      // Field fix #6 (Jonathan, 2026-07-17): a duplicated tab's resume
+      // or a fresh restore boot landed without keyboard focus — the
+      // mount-time focus() predates the restore flow. Focus follows
+      // the outcome either way (a refusal's cold boot types too).
+      term.focus();
       return;
     }
     if (msg.type === 'overlay-sweep') {
@@ -1271,6 +1420,7 @@ async function init(): Promise<void> {
       // CHANGED — a sticky re-lease on reload is old news.
       const octetChanged = loadSession().tanHostOctet !== msg.hostOctet;
       saveSession({ tanHostOctet: msg.hostOctet });
+      postRackStatus({ name: msg.name ?? null, octet: msg.hostOctet });
       if (msg.detached === true) {
         // Phase 18 M3 field find: a restored (cloned / named-save)
         // machine wears the CAPTURE's network identity, so its cable
@@ -1356,6 +1506,7 @@ async function init(): Promise<void> {
     }
     if (msg.type === 'halted') {
       syslog.log(`machine halted — ${msg.reason}`, { toast: true });
+      postRackStatus({ state: 'halted' });
       return;
     }
     if (msg.type === 'error') {
@@ -1577,6 +1728,12 @@ async function init(): Promise<void> {
           }
         }
       }
+      // Field fix #6 (Jonathan, 2026-07-17): the choice dialog's
+      // buttons took keyboard focus and nothing gave it back — every
+      // duplicate landed with a dead keyboard until a click. All
+      // branches funnel here; the restore-result handler covers the
+      // restore flows the dialog doesn't see.
+      term.focus();
     } else if (overlaySession !== null && overlaySession.origin === 'reload') {
       const rec = await machineStore.getState(ownResumeSlotId);
       // §7: only storeDigest slots can be verified now. A pre-§7 row
@@ -1683,7 +1840,9 @@ async function init(): Promise<void> {
           (await machineStore.listMeta())
             .filter((m) => m.kind === 'named')
             .sort((a, b) => b.lastTouched - a.lastTouched),
-        save: (label: string) => saveNamedState(label),
+        save: async (label: string) => {
+          await saveNamedState(label); // the modal ignores the id
+        },
         restore: (stateId: string) => {
           saveSession({ pendingRestoreStateId: stateId });
           location.reload();
@@ -1721,7 +1880,9 @@ async function init(): Promise<void> {
     // Save from the popup (Jonathan: "this would be a great place to
     // add the save machine state button") — same flow as the settings
     // modal's, capturing the frozen picture exactly.
-    saveState: (label: string) => saveNamedState(label),
+    saveState: async (label: string) => {
+      await saveNamedState(label); // popup ignores the id the rack needs
+    },
     // …and restore from it too ("click - restore - boom"), and delete
     // (field ask 2026-07-16: "<dropdown> [Restore] [Delete]").
     savedStates: {

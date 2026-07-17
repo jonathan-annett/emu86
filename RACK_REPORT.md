@@ -1,0 +1,117 @@
+# Rack report — one tab, many machines
+
+Written 2026-07-17, the session that drafted the brief
+(`emu86-multi-pc-brief.md`, approved in-session: rack / unchanged
+chrome / freeze-all capture / one-way migration) and landed all four
+milestones. Same session, earlier: the whole TAN-freeze line
+(`TAN_FREEZE_REPORT.md`) — the rack composes directly on it — and
+field fixes #5 (invaders cursor) and #6 (keyboard focus after
+duplicate/restore, folded in mid-build from Jonathan's note).
+
+## What landed
+
+**M0 — per-instance session namespace.** Same-origin iframes share
+the tab's sessionStorage, so `session-store.ts` learned `?pc=<id>`
+key namespacing (`emu86.session.v1.<id>`; bare key without the param
+— standalone tabs byte-for-byte unchanged) plus `loadSessionAt` /
+`saveSessionAt` for the rack to address its iframes' records.
+
+**M1 — the rack page.** `web/rack.html` + `rack.ts` (fifth vite
+entry alongside tabshark): explorer layout, left rail, one iframe per
+PC at `./?pc=<id>`, only the selected one visible — hidden PCs keep
+running (workers are threads; the paced loop's yield is unclamped).
+The [+] picker offers a new blank PC and every named save (adoption =
+write `pendingRestoreStateId` into the fresh instance's record, spawn
+the iframe — the app's own restore path does the rest). Embedded
+main.ts posts `pc-status` to the parent (name, octet,
+booting/running/frozen/halted) on identity/ready/halted/freeze/thaw;
+the rack binds rows by message SOURCE, never by payload claim. The
+rail persists in the rack's own `emu86.rack.v1` record, so a rack F5
+recreates every iframe and each reload-resumes: THE WHOLE RACK
+SURVIVES REFRESH via N ordinary resume slots, rack-internal telnet
+sessions bridged by the TAN freeze.
+
+**M2 — migration, tab → rack.** `web/migrate.ts` owns the tab side:
+racks announce on `emu86-rack-v1` (open + every probe); the "move to
+the rack ⇱" pill appears beside the gear only while a rack is
+announcing (and never inside an iframe). The move is the F5 path
+aimed elsewhere: freeze (set-paused reason 'teardown' — the TAN
+freeze holds open connections), await a DURABLE slot row (the
+`resumeCaptureSettled` refactor makes the capture chain awaitable;
+F5 gets this from teardown grace, a live handover must wait), send
+the whole session record, ack, clear the tab's own record, navigate
+to `moved.html` (sixth entry — "this PC has moved"). The rack ACKs,
+then spawns only after the dead document's Web Locks release
+(navigator.locks.query poll, 5 s cap — all three names derivable
+from the record: resume slot, overlay, fork), or the iframe's
+session resolution would read "duplicate" and fork fresh identities
+instead of resuming. Every abort path (no ack, refused, stale slot,
+capture failure) unfreezes and reports; the record never leaves the
+tab before the slot is proven fresh — a restored-from-named-save
+session (which writes no reference slot) refuses the move honestly
+with "needs a reboot first".
+
+**M3 — infrastructure packages.** `web/package-store.ts`
+(`emu86-packages` IDB, deliberately NOT a version bump of
+emu86-machines): one manifest row per package — name, createdAt,
+members as {label, stateId} pointers at named saves. Save (💾,
+D3 ruling): freeze every member → capture each via a parent→iframe
+`save-named` command (embedded main.ts answers with the stateId;
+`saveNamedState` now returns it) → manifest LAST → unfreeze. An
+interrupted save rolls members back and can only ever leave plain
+named saves, never a dangling manifest. Load: the [+] picker's
+"infrastructure packages" section spawns every member down the
+named-save path. Delete: members first, manifest last, confirm
+dialog.
+
+## Warts and recorded honesty
+
+- **Package-loaded PCs boot with a detached cable** until their first
+  reboot — existing named-save restore semantics (the guest wears the
+  capture's identity). A freshly loaded "two-node lab" needs each
+  member rebooted before they can talk. Recorded, not fought — the
+  reboot re-leases and rejoins, same as any named-save restore.
+- **Dead tabs' resume slots are not adoptable** by [+] (brief M1
+  correction): the sessionId→overlayId mapping died with the tab.
+  Migration is unaffected — the live tab hands over its record.
+- **prompt()/confirm() in rack v1** for package name and delete —
+  deliberate minimal surface; the app's modal patterns can replace
+  them if the field minds.
+- The rack has no per-PC remove/eject affordance (D4: one-way v1);
+  a mis-added PC can be F5'd away only by clearing the rail (its
+  machine state survives in its slot/fork either way).
+- The lock-release poll's 5 s cap falls back to spawning anyway; the
+  overlay/fork self-healers then fork fresh identities (the machine
+  still arrives, as a new PC rather than a resume — logged by the
+  session modules).
+- iframes are NOT sandboxed — they must be same-origin for
+  sessionStorage/locks/channels to compose. Parent commands into an
+  iframe are origin+source-gated on both sides.
+
+## Verified (this session)
+
+- Typecheck (all configs) clean throughout; six-entry vite build
+  emits index/tabshark/rack/moved (+ worker chunks) — verified into a
+  scratch outDir; dev server serves every entry 200 with modules
+  resolving.
+- Unit: 4 session-store instance tests (M0), 6 migrate-dance
+  choreography tests (freeze→settle→request→ack ordering, abort paths
+  all unfreezing, foreign-nonce immunity, rack forgetting on
+  silence), 3 package-store tests. Suite baselines quoted per commit.
+- NOT verified — the field pass: real iframes booting machines,
+  rack F5 resume, a live migration with a telnet session riding
+  through, package save/load round trip. No browser automation on
+  this box; the composition arguments are traced in source and the
+  protocol layers are unit-tested, but the end-to-end story needs
+  eyes on dev.
+
+## Files
+
+- M0: `web/session-store.ts` + tests
+- M1: `web/rack.html`, `web/rack.ts`, `web/main.ts` (pc-status,
+  embedded detection), `vite.config.ts`
+- M2: `web/migrate.ts` + tests, `web/moved.html`, `web/main.ts`
+  (mover wiring, `resumeCaptureSettled`), `web/index.html` +
+  `style.css` (the pill), rack.ts (adoption + lock poll)
+- M3: `web/package-store.ts` + tests, rack.ts (save/load/delete),
+  `web/main.ts` (parent commands, saveNamedState returns the id)

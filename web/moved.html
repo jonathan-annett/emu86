@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PC moved — emu86</title>
+    <!-- The index.html favicon, dimmed: the machine left this tab. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230c0c0c'/%3E%3Crect x='3' y='3' width='7' height='10' fill='%23207040'/%3E%3C/svg%3E"
+    />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0c0c0c;
+        color: #d0d0d0;
+        font-family: 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+        font-size: 14px;
+      }
+      main { max-width: 34em; padding: 2em; line-height: 1.7; }
+      h1 { font-size: 16px; color: #33ff66; }
+      a { color: #8ab4f8; }
+      .dim { color: #7a7a7a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="headline">This PC has moved to the rack.</h1>
+      <p>
+        Its machine — RAM, disks, network identity, open connections —
+        now lives in your rack tab. This tab can be closed.
+      </p>
+      <p class="dim">
+        If the rack never received it, the machine is still safe: its
+        state sits in the resume slot until something adopts it or the
+        week-old-slot sweep runs. <a href="./">Boot a fresh PC here</a>
+        any time — it will mint its own identity.
+      </p>
+    </main>
+    <script type="module">
+      // ?name=<mouse> personalises the headline; nothing else runs here.
+      const name = new URLSearchParams(location.search).get('name');
+      if (name !== null && /^[a-z0-9-]{1,32}$/i.test(name)) {
+        document.getElementById('headline').textContent =
+          `${name} has moved to the rack.`;
+      }
+    </script>
+  </body>
+</html>
