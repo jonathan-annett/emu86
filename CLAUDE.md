@@ -195,8 +195,12 @@ built against it.)
   Deployment is two-tier and NOT git-triggered (see `wrangler.jsonc`):
   `npm run deploy:dev` → emu86-dev.jonathan-max-annett.workers.dev (testing);
   `npm run deploy:prod` → https://8086-tab.net (stable — promote only after
-  the dev tier is field-verified). Deploys are permission-gated for agents;
-  Jonathan runs them.
+  the dev tier is field-verified). **Deploy split (Jonathan's ruling,
+  2026-07-18): agents deploy to DEV freely as we iterate** — dev is his
+  test bench; deploy gated work there without asking, verify by build
+  stamp (RELEASE_PROCEDURE.md rule 3), and commit the rebuilt dist-web
+  as `dist-web: <hash> build — …`. **Prod promotion remains Jonathan's
+  explicit call, every time.** The full suite still gates every deploy.
 
 ## 7. How to work in this repo
 
