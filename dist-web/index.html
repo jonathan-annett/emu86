@@ -17,8 +17,11 @@
          HTML for it (MIME-rejected as a stylesheet), leaving xterm
          unstyled since Phase 9: visible helper textarea, unstyled
          scrollback viewport. Found by Jonathan, Phase 14. -->
-    <script type="module" crossorigin src="./assets/index-BVGFlEzC.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DC-lv3G4.css">
+    <script type="module" crossorigin src="./assets/main-D5GJQyLl.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="./assets/machine-store-CzAQtqX-.js">
+    <link rel="modulepreload" crossorigin href="./assets/tan-names-DBBPuXe-.js">
+    <link rel="stylesheet" crossorigin href="./assets/main-waPGi7Fx.css">
   </head>
   <body>
     <main>
@@ -29,6 +32,9 @@
       <div id="terminal"></div>
     </main>
     <button id="settings-gear" type="button" aria-label="Open settings">⚙</button>
+    <!-- Multi-PC brief M2: visible only while a rack tab is announcing
+         (and never inside a rack iframe). -->
+    <button id="move-to-rack" type="button" hidden>move to the rack ⇱</button>
     <div id="settings-modal-root"></div>
   </body>
 </html>
