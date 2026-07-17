@@ -258,6 +258,10 @@ export class ImageLibrary {
       ...(entry.viability !== undefined ? { viability: entry.viability } : {}),
       ...(entry.geometry !== undefined ? { geometry: entry.geometry } : {}),
       ...(entry.modifiedAt !== undefined ? { modifiedAt: entry.modifiedAt } : {}),
+      // Fix #8 hotfix: this projection silently DROPPED the new
+      // generation field — boot read null while the row carried a
+      // real one, refusing every legitimate resume as "rewritten".
+      ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
     }));
     meta.sort((a, b) => b.uploadedAt - a.uploadedAt);
     return meta;

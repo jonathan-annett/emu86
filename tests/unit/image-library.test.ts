@@ -239,6 +239,25 @@ describe('ImageLibrary', () => {
     lib.close();
   });
 
+  it('generation round-trips through getImageEntry AND listImages (fix #8)', async () => {
+    const lib = new ImageLibrary('test-images-gen-1');
+    const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
+    await lib.updateImageBytes(id, sampleBytes(8192, 0x11), 'gen-alpha');
+    expect((await lib.getImageEntry(id)).generation).toBe('gen-alpha');
+    // The field-kill regression: the listing projection dropped the
+    // field, so boot read null and refused every legitimate resume.
+    const meta = (await lib.listImages()).find((m) => m.id === id);
+    expect(meta?.generation).toBe('gen-alpha');
+    // An out-of-band write (no generation named) mints a FRESH one —
+    // never keeps the old (a kept generation would let a slot's delta
+    // fold over foreign bytes undetected).
+    await lib.updateImageBytes(id, sampleBytes(8192, 0x22));
+    const after = await lib.getImageEntry(id);
+    expect(typeof after.generation).toBe('string');
+    expect(after.generation).not.toBe('gen-alpha');
+    lib.close();
+  });
+
   it('updateImageBytes rejects a size mismatch and unknown ids', async () => {
     const lib = new ImageLibrary('test-images-blank-4');
     const id = await lib.createBlankImage('drive.img', DRIVE_GEOMETRY);
