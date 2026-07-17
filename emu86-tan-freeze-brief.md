@@ -209,3 +209,49 @@ STORE-only writer, web/zip.ts, validated against the real unzip):
 Assembly is DOM-free (web/tabshark-export.ts) with an injected
 state source; full machine RAM/disk payloads stay OUT of the export
 (size — the meta says they exist and how big).
+
+## 8. Field fix #7 — non-promiscuous residents (found via the §7
+## export, 2026-07-18: the telnet-restore kill)
+
+Field: "boot mouse, boot cat, telnet from mouse to cat, refresh,
+press enter. connection is dropped." Diagnosed ENTIRELY from one
+tab-shark export zip + the guests' screens + ktcp's source — no
+paste-debugging.
+
+**The kill chain (traced):** a reload-resume boots a FRESH worker:
+empty switch CAM, empty resident ARP tables — but the restored
+guest's warm ARP cache never asks again. Its first OUTBOUND segment
+(the user's Enter) is unknown-unicast to the peer's MAC → the switch
+floods it to every port, including the gateway resident. The gateway
+had no destination-MAC filter, so the peer-bound frame fell into the
+"routed traffic" arm and the HTTP gateway's TCP terminator answered
+a mid-stream segment for a connection it didn't know: a RST wearing
+THE PEER'S OWN ADDRESS, delivered locally (resident-sourced frames
+never cross the trunk — invisible to tab-shark by design). ktcp
+removes a connection on RST silently (tcp.c:143); the peer's real
+ACK arrived 3 ms later to a dead connection, drew the observed
+tcp_reject RST (win=1, the 1-byte dummy cb — the fingerprint that
+cracked the case), killed the peer's cb, and telnetd's next read
+printed "ktcp: panic in read".
+
+**Why the freeze exposed it:** the M2 freeze holds the peer
+perfectly still through the reload — nothing inbound re-teaches the
+restored side's CAM, so the first post-restore packet is guaranteed
+outbound, guaranteed flooded. (Pre-freeze, the peer's live
+retransmits usually taught the CAM first, masking the hole.)
+
+**Fix:** real-NIC semantics at both residents — gateway.ts and
+dns.ts accept only their own MAC + broadcast (a non-promiscuous NIC
+drops flooded unknown-unicast). Regression tests replay the exact
+field frame through an empty-CAM switch. The clocks were verified
+INNOCENT: ktcp's Now is kernel jiffies (paced, frozen-corrected on
+both machines by the existing law).
+
+**Recorded follow-on (Jonathan's design, this session): the RTC
+nudge.** The MC146818 is the one real-wall-time leak in the paced
+universe: after freezes/hibernation, `date` runs ahead of guest
+uptime. Proposal: an accumulated nudge subtracted from RTC reads,
+incremented by pause/hibernation time — and, once the conntrack
+shows NO open connections, decayed back toward zero so the clock
+re-approaches real time when nobody's TCP could notice. Not built;
+needs its own scope.

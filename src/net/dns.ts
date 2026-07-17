@@ -38,11 +38,13 @@ import {
   ETHERTYPE_ARP,
   ETHERTYPE_IPV4,
   IPPROTO_TCP,
+  MAC_BROADCAST,
   buildArp,
   buildEthernetFrame,
   buildIpv4,
   formatIp,
   ipEquals,
+  macEquals,
   parseArp,
   parseIpv4,
   type Ipv4,
@@ -322,6 +324,12 @@ export class DnsHost {
 
   #onFrame(frame: Uint8Array): void {
     if (frame.length < 14) return;
+    // Field fix #7 (gateway.ts has the full story): non-promiscuous
+    // NIC semantics — own MAC + broadcast only, or unknown-unicast
+    // floods reach a resident they were never addressed to.
+    if (!macEquals(frame, 0, this.mac) && !macEquals(frame, 0, MAC_BROADCAST)) {
+      return;
+    }
     const ethertype = ((frame[12] ?? 0) << 8) | (frame[13] ?? 0);
     const payload = frame.subarray(14);
     if (ethertype === ETHERTYPE_ARP) {

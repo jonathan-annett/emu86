@@ -17,6 +17,7 @@ import {
   ICMP_ECHO_REPLY,
   ICMP_ECHO_REQUEST,
   IPPROTO_ICMP,
+  IPPROTO_TCP,
   MAC_BROADCAST,
   buildArp,
   buildEthernetFrame,
@@ -261,5 +262,74 @@ describe('LanGateway — off-LAN echo gets host-unreachable (Phase 15 M3, D6)', 
     );
     expect(l.gateway.unreachablesSent).toBe(1);
     expect(l.guestRx).toHaveLength(1);
+  });
+});
+
+describe('field fix #7 — non-promiscuous residents (the telnet-restore kill)', () => {
+  /** The exact field frame: a guest's telnet segment to a PEER guest,
+   *  which an empty post-restore CAM floods to every port. */
+  function peerBoundTcpFrame(): Uint8Array {
+    const PEER_MAC = [0x02, 0x65, 0x6d, 0x75, 0x38, 0x11];
+    const PEER_IP = [10, 0, 2, 17];
+    const seg = new Uint8Array(21); // 20-byte header + 1 data byte, contents irrelevant
+    seg[12] = 5 << 4;
+    return buildEthernetFrame(
+      PEER_MAC,
+      GUEST_MAC,
+      ETHERTYPE_IPV4,
+      buildIpv4(IPPROTO_TCP, GUEST_IP, PEER_IP, seg),
+    );
+  }
+
+  it('ignores flooded unknown-unicast — never terminates a peer-bound segment', () => {
+    const l = makeLan();
+    const terminated: string[] = [];
+    l.gateway.registerTcpTerminator((src, dst) => {
+      terminated.push(`${src.join('.')}→${dst.join('.')}`);
+    });
+    gratuitousArp(l); // gateway knows the guest — a reply WOULD be routable
+    // Empty-CAM flood: the switch delivers the peer-bound frame to the
+    // gateway's port (unknown unicast floods everywhere). 2026-07-18
+    // field kill: this used to hit the "routed traffic" arm and RST
+    // the guest's live telnet wearing the peer's own address.
+    l.guest.transmit(peerBoundTcpFrame());
+    expect(terminated).toEqual([]);
+    expect(l.gateway.tcpForwarded).toBe(0);
+    expect(l.guestRx).toHaveLength(0); // and no local RST came back
+  });
+
+  it('still terminates TCP genuinely addressed to the gateway MAC', () => {
+    const l = makeLan();
+    const terminated: string[] = [];
+    l.gateway.registerTcpTerminator((src, dst) => {
+      terminated.push(`${src.join('.')}→${dst.join('.')}`);
+    });
+    const seg = new Uint8Array(21);
+    seg[12] = 5 << 4;
+    l.guest.transmit(
+      buildEthernetFrame(
+        Array.from(GATEWAY_MAC),
+        GUEST_MAC,
+        ETHERTYPE_IPV4,
+        buildIpv4(IPPROTO_TCP, GUEST_IP, [93, 184, 216, 34], seg),
+      ),
+    );
+    expect(terminated).toEqual(['10.0.2.15→93.184.216.34']);
+    expect(l.gateway.tcpForwarded).toBe(1);
+  });
+
+  it('still answers broadcast ARP (the guard admits broadcast)', () => {
+    const l = makeLan();
+    l.guest.transmit(
+      buildEthernetFrame(
+        MAC_BROADCAST,
+        GUEST_MAC,
+        ETHERTYPE_ARP,
+        buildArp(ARP_OP_REQUEST, GUEST_MAC, GUEST_IP, [0, 0, 0, 0, 0, 0], Array.from(GATEWAY_IP)),
+      ),
+    );
+    expect(l.guestRx).toHaveLength(1);
+    const arp = parseArp(l.guestRx[0]!.subarray(14));
+    expect(arp?.op).toBe(ARP_OP_REPLY);
   });
 });

@@ -44,6 +44,7 @@ import {
   buildIcmpEcho,
   buildIpv4,
   formatIp,
+  macEquals,
   parseArp,
   parseIcmpEcho,
   parseIpv4,
@@ -285,6 +286,18 @@ export class LanGateway {
 
   #onFrame(frame: Uint8Array): void {
     if (frame.length < 14) return;
+    // Field fix #7 (2026-07-18, the telnet-restore kill): a real NIC
+    // in non-promiscuous mode accepts only its own MAC + broadcast.
+    // Without this guard, unknown-unicast FLOODS reach us — and a
+    // reload-resumed guest's first outbound segment is exactly that
+    // (fresh switch, empty CAM, warm guest ARP cache that never asks
+    // again): its telnet packet to a PEER landed here, fell through
+    // the dst-ip≠gateway "routed traffic" arm, and the TCP terminator
+    // RSTed the guest's live session wearing the peer's own address —
+    // locally, resident-sourced, invisible to tab-shark by design.
+    if (!macEquals(frame, 0, this.mac) && !macEquals(frame, 0, MAC_BROADCAST)) {
+      return;
+    }
     const ethertype = ((frame[12] ?? 0) << 8) | (frame[13] ?? 0);
     const payload = frame.subarray(14);
     if (ethertype === ETHERTYPE_ARP) {
