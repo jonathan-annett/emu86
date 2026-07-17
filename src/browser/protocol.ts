@@ -15,6 +15,7 @@
 import type { CpuSpeedMode } from './pacing.js';
 import type { OverlayChunk } from '../disk/overlay.js';
 import type { MachineState } from '../machine/machine-state.js';
+import type { TanPeerConnection } from '../net/conntrack.js';
 
 export type { CpuSpeedMode, OverlayChunk, MachineState };
 
@@ -706,6 +707,12 @@ export interface InspectSnapshot {
     /** Cycles run since THIS session's boot or restore. */
     cyclesThisSession: number;
   };
+  /**
+   * Open TAN connections from this guest's perspective (TAN-freeze
+   * brief M1 — the conntrack's view). Empty for solo machines and
+   * when nothing is open.
+   */
+  tanConnections: TanPeerConnection[];
 }
 
 /** Reply to {@link InspectMachineMessage}. */

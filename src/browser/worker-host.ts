@@ -1964,6 +1964,10 @@ export class WorkerHost {
             cyclesSinceBoot: machine.clock.now(),
             cyclesThisSession: machine.clock.now() - this.#sessionStartCycles,
           },
+          tanConnections:
+            this.#tan !== null && this.#tan.identity !== null
+              ? this.#tan.conntrack.connectionsFor(this.#tan.identity.hostOctet)
+              : [],
         },
       });
     } catch (err) {

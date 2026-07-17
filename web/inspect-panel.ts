@@ -224,6 +224,18 @@ function showPanel(
     `session  ${fmtGuestTime(s.time.cyclesThisSession)} since this boot/restore`,
   ].join('\n');
 
+  // Open TAN connections (TAN-freeze M1) — the conntrack's view from
+  // this guest's side. Always rendered: "(none)" is information too.
+  const conns = s.tanConnections.length === 0
+    ? '(none)'
+    : s.tanConnections
+        .map((c) => {
+          const peer = c.peerName ?? `10.0.2.${c.peerOctet}`;
+          const arrow = c.outbound === null ? '↔' : c.outbound ? '→' : '←';
+          return `local:${c.localPort} ${arrow} ${peer}:${c.peerPort}  ${c.state}`;
+        })
+        .join('\n');
+
   panel.append(
     heading('h2', 'machine frozen — dismiss to resume'),
     heading('h3', 'registers'),
@@ -236,6 +248,8 @@ function showPanel(
     pre(devices),
     heading('h3', 'guest time (4.77 MHz cycles)'),
     pre(time),
+    heading('h3', 'open TAN connections'),
+    pre(conns),
   );
 
   // Save the frozen machine as a named state — the capture happens at

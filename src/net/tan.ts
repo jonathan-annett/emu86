@@ -46,6 +46,7 @@
  */
 
 import type { EthernetSwitch, SwitchPort } from './switch.js';
+import { TanConntrack } from './conntrack.js';
 import {
   ARP_OP_REPLY,
   ARP_OP_REQUEST,
@@ -189,6 +190,14 @@ export class TabAreaNetwork {
   /** Set when a conflicting claim arrives during our own claim window. */
   #conflictSeen = false;
 
+  /**
+   * Connection accounting over everything crossing the trunk (both
+   * directions — the channel is a bus, so this includes third-party
+   * flows; the per-tab views filter by octet). Drives the M2 network
+   * freeze and the inspect popup's connection list.
+   */
+  readonly conntrack = new TanConntrack();
+
   /** Frames forwarded in each direction — diagnostics/tests. */
   framesOut = 0;
   framesIn = 0;
@@ -298,6 +307,7 @@ export class TabAreaNetwork {
         }
         // Local frame flooded/routed to the trunk → other tabs.
         this.framesOut++;
+        this.conntrack.observe(frame);
         this.#channel.postMessage({ tan: 'frame', bytes: frame });
         // Proxy-ARP: answer who-has for known members immediately.
         // First-contact ARP otherwise costs a full cross-tab round
@@ -366,6 +376,7 @@ export class TabAreaNetwork {
         return;
       }
       this.framesIn++;
+      this.conntrack.observe(bytes);
       // Enters the local switch as trunk-port traffic; the switch never
       // echoes to the ingress port, so nothing re-posts to the channel.
       this.#trunk.transmit(bytes);
