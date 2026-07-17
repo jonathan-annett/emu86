@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tab-shark — TAN analyzer</title>
+    <!-- Same inline-SVG favicon trick as index.html (no /favicon.ico
+         404), recolored: a shark-grey fin block on black. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230c0c0c'/%3E%3Cpath d='M3 13 L8 3 L10 8 L13 13 Z' fill='%238ab4f8'/%3E%3C/svg%3E"
+    />
+    <style>
+      /* Self-contained on purpose: tab-shark is a diagnostic page and
+         must not couple to the app's stylesheet. Same terminal-dark
+         family as the main page. */
+      :root {
+        --bg: #0c0c0c;
+        --panel: #161616;
+        --text: #d0d0d0;
+        --dim: #7a7a7a;
+        --accent: #8ab4f8;
+        --good: #33ff66;
+        --warn: #ffcc66;
+        --line: #2a2a2a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+        font-size: 13px;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      header {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      header h1 { font-size: 15px; margin: 0; color: var(--accent); }
+      header .stats { color: var(--dim); }
+      #census { display: flex; gap: 8px; flex-wrap: wrap; }
+      #census .chip {
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 1px 7px;
+        color: var(--good);
+      }
+      #census .chip.frozen { color: var(--warn); }
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        min-height: 0;
+      }
+      section { display: flex; flex-direction: column; min-height: 0; }
+      section h2 {
+        font-size: 12px;
+        margin: 0;
+        padding: 6px 12px;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid var(--line);
+      }
+      #frames { border-right: 1px solid var(--line); }
+      #frame-log, #conn-table, #event-log {
+        overflow-y: auto;
+        padding: 6px 12px;
+        margin: 0;
+        white-space: pre;
+      }
+      #frame-log { flex: 1; }
+      aside { display: flex; flex-direction: column; min-height: 0; }
+      #conn-table { min-height: 8em; }
+      #event-log { flex: 1; border-top: 1px solid var(--line); }
+      .t { color: var(--dim); }
+      .who { color: var(--accent); }
+      .ctl { color: var(--warn); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>tab-shark</h1>
+      <div id="census"></div>
+      <div class="stats" id="stats">listening…</div>
+    </header>
+    <main>
+      <section id="frames">
+        <h2>frames (newest first)</h2>
+        <pre id="frame-log"></pre>
+      </section>
+      <aside>
+        <section>
+          <h2>connections</h2>
+          <pre id="conn-table">(none)</pre>
+        </section>
+        <section style="flex:1; min-height:0;">
+          <h2>lease &amp; freeze events</h2>
+          <pre id="event-log"></pre>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="./tabshark.ts"></script>
+  </body>
+</html>

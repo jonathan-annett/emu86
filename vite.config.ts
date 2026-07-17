@@ -137,6 +137,16 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        // The app, plus tab-shark (TAN-freeze M3) — a passive TAN
+        // analyzer page served at /tabshark.html on both tiers. The
+        // deploy worker serves dist-web verbatim, so a second HTML
+        // entry needs no routing changes.
+        main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
+        tabshark: fileURLToPath(new URL('./web/tabshark.html', import.meta.url)),
+      },
+    },
   },
   worker: {
     format: 'es',
