@@ -53,6 +53,18 @@
         color: var(--good);
       }
       #census .chip.frozen { color: var(--warn); }
+      #export-zip {
+        margin-left: auto;
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+        padding: 2px 9px;
+      }
+      #export-zip:hover { border-color: var(--accent); color: var(--accent); }
+      #export-zip:disabled { opacity: 0.5; cursor: wait; }
       main {
         flex: 1;
         display: grid;
@@ -84,16 +96,20 @@
       .who { color: var(--accent); }
       .ctl { color: var(--warn); }
     </style>
-    <script type="module" crossorigin src="./assets/tabshark-DPM2Lu9K.js"></script>
+    <script type="module" crossorigin src="./assets/tabshark-B6dPnLT6.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/tan-names-DBBPuXe-.js">
-    <link rel="modulepreload" crossorigin href="./assets/debug-log-_skieu7N.js">
+    <link rel="modulepreload" crossorigin href="./assets/debug-log-ClT2_cU6.js">
   </head>
   <body>
     <header>
       <h1>tab-shark</h1>
       <div id="census"></div>
       <div class="stats" id="stats">listening…</div>
+      <button
+        id="export-zip"
+        title="download everything — events, raw frames as pcap, every stored state's terminal snapshot"
+      >⬇ export</button>
     </header>
     <main>
       <section id="frames">
