@@ -174,3 +174,25 @@ New vite entry `rack.html` + `rack.ts` (the tabshark pattern):
   machines back, TAN re-leased, tab-shark shows the traffic.
 - The [+] picker refuses PCs whose lock is live (a running tab's PC
   cannot be adopted out from under it).
+
+## 5b. Addendum — the ⏻ power-off (field ask 2026-07-18)
+
+Field, after the first real rack session ("nice work on rack"): "we
+might need a 'turn off' ie delete a pc button." This was §D4's
+recorded eject wart; the field asked, so v1 lands: a per-row ⏻
+(hover-visible) with a confirm. Removing the iframe fires pagehide
+inside it (the machine runs its normal teardown, TAN peers get the
+honest 10 s give-up if it had connections); the instance's session
+record and resume slot are deleted proactively; named saves and the
+drive fork persist (the orphan-fork GC owns unowned forks, exactly
+as with a closed tab). Eject-to-tab remains out (D4, one-way v1).
+
+## 5c. Addendum — rail selection focuses the terminal (field ask
+## 2026-07-18)
+
+"when selecting a pc using the selection list, the xterm in the
+iframe needs focus." contentWindow.focus() only reaches the iframe
+WINDOW; the terminal inside needs it explicitly. The rack now also
+posts `{emu86:'focus'}` down the parent-command channel and embedded
+main.ts answers with term.focus() — the same funnel every overlay
+dismissal uses.

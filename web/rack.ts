@@ -30,7 +30,12 @@ import {
   resumeSlotLockName,
   type MachineStateMeta,
 } from './machine-store.js';
-import { saveSessionAt, type SessionState } from './session-store.js';
+import {
+  loadSessionAt,
+  saveSessionAt,
+  storageKeyFor,
+  type SessionState,
+} from './session-store.js';
 import { overlayLockName } from './overlay-session.js';
 import { forkLockName } from './drive-session.js';
 import {
@@ -174,9 +179,11 @@ function select(id: string): void {
   emptyHint.style.display = pcs.length === 0 ? '' : 'none';
   persistRack();
   renderRail();
-  // Focus the machine the user just picked — xterm's own focus funnel
-  // takes it from there.
+  // Focus the machine the user just picked: the iframe window first,
+  // then the terminal inside it (field ask 2026-07-18 — window focus
+  // alone leaves xterm's textarea unfocused).
   frames.get(id)?.contentWindow?.focus();
+  postToPc(id, { emu86: 'focus' });
 }
 
 function renderRail(): void {
@@ -192,10 +199,52 @@ function renderRail(): void {
     const sub = document.createElement('span');
     sub.className = 'pc-sub';
     sub.textContent = pc.octet !== null ? `.${pc.octet}` : '';
-    row.append(dot, name, sub);
+    const off = document.createElement('button');
+    off.className = 'pc-off';
+    off.textContent = '⏻';
+    off.title = 'turn off — removes this PC (unsaved machine state is lost; saved states and its drive fork persist)';
+    off.addEventListener('click', (e) => {
+      e.stopPropagation();
+      powerOff(pc);
+    });
+    row.append(dot, name, sub, off);
     row.addEventListener('click', () => select(pc.id));
     rail.appendChild(row);
   }
+}
+
+/**
+ * Turn off a PC (field ask 2026-07-18 — the recorded eject wart).
+ * Removing the iframe fires pagehide inside it, so the machine runs
+ * its normal teardown (capture + TAN freeze if it had connections —
+ * peers give up after the honest 10 s, since this one never returns).
+ * Then the instance's records go: the namespaced session record and
+ * its resume slot, proactively (the orphan GC would take a week).
+ * Named saves and the drive fork persist — a fork with no owner is
+ * the fork GC's business, exactly as with a closed tab.
+ */
+function powerOff(pc: RackPc): void {
+  const label = pc.name ?? pc.id.slice(0, 11);
+  if (!confirm(`Turn off ${label}? Unsaved machine state is lost (saved states and its drive fork persist).`)) {
+    return;
+  }
+  const sessionId = loadSessionAt(pc.id).sessionId;
+  frames.get(pc.id)?.remove();
+  frames.delete(pc.id);
+  const at = pcs.findIndex((p) => p.id === pc.id);
+  if (at >= 0) pcs.splice(at, 1);
+  try {
+    sessionStorage.removeItem(storageKeyFor(pc.id));
+  } catch { /* nothing to clean */ }
+  void machineStore.deleteState(resumeSlotId(sessionId)).catch(() => { /* GC's backstop */ });
+  if (selected === pc.id) {
+    selected = pcs[0]?.id ?? null;
+    if (selected !== null) select(selected);
+  }
+  emptyHint.style.display = pcs.length === 0 ? '' : 'none';
+  persistRack();
+  renderRail();
+  note(`${label} turned off`);
 }
 
 // ---- the [+] picker ---------------------------------------------------
