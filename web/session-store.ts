@@ -45,6 +45,17 @@
  *
  * Fail-open like settings.ts: no sessionStorage (sandboxed iframe,
  * exotic privacy mode) degrades to fresh ephemeral values per load.
+ *
+ * INSTANCES (rack M0, 2026-07-17): same-origin iframes SHARE the
+ * top-level tab's sessionStorage, so N embedded PCs on one fixed key
+ * would thrash a single record (every collision self-healer firing on
+ * every switch). A `?pc=<id>` query param therefore namespaces the
+ * key — `emu86.session.v1.<id>` — giving each rack iframe its own
+ * record under the shared store. No param = the bare key: standalone
+ * tabs are byte-for-byte unchanged. The rack (and the migration
+ * handshake) addresses records for OTHER instances via the
+ * `...At(pcId)` variants; plain loadSession/saveSession keep serving
+ * the module's own ambient instance.
  */
 
 export interface SessionState {
@@ -79,7 +90,31 @@ export interface SessionState {
   pendingColdBoot: boolean;
 }
 
-const STORAGE_KEY = 'emu86.session.v1';
+const STORAGE_KEY_BASE = 'emu86.session.v1';
+
+/** Instance ids ride in URLs and storage keys — keep them boring. */
+const PC_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Validate a candidate instance id; anything unruly is ignored. */
+export function sanitizePcId(raw: string | null | undefined): string | null {
+  return typeof raw === 'string' && PC_ID_PATTERN.test(raw) ? raw : null;
+}
+
+/** The storage key for one instance (null = the standalone-tab key). */
+export function storageKeyFor(pcId: string | null): string {
+  return pcId === null ? STORAGE_KEY_BASE : `${STORAGE_KEY_BASE}.${pcId}`;
+}
+
+/** This context's own instance id, read once from `?pc=`. */
+function ambientPcId(): string | null {
+  try {
+    return sanitizePcId(new URLSearchParams(location.search).get('pc'));
+  } catch {
+    return null; // no `location` (tests, workers) → the standalone key
+  }
+}
+
+const AMBIENT_PC_ID = ambientPcId();
 
 /**
  * Mint a fresh per-tab id. Exposed for the clone path (Phase 18 M3):
@@ -111,9 +146,15 @@ function freshState(): SessionState {
  * tab mints and persists the sessionId; later calls round-trip it.
  */
 export function loadSession(): SessionState {
+  return loadSessionAt(AMBIENT_PC_ID);
+}
+
+/** Load (or initialise) a specific instance's session state — the
+ *  rack addressing its iframes' records (rack M0). */
+export function loadSessionAt(pcId: string | null): SessionState {
   let raw: string | null;
   try {
-    raw = sessionStorage.getItem(STORAGE_KEY);
+    raw = sessionStorage.getItem(storageKeyFor(pcId));
   } catch {
     return freshState();
   }
@@ -169,21 +210,29 @@ export function loadSession(): SessionState {
 
   if (state === null) {
     state = freshState();
-    persist(state);
+    persist(pcId, state);
   }
   return state;
 }
 
 /** Merge `patch` into the stored state (loading/creating as needed). */
 export function saveSession(patch: Partial<SessionState>): SessionState {
-  const next = { ...loadSession(), ...patch };
-  persist(next);
+  return saveSessionAt(AMBIENT_PC_ID, patch);
+}
+
+/** Merge `patch` into a specific instance's stored state (rack M0). */
+export function saveSessionAt(
+  pcId: string | null,
+  patch: Partial<SessionState>,
+): SessionState {
+  const next = { ...loadSessionAt(pcId), ...patch };
+  persist(pcId, next);
   return next;
 }
 
-function persist(state: SessionState): void {
+function persist(pcId: string | null, state: SessionState): void {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    sessionStorage.setItem(storageKeyFor(pcId), JSON.stringify(state));
   } catch {
     // Quota/privacy failures: the session simply won't stick. Fine.
   }
