@@ -269,6 +269,16 @@ const OVERLAY_ACK_TIMEOUT_MS = 10_000;
  */
 const RESUME_SWEEP_SUPPRESS_MS = 15_000;
 
+/**
+ * TAN-freeze M2 (Jonathan's ruling, 2026-07-17): how long a peer's
+ * machine holds still waiting for a dying tab to reload before giving
+ * up. Covers a slow reload with margin; a closed-forever tab costs
+ * its peers this much frozen wall time, once. The deadline is checked
+ * in the paced loop's frozen turns — never a setTimeout, which
+ * throttles in long-hidden tabs.
+ */
+const TAN_FREEZE_WAIT_MS = 10_000;
+
 /** Full-image copy via the sector loop. Boot-time (Phase 17 M3 reads
  *  the secondary to decide the show/net stamps) and capture-time
  *  (Phase 18 M2 — works through the OverlayDisk wrapper too: overlay
@@ -411,6 +421,16 @@ export class WorkerHost {
   #referenceValid = true;
   /** Freeze flag (the inspect popup): paced loop steps nothing while set. */
   #paused = false;
+
+  /**
+   * TAN-freeze M2: dying peers we are holding still for → pacer-time
+   * deadline. The paced loop steps nothing while any deadline is in
+   * the future ({@link serviceTanFreezes}).
+   */
+  readonly #tanFreezes = new Map<number, number>();
+  /** True after OUR teardown freeze broadcast — the bfcache-revival
+   *  unpause takes it back with a thaw. */
+  #sentTanFreeze = false;
   /** Guest→fabric frame count since boot (NET LED telemetry). */
   #nicTxFrames = 0;
   #stopping = false;
@@ -616,6 +636,24 @@ export class WorkerHost {
       // every paused turn, so frozen wall time never becomes guest time
       // — the resume is seamless by the same law boot uses.
       this.#paused = msg.paused;
+      // TAN-freeze M2: a TEARDOWN pause is the page dying (pagehide —
+      // never a tab switch): peers with open connections to us hold
+      // still through the reload gap. A later unpause is bfcache
+      // revival — take the freeze back. Inspect pauses carry no
+      // reason and never touch the network.
+      const tan = this.#tan;
+      const identity = tan?.identity ?? null;
+      if (tan !== null && identity !== null) {
+        if (msg.paused && msg.reason === 'teardown') {
+          if (tan.conntrack.hasAnyPeerFor(identity.hostOctet)) {
+            tan.broadcastFreeze();
+            this.#sentTanFreeze = true;
+          }
+        } else if (!msg.paused && this.#sentTanFreeze) {
+          tan.broadcastThaw();
+          this.#sentTanFreeze = false;
+        }
+      }
       return;
     }
     if (msg.type === 'inspect-machine') {
@@ -822,6 +860,17 @@ export class WorkerHost {
         continue;
       }
 
+      // TAN-frozen (M2): a dying peer is reloading — hold still so no
+      // guest time passes during its gap (our TCP timers included).
+      // Deadlines expire here, in the loop: it keeps spinning on the
+      // unclamped MessageChannel yield, so the 10 s cap works even in
+      // a long-hidden tab where setTimeout would throttle.
+      if (this.serviceTanFreezes(this.#pacerNow())) {
+        this.#pacer.skip();
+        await yieldMacrotask();
+        continue;
+      }
+
       // DNS resolve or gateway fetch in flight: stall the machine (and
       // its clock) until it settles — with honest pacing this is
       // bounded belt-and-braces (a slow fetch can still outlast the
@@ -978,6 +1027,11 @@ export class WorkerHost {
           ? { preferredOctet: config.tanPreferredOctet }
           : {}),
       });
+      // TAN-freeze M2: peer death/return announcements. Involvement is
+      // decided HERE against our own conntrack (self-selection — no
+      // trust in the sender, multi-peer for free).
+      this.#tan.onPeerFreeze = (octet) => this.#onPeerFreeze(octet);
+      this.#tan.onPeerThaw = (octet) => this.#onPeerThaw(octet);
     }
     // Phase 18 M2: an EMBEDDED restore (named save / clone) replaces
     // the whole resolve pipeline — captured bytes verbatim, no overlay
@@ -1200,6 +1254,10 @@ export class WorkerHost {
     // Fresh boot: maintenance sweeps run normally until captures start.
     this.#lastReferenceCaptureAt = Number.NEGATIVE_INFINITY;
     this.#paused = false;
+    // A reboot mid-freeze abandons the wait: the machine the user
+    // asked for starts now, and its fresh guest RSTs stale flows.
+    this.#tanFreezes.clear();
+    this.#sentTanFreeze = false;
     this.#nicTxFrames = 0;
     if (primary.overlayFingerprint !== undefined) {
       this.#post({
@@ -1399,6 +1457,11 @@ export class WorkerHost {
         capturedAt: config.restore.capturedAt,
         ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
       });
+      // TAN-freeze M2: peers frozen for our reload resume the moment
+      // the outcome is known, either way — success realigns the
+      // clocks; a refusal cold-boots and the stale connections die
+      // fast by honest RSTs from the fresh guest.
+      this.#tan?.broadcastThaw();
     }
 
     // This session's guest-time baseline: 0 after a cold boot, the
@@ -1897,6 +1960,60 @@ export class WorkerHost {
   // ============================================================
   // Freeze-and-inspect (Phase 18 field-loop UI)
   // ============================================================
+
+  /**
+   * TAN-freeze M2, peer side: a tab announced its death. Freeze only
+   * if OUR conntrack shows open flows with it; the deadline caps the
+   * wait for a tab that closed rather than reloaded.
+   */
+  #onPeerFreeze(octet: number): void {
+    const tan = this.#tan;
+    const identity = tan?.identity ?? null;
+    if (tan === null || identity === null) return;
+    if (!tan.conntrack.hasPeer(identity.hostOctet, octet)) return;
+    this.#tanFreezes.set(octet, this.#pacerNow() + TAN_FREEZE_WAIT_MS);
+    this.#post({
+      type: 'tan-freeze',
+      peerOctet: octet,
+      peerName: nameForOctet(octet),
+      connections: tan.conntrack
+        .connectionsFor(identity.hostOctet)
+        .filter((c) => c.peerOctet === octet),
+    });
+  }
+
+  /** TAN-freeze M2, peer side: the dying tab came back — release. */
+  #onPeerThaw(octet: number): void {
+    if (this.#tanFreezes.delete(octet)) {
+      this.#post({
+        type: 'tan-thaw',
+        peerOctet: octet,
+        peerName: nameForOctet(octet),
+        outcome: 'returned',
+      });
+    }
+  }
+
+  /**
+   * TAN-freeze M2: expire overdue freezes (posting their timeout
+   * thaws) and say whether any freeze still holds. Called by the
+   * paced loop every frozen turn; public so tests can drive the
+   * deadline with a fake clock.
+   */
+  serviceTanFreezes(now: number): boolean {
+    for (const [octet, deadline] of this.#tanFreezes) {
+      if (now >= deadline) {
+        this.#tanFreezes.delete(octet);
+        this.#post({
+          type: 'tan-thaw',
+          peerOctet: octet,
+          peerName: nameForOctet(octet),
+          outcome: 'timeout',
+        });
+      }
+    }
+    return this.#tanFreezes.size > 0;
+  }
 
   /**
    * One coherent machine inspection — registers, code/stack memory

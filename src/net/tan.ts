@@ -114,7 +114,24 @@ interface TanHereMsg {
   readonly tan: 'here';
   readonly octet: number;
 }
-type TanMsg = TanFrameMsg | TanClaimMsg | TanHereMsg;
+/**
+ * Network freeze (TAN-freeze brief M2). `freeze`: the sender's page is
+ * DYING (pagehide — never a tab switch) and peers with open
+ * connections to it should hold their CPUs still so no guest time
+ * passes during the reload gap. `thaw`: the sender is back (restore
+ * outcome known, either way) or revived from bfcache — release.
+ * Receivers self-select against their OWN conntrack; an uninvolved
+ * tab ignores both.
+ */
+interface TanFreezeMsg {
+  readonly tan: 'freeze';
+  readonly octet: number;
+}
+interface TanThawMsg {
+  readonly tan: 'thaw';
+  readonly octet: number;
+}
+type TanMsg = TanFrameMsg | TanClaimMsg | TanHereMsg | TanFreezeMsg | TanThawMsg;
 
 function isTanMsg(data: unknown): data is TanMsg {
   return typeof data === 'object' && data !== null && 'tan' in data;
@@ -197,6 +214,14 @@ export class TabAreaNetwork {
    * freeze and the inspect popup's connection list.
    */
   readonly conntrack = new TanConntrack();
+
+  /**
+   * Network-freeze hooks (M2): a peer announced its death / return.
+   * The host layer decides involvement (its own conntrack) and owns
+   * the deadline; the TAN only carries the words.
+   */
+  onPeerFreeze: ((octet: number) => void) | null = null;
+  onPeerThaw: ((octet: number) => void) | null = null;
 
   /** Frames forwarded in each direction — diagnostics/tests. */
   framesOut = 0;
@@ -346,6 +371,19 @@ export class TabAreaNetwork {
     );
   }
 
+  /** Announce our death (pagehide) — peers with open connections to
+   *  us hold still. No-op before the identity settles. */
+  broadcastFreeze(): void {
+    if (this.#identity === null) return;
+    this.#channel.postMessage({ tan: 'freeze', octet: this.#identity.hostOctet });
+  }
+
+  /** Announce our return (restore outcome known, or bfcache revival). */
+  broadcastThaw(): void {
+    if (this.#identity === null) return;
+    this.#channel.postMessage({ tan: 'thaw', octet: this.#identity.hostOctet });
+  }
+
   /**
    * Unplug from the current switch only — identity, channel, and
    * defence stay live so a rebooting tab keeps its address and other
@@ -392,6 +430,13 @@ export class TabAreaNetwork {
       if (mine !== null && !this.#settled && data.octet === mine.hostOctet) {
         this.#conflictSeen = true;
       }
+      return;
+    }
+    if (data.tan === 'freeze' || data.tan === 'thaw') {
+      if (!Number.isInteger(data.octet)) return;
+      if (this.#identity !== null && data.octet === this.#identity.hostOctet) return;
+      if (data.tan === 'freeze') this.onPeerFreeze?.(data.octet);
+      else this.onPeerThaw?.(data.octet);
       return;
     }
     if (data.tan === 'claim') {

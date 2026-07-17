@@ -383,6 +383,15 @@ export interface SecondaryPersistedMessage {
 export interface SetPausedMessage {
   type: 'set-paused';
   paused: boolean;
+  /**
+   * TAN-freeze M2: 'teardown' marks the pagehide freeze — the page is
+   * DYING (never a tab switch), so the worker also broadcasts the TAN
+   * freeze to peers with open connections. The inspect popup's pauses
+   * carry no reason and never touch the network. The bfcache-revival
+   * unpause (pageshow) needs no reason either: any unpause after a
+   * teardown-freeze broadcast takes the freeze back.
+   */
+  reason?: 'teardown';
 }
 
 /**
@@ -724,6 +733,28 @@ export interface MachineInspectedMessage {
   snapshot?: InspectSnapshot;
 }
 
+/**
+ * TAN-freeze M2: this machine froze because a peer with open
+ * connections announced its death (pagehide). Main surfaces it —
+ * syslog + toast — so the field can see the protocol working.
+ */
+export interface TanFreezeMessage {
+  type: 'tan-freeze';
+  peerOctet: number;
+  peerName: string | null;
+  /** The flows that justified the freeze (this guest's perspective). */
+  connections: TanPeerConnection[];
+}
+
+/** TAN-freeze M2: the freeze for `peerOctet` ended. */
+export interface TanThawMessage {
+  type: 'tan-thaw';
+  peerOctet: number;
+  peerName: string | null;
+  /** 'returned' = the peer thawed us; 'timeout' = we gave up waiting. */
+  outcome: 'returned' | 'timeout';
+}
+
 export type WorkerToMainMessage =
   | ReadyMessage
   | TxMessage
@@ -738,4 +769,6 @@ export type WorkerToMainMessage =
   | OverlayIdentityMessage
   | StateCapturedMessage
   | RestoreResultMessage
-  | MachineInspectedMessage;
+  | MachineInspectedMessage
+  | TanFreezeMessage
+  | TanThawMessage;

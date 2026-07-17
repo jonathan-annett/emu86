@@ -804,7 +804,13 @@ async function init(): Promise<void> {
   // (bfcache revival) thaws; the pacer's paused-turn skip keeps the
   // frozen wall time out of guest time.
   window.addEventListener('pagehide', () => {
-    const freeze: MainToWorkerMessage = { type: 'set-paused', paused: true };
+    // reason 'teardown' (TAN-freeze M2): the worker also tells peers
+    // with open connections to hold still through the reload gap.
+    const freeze: MainToWorkerMessage = {
+      type: 'set-paused',
+      paused: true,
+      reason: 'teardown',
+    };
     worker.postMessage(freeze);
     maybeRefreshResumeSlot(true);
   });
@@ -1085,6 +1091,34 @@ async function init(): Promise<void> {
         inspectSinks.delete(msg.requestId);
         sink(msg);
       }
+      return;
+    }
+    if (msg.type === 'tan-freeze') {
+      // TAN-freeze M2: our machine is holding still for a dying peer.
+      const peer = msg.peerName ?? `10.0.2.${msg.peerOctet}`;
+      const services = msg.connections
+        .map((c) => {
+          // The service end of the flow: our local port when the peer
+          // dialed us, their port when we dialed them; either when the
+          // flow was picked up mid-stream.
+          const port = c.outbound === false ? c.localPort : c.peerPort;
+          return TAN_SERVICE_NAMES[port] ?? `:${port}`;
+        })
+        .join(', ');
+      syslog.log(
+        `machine frozen — waiting for ${peer}${services !== '' ? ` (${services})` : ''} to reload`,
+        { toast: true },
+      );
+      return;
+    }
+    if (msg.type === 'tan-thaw') {
+      const peer = msg.peerName ?? `10.0.2.${msg.peerOctet}`;
+      syslog.log(
+        msg.outcome === 'returned'
+          ? `machine resumed — ${peer} is back`
+          : `machine resumed — gave up waiting for ${peer}`,
+        { toast: true },
+      );
       return;
     }
     if (msg.type === 'restore-result') {
@@ -2032,6 +2066,17 @@ function ensureDriveBanner(onPromote: () => void): {
  * well under a second, so anything past this is a genuinely old state.
  */
 const RESTORE_NOTICE_AGE_MS = 10_000;
+
+/**
+ * Well-known ELKS service ports for the TAN-freeze toast — "waiting
+ * for mouse (telnet)" reads better than "(:23)". Anything else shows
+ * its number.
+ */
+const TAN_SERVICE_NAMES: Readonly<Record<number, string>> = {
+  21: 'ftp',
+  23: 'telnet',
+  80: 'http',
+};
 
 
 /** Human-readable age for the restore notice. */

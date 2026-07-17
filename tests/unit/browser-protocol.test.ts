@@ -175,6 +175,8 @@ describe('browser protocol — exhaustiveness', () => {
       case 'state-captured': return 'state-captured';
       case 'restore-result': return 'restore-result';
       case 'machine-inspected': return 'machine-inspected';
+      case 'tan-freeze': return 'tan-freeze';
+      case 'tan-thaw': return 'tan-thaw';
       default: {
         const _exhaustive: never = m;
         return _exhaustive;
@@ -238,5 +240,22 @@ describe('browser protocol — exhaustiveness', () => {
         chunksOffered: 3,
       }),
     ).toBe('overlay-identity');
+    // TAN-freeze M2: the network freeze surfacing.
+    expect(
+      describeWorker({
+        type: 'tan-freeze',
+        peerOctet: 16,
+        peerName: 'mouse',
+        connections: [{
+          peerOctet: 16, peerName: 'mouse', localPort: 23, peerPort: 1024,
+          state: 'established', outbound: false,
+        }],
+      }),
+    ).toBe('tan-freeze');
+    expect(
+      describeWorker({
+        type: 'tan-thaw', peerOctet: 16, peerName: 'mouse', outcome: 'returned',
+      }),
+    ).toBe('tan-thaw');
   });
 });
