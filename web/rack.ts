@@ -39,6 +39,13 @@ import {
   type AdoptRequestMsg,
 } from './migrate.js';
 import { PackageStore, type RackPackageMember } from './package-store.js';
+import { createDebugTrace } from './debug-log.js';
+
+// The rack narrates too (debug trace, field ask 2026-07-17): adoption
+// handshakes and lock waits are exactly the seams a migration bug
+// hides in. Named 'rack' — it has no octet of its own.
+const dbg = createDebugTrace(null);
+dbg.setIdentity(null, 'rack');
 
 /** iframe → rack status report (posted by embedded main.ts). */
 interface PcStatusMsg {
@@ -129,6 +136,7 @@ const picker = document.getElementById('picker') as HTMLDivElement;
 
 let noteTimer: ReturnType<typeof setTimeout> | null = null;
 function note(text: string, sticky = false): void {
+  dbg(text); // whatever the rack tells its user, it tells the wire
   noteEl.textContent = text;
   noteEl.hidden = false;
   if (noteTimer !== null) clearTimeout(noteTimer);
@@ -479,13 +487,19 @@ async function adopt(req: AdoptRequestMsg): Promise<void> {
   // Seed the new instance with the dying tab's ENTIRE record —
   // sessionId (→ its resume slot), octet, fork, overlay. The iframe's
   // boot then reload-resumes exactly as if this were the old tab.
+  dbg(`adopting ${req.name ?? 'a PC'} — record received, acking`);
   const id = mintPcId();
   saveSessionAt(id, req.record);
   rackChannel.postMessage({ rack: 'adopt-ack', nonce: req.nonce, ok: true });
   // The tab navigates on our ack; spawn only after its document's
   // locks release, or the iframe's session resolution would read
   // "duplicate" and fork fresh identities instead of resuming.
+  const t0 = Date.now();
   await locksClear(lockNamesFor(req.record), 5_000);
+  dbg(
+    `adopting ${req.name ?? 'a PC'} — old tab's locks cleared after ` +
+      `${Date.now() - t0} ms, spawning the iframe`,
+  );
   addPc(id, req.name);
 }
 

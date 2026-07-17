@@ -20,6 +20,7 @@
 
 import { TanConntrack } from '../src/net/conntrack.js';
 import { decodeFrame, octetName } from './tabshark-decode.js';
+import { DEBUG_CHANNEL_NAME, type DebugTraceMsg } from './debug-log.js';
 import { ETHERTYPE_IPV4, parseIpv4, type Ipv4 } from '../src/net/wire.js';
 
 /** Same literal as web/worker.ts — the TAN's channel name. */
@@ -30,7 +31,7 @@ const TAN_CHANNEL_NAME = 'emu86-tan-v1';
 const FREEZE_CHIP_FALLBACK_MS = 10_000;
 
 const FRAME_LOG_CAP = 400;
-const EVENT_LOG_CAP = 200;
+const EVENT_LOG_CAP = 500; // debug traces are chatty on purpose
 
 // ---- state ----------------------------------------------------------
 
@@ -183,6 +184,29 @@ channel.onmessage = (ev: MessageEvent<unknown>) => {
     render();
     return;
   }
+};
+
+// The debug trace (field ask 2026-07-17): every tab broadcasts its
+// lifecycle — freezes, captures, restore outcomes, page lifecycle,
+// every syslog line — on emu86-debug-v1. Rendered into the event log
+// with the sender named, so a multi-tab bug leaves ONE merged story.
+const debugChannel = new BroadcastChannel(DEBUG_CHANNEL_NAME);
+debugChannel.onmessage = (ev: MessageEvent<unknown>) => {
+  const d = ev.data as Partial<DebugTraceMsg> | null;
+  if (typeof d !== 'object' || d === null || d.dbg !== 'trace') return;
+  if (typeof d.text !== 'string') return;
+  const octet = typeof d.octet === 'number' ? d.octet : null;
+  if (octet !== null) members.add(octet); // traces feed the census too
+  const who =
+    typeof d.name === 'string' && d.name.length > 0
+      ? d.name
+      : octet !== null
+        ? `.${octet}`
+        : typeof d.pc === 'string'
+          ? `pc:${d.pc.slice(0, 11)}`
+          : '?';
+  logEvent(`[${who}] ${d.text}`);
+  render();
 };
 
 // The ❄ fallback needs an occasional repaint even with a silent wire.

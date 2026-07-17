@@ -106,7 +106,8 @@ import {
 } from './machine-store.js';
 import { mountStatusLeds, type StatusLeds } from './status-leds.js';
 import { mountInspectPanel } from './inspect-panel.js';
-import { mountSystemLog } from './system-log.js';
+import { mountSystemLog, type SystemLog } from './system-log.js';
+import { createDebugTrace } from './debug-log.js';
 
 const BUNDLED_IMAGE_URL = '/elks-serial.img';
 
@@ -284,12 +285,28 @@ async function init(): Promise<void> {
     if (n > 0) console.debug(`[emu86] swept ${n} abandoned clone snapshot${n === 1 ? '' : 's'}`);
   }).catch(() => { /* sweep is best-effort */ });
 
+  // Rack M1: this context's instance id (?pc=…) — embedded in a rack
+  // iframe when non-null. Read once, early: the debug trace and the
+  // rack status reporting both key off it.
+  const embeddedPcId = sanitizePcId(new URLSearchParams(location.search).get('pc'));
+
+  // The debug trace (field ask 2026-07-17): lifecycle breadcrumbs +
+  // every syslog line, broadcast for tab-shark's merged event log.
+  const dbg = createDebugTrace(embeddedPcId);
+
   // The system log (Phase 18 field-loop UI): every HOST-side message
   // lands here — the terminal is the machine's alone from this point
   // on (Jonathan: "a system log that is totally detached from what the
   // machine actually prints out"). Dismissing any overlay hands focus
-  // back to the terminal (field report 2026-07-16).
-  const syslog = mountSystemLog({ onClosed: () => term.focus() });
+  // back to the terminal (field report 2026-07-16). The debug-trace
+  // mirror means anything a tab tells its user, it also tells the wire.
+  const syslogPanel = mountSystemLog({ onClosed: () => term.focus() });
+  const syslog: SystemLog = {
+    log: (text, opts) => {
+      syslogPanel.log(text, opts);
+      dbg(text);
+    },
+  };
 
   const sourceLabel = await describeImageSource(library, settings.imageSource);
   const buildLabel = import.meta.env.DEV ? `${__EMU86_BUILD__} · dev-server` : __EMU86_BUILD__;
@@ -367,8 +384,8 @@ async function init(): Promise<void> {
   // Rack M1: when embedded (?pc= present), report identity/status to
   // the parent so the rail can name this machine and dot its state.
   // Post-only — the rack binds rows by message SOURCE, so nothing in
-  // the payload is security-relevant.
-  const embeddedPcId = sanitizePcId(new URLSearchParams(location.search).get('pc'));
+  // the payload is security-relevant. (embeddedPcId is read once,
+  // early, beside the debug trace.)
   const rackStatus: {
     name: string | null;
     octet: number | null;
@@ -787,6 +804,9 @@ async function init(): Promise<void> {
         'resume slot fresh — a reload resumes from this moment',
         new Date().toLocaleTimeString(),
       );
+      // Chatty on purpose (debug trace): when chasing a torn restore,
+      // "when was the last good capture?" is the first question.
+      dbg(`resume slot captured${force ? ' (forced)' : ''}`);
     })()
       .catch((err: unknown) => {
         console.warn('[emu86] resume-slot capture failed:', err);
@@ -818,6 +838,7 @@ async function init(): Promise<void> {
   // telnet from the background).
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
+      dbg('hidden — forcing a resume-slot capture (tab switch or pre-close)');
       maybeRefreshResumeSlot(true);
     }
   });
@@ -836,6 +857,7 @@ async function init(): Promise<void> {
   window.addEventListener('pagehide', () => {
     // reason 'teardown' (TAN-freeze M2): the worker also tells peers
     // with open connections to hold still through the reload gap.
+    dbg('pagehide — teardown freeze + final capture (page is dying)');
     const freeze: MainToWorkerMessage = {
       type: 'set-paused',
       paused: true,
@@ -845,6 +867,7 @@ async function init(): Promise<void> {
     maybeRefreshResumeSlot(true);
   });
   window.addEventListener('pageshow', () => {
+    dbg('pageshow — bfcache revival thaw');
     const thaw: MainToWorkerMessage = { type: 'set-paused', paused: false };
     worker.postMessage(thaw);
   });
@@ -870,6 +893,7 @@ async function init(): Promise<void> {
         moveBtn.hidden = !present;
       },
       freeze: () => {
+        dbg('migrate — freezing for handover (teardown freeze)');
         const msg: MainToWorkerMessage = {
           type: 'set-paused',
           paused: true,
@@ -878,6 +902,7 @@ async function init(): Promise<void> {
         worker.postMessage(msg);
       },
       unfreeze: () => {
+        dbg('migrate — aborted, machine resumed here');
         const msg: MainToWorkerMessage = { type: 'set-paused', paused: false };
         worker.postMessage(msg);
         term.focus();
@@ -887,6 +912,7 @@ async function init(): Promise<void> {
         await resumeCaptureSettled.catch(() => { /* that beat already reported */ });
         maybeRefreshResumeSlot(true);
         await resumeCaptureSettled;
+        dbg('migrate — resume slot durable, handing over');
       },
       slotFreshSince: async (since) => {
         const meta = await machineStore.getMeta(ownResumeSlotId);
@@ -906,6 +932,7 @@ async function init(): Promise<void> {
       },
       report: (text) => syslog.log(text, { toast: true }),
       navigateToMoved: (name) => {
+        dbg('migrate — adopted by the rack, navigating to moved.html');
         location.replace(
           `./moved.html${name !== null ? `?name=${encodeURIComponent(name)}` : ''}`,
         );
@@ -932,6 +959,7 @@ async function init(): Promise<void> {
         requestId?: unknown;
       };
       if (cmd.emu86 === 'set-paused' && typeof cmd.paused === 'boolean') {
+        dbg(cmd.paused ? 'rack command — machine frozen' : 'rack command — machine resumed');
         const msg: MainToWorkerMessage = { type: 'set-paused', paused: cmd.paused };
         worker.postMessage(msg);
         return;
@@ -1198,6 +1226,7 @@ async function init(): Promise<void> {
       // and the post-set_console UART traffic both stream via `tx`
       // messages — see worker-host.ts shared txBuffer.
       postRackStatus({ state: 'running' });
+      dbg('boot ready — machine running');
       return;
     }
     if (msg.type === 'secondary-snapshot') {
@@ -1296,6 +1325,9 @@ async function init(): Promise<void> {
           }
         }
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
+        // The fresh resume is deliberately SILENT in the syslog (the
+        // crown's "nothing breaks") — but the debug trace tells all.
+        dbg(`restore resumed ok (state from ${age !== null ? describeAge(age) : '?'} ago)`);
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
           syslog.log(`resumed machine state from ${describeAge(age)} ago`, { toast: true });
         }
@@ -1421,6 +1453,7 @@ async function init(): Promise<void> {
       const octetChanged = loadSession().tanHostOctet !== msg.hostOctet;
       saveSession({ tanHostOctet: msg.hostOctet });
       postRackStatus({ name: msg.name ?? null, octet: msg.hostOctet });
+      dbg.setIdentity(msg.hostOctet, msg.name ?? null);
       if (msg.detached === true) {
         // Phase 18 M3 field find: a restored (cloned / named-save)
         // machine wears the CAPTURE's network identity, so its cable
@@ -1867,6 +1900,7 @@ async function init(): Promise<void> {
   }
   mountInspectPanel({
     setPaused: (paused) => {
+      dbg(paused ? 'inspect popup — machine frozen' : 'inspect popup dismissed — machine resumed');
       const msg: MainToWorkerMessage = { type: 'set-paused', paused };
       worker.postMessage(msg);
     },

@@ -164,3 +164,24 @@ vite input; confirm the deploy worker serves the extra asset.
   way. bfcache back/forward: immediate thaw.
 - M3: tab-shark open beside two machines shows the telnet SYN →
   ESTABLISHED → data → freeze/thaw live.
+
+## 6. Addendum — the debug trace (field ask 2026-07-17)
+
+Field (Jonathan, heading out to test telnet-restore bugs): "are you
+able to include other logging items in tab shark, like when pc state
+is frozen etc. this will help debug later."
+
+Scope: a passive `emu86-debug-v1` channel. Every tab broadcasts its
+lifecycle breadcrumbs (`web/debug-log.ts`, createDebugTrace):
+freezes/thaws (TAN, inspect popup, rack commands), capture and
+restore outcomes (including the deliberately-silent fresh resume and
+every resume-slot heartbeat — "when was the last good capture?" is
+the first question a torn restore asks), pagehide/pageshow/hidden,
+migration steps, PLUS a mirror of every syslog line (anything a tab
+tells its user, it tells the wire). tab-shark subscribes read-only
+and renders traces in the event log with the sender named — one
+merged, timestamped story across every involved tab.
+
+Rules kept: nothing in the app ever LISTENS on the channel; no
+behavior depends on a trace arriving; tracing failures are swallowed
+(the trace must never break the machine it narrates).
