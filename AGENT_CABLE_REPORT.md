@@ -82,3 +82,17 @@ in place: 'tab' has no user gesture behind it (popups must be
 allowed for the origin once); 'rack' from a standalone or floated PC
 has no rack to relay to and says so. Tested both sides against the
 real server (kind validation, 404s, push→onSpawn).
+
+## M3 — field acceptance: PASSED, agent-driven (2026-07-18)
+
+The first drive ran the same session the code landed. Jonathan's
+whole contribution was opening a rack PC and pasting the cable URL
+once; the agent then — over plain curl against loopback:8737 —
+verified rx/tx (mouse answered Enter), spawned a second PC into the
+rack via POST /spawn (the new iframe dialed the cable itself and
+hello'd as cat .17 within seconds), watched cat boot to its prompt
+(ktcp up, telnetd up, autologin landed), drove `telnet 10.0.2.17`
+from mouse, logged in as root, ran `uname -a` on the far machine
+(ELKS 0.9.0, ibmpc i8086), and exited cleanly back to mouse's
+prompt. Both machines healthy after. The spawn relay note showed in
+the rack ("a new PC joined — asked over the agent cable").
