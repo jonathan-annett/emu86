@@ -173,6 +173,17 @@ export interface RestoreSpec {
   state: MachineState;
   /** Date.now() at capture — restore compares age for the honesty notice. */
   capturedAt: number;
+  /**
+   * Fix #9: true when this slot IS a death-point capture (courier or
+   * an ordinary teardown capture that landed) — its sessions can
+   * simply continue. Absent/false with `staleFlows` present = a
+   * PRE-death heartbeat: those sessions are unreconcilable (ktcp
+   * cannot heal a rewound endpoint) and get clean local RSTs right
+   * after restore instead of forty seconds of retransmit limbo.
+   */
+  teardownCapture?: boolean;
+  /** Fix #9: the open flows recorded in a STALE slot — RST targets. */
+  staleFlows?: CapturedTanFlow[];
   /** D2(a): captured disk bytes, verbatim. */
   embedded?: {
     primary: DiskSlotSpec & { imageBytes: Uint8Array };
@@ -356,6 +367,67 @@ export interface CaptureStateMessage {
    * saves — the fork auto-persist keeps its own trigger).
    */
   markSecondaryClean?: boolean;
+  /**
+   * Fix #9 (the dying-slot courier), pagehide captures only: on a
+   * keyboard F5 the dying page's event loop stops dispatching tasks
+   * before the capture reply can be delivered — no capture speed
+   * fixes that. But worker-side BroadcastChannel posts DO escape the
+   * dying page (the freeze broadcast proved it in the field), so
+   * main sends everything only IT knows along with the request, and
+   * the worker broadcasts the COMPLETE slot for any live peer to
+   * write into the (origin-global) machine store. Gated worker-side
+   * on open TAN flows — no peer, no session to save, no courier
+   * (Jonathan's ruling).
+   */
+  courier?: {
+    stateId: string;
+    terminal: {
+      tail: Uint8Array;
+      viewportY: number;
+      modes: Array<{ mode: number; set: boolean }>;
+    };
+    secondaryGeneration: string | null;
+    pendingForkGeneration: string;
+  };
+}
+
+/**
+ * Fix #9: one open TAN flow as captured — enough to name the session
+ * in a slot row and, on a STALE resume, to inject a clean local RST
+ * (ktcp drops any segment whose seq isn't exactly rcv_nxt, so the
+ * RST must wear `expectFromPeer`).
+ */
+export interface CapturedTanFlow {
+  peerOctet: number;
+  localPort: number;
+  peerPort: number;
+  expectFromPeer: number | null;
+}
+
+/**
+ * Fix #9: the courier broadcast (the `emu86-courier-v1` channel, NOT
+ * the worker→main pipe). Any live same-origin main thread assembles
+ * a machine-store record from these pieces and writes it — the
+ * reborn tab then finds a death-point slot exactly where it already
+ * looks.
+ */
+export interface CourierSlotBroadcast {
+  courier: 'slot';
+  stateId: string;
+  state: MachineState;
+  capturedAt: number;
+  baseFingerprint: string | null;
+  storeDigest: string;
+  carriedPrimary: { chunkSizeBytes: number; chunks: OverlayChunk[] } | null;
+  carriedSecondary: Array<{ lba: number; bytes: Uint8Array }> | null;
+  secondaryGeneration: string | null;
+  pendingForkGeneration: string;
+  terminal: {
+    tail: Uint8Array;
+    viewportY: number;
+    modes: Array<{ mode: number; set: boolean }>;
+  };
+  tanFlows: CapturedTanFlow[];
 }
 
 /**
@@ -680,6 +752,12 @@ export interface StateCapturedMessage {
    * {@link SecondaryPersistedMessage} as before.
    */
   carriedSecondary?: Array<{ lba: number; bytes: Uint8Array }>;
+  /**
+   * Fix #9, reference mode: the guest's open TAN flows at capture —
+   * recorded in the slot row so a STALE resume knows which sessions
+   * to reset cleanly (and a death-point resume knows it need not).
+   */
+  tanFlows?: CapturedTanFlow[];
 }
 
 /**

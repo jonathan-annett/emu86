@@ -37,6 +37,8 @@
  */
 
 import type {
+  CapturedTanFlow,
+  CourierSlotBroadcast,
   BootConfig,
   CaptureStateMessage,
   DiskClass,
@@ -80,6 +82,7 @@ import { DnsAnswerCache, DnsHost, dohResolve } from '../net/dns.js';
 import { HttpGatewayHost, realGatewayFetch } from '../net/http.js';
 import { ControlHost } from '../net/control.js';
 import { TabAreaNetwork, type FrameChannel } from '../net/tan.js';
+import { buildFlowResetFrame } from '../net/conntrack.js';
 import { addressForName, nameForOctet } from '../net/tan-names.js';
 import {
   AUTHENTIC_CYCLES_PER_MS,
@@ -200,6 +203,12 @@ export interface WorkerHostOptions {
    * and headless callers unchanged).
    */
   tan?: { channel: FrameChannel; hostOctet?: number };
+  /**
+   * Fix #9: post on the dying-slot courier channel
+   * (`emu86-courier-v1`). Worker-side broadcasts escape a dying page
+   * when worker→main replies cannot; a live peer writes the slot.
+   */
+  courierPost?: (data: unknown) => void;
   /**
    * Wall-time source for the real-time pacer (pacing milestone). Default
    * `() => performance.now()`. Tests inject a fake to drive paced turns
@@ -377,6 +386,8 @@ export class WorkerHost {
   #overlayFlushWanted = false;
   #tanConfig: { channel: FrameChannel; hostOctet?: number } | null = null;
   #tan: TabAreaNetwork | null = null;
+  /** Fix #9: the courier channel's post, or null (tests/headless). */
+  #courierPost: ((data: unknown) => void) | null = null;
   /** This boot's pristine-primary SHA-256 (Phase 18 M2 pairs captures with it). */
   #bootFingerprint: string | null = null;
   // ---- §7: the acked-chunk hash mirror (the 0-stale capture) ----
@@ -457,6 +468,7 @@ export class WorkerHost {
     this.#haltSpinCycles = opts.haltSpinCycles ?? 1000;
     this.#maxHaltSpins = opts.maxHaltSpins ?? 1000;
     this.#tanConfig = opts.tan ?? null;
+    this.#courierPost = opts.courierPost ?? null;
     this.#hostClock = opts.hostClock ?? new NodeHostClock();
     this.#pacerNow = opts.pacerTimeSource ?? (() => performance.now());
     this.#pacer = new RealTimePacer({ now: this.#pacerNow });
@@ -1472,6 +1484,27 @@ export class WorkerHost {
             }
           }
           outcome = { ok: true };
+          // Fix #9, the honest fallback: a STALE slot (a pre-death
+          // heartbeat, not a death-point capture) with open flows
+          // cannot reconcile — ktcp never heals a rewound endpoint.
+          // Reset those sessions NOW with in-sequence local RSTs
+          // (seq = the guest's restored rcv_nxt, the only value ktcp
+          // accepts) instead of forty seconds of retransmit limbo.
+          if (config.restore.teardownCapture !== true) {
+            for (const flow of config.restore.staleFlows ?? []) {
+              if (flow.expectFromPeer === null) continue;
+              const identity = this.#tan?.identity ?? null;
+              if (identity === null) break;
+              machine.nic.injectFrame(
+                buildFlowResetFrame(identity.hostOctet, {
+                  peerOctet: flow.peerOctet,
+                  localPort: flow.localPort,
+                  peerPort: flow.peerPort,
+                  expectFromPeer: flow.expectFromPeer,
+                }),
+              );
+            }
+          }
         } catch (err) {
           machine.reset(); // back to the clean cold-boot baseline
           outcome = { ok: false, reason: String(err) };
@@ -1908,6 +1941,18 @@ export class WorkerHost {
       const diskClass = machine.diskClass;
       const secondaryDiskClass = machine.secondaryDiskClass;
       const referenceValid = this.#referenceValid;
+      // Fix #9: the open flows at this exact moment — recorded in the
+      // slot (stale resumes reset them cleanly) and the courier gate.
+      const tanIdentity = this.#tan?.identity ?? null;
+      const tanFlows: CapturedTanFlow[] =
+        !embedded && this.#tan !== null && tanIdentity !== null
+          ? this.#tan.conntrack.connectionsFor(tanIdentity.hostOctet).map((c) => ({
+              peerOctet: c.peerOctet,
+              localPort: c.localPort,
+              peerPort: c.peerPort,
+              expectFromPeer: c.expectFromPeer,
+            }))
+          : [];
 
       // Async completion: the delta-sized hashes, then the reply.
       void (async () => {
@@ -1927,6 +1972,44 @@ export class WorkerHost {
           }
           const secondarySha =
             secondaryBytes !== null ? await sha256Hex(secondaryBytes) : null;
+          // Fix #9: the courier goes FIRST — on a dying page the
+          // reply below may never be delivered, but a broadcast
+          // escapes. Gated on open flows (no peer, no session worth
+          // saving) and on a computed store digest (the slot must be
+          // verifiable or the restore would refuse it anyway).
+          if (
+            msg.courier !== undefined &&
+            tanFlows.length > 0 &&
+            storeDigest !== undefined &&
+            this.#courierPost !== null
+          ) {
+            const courier: CourierSlotBroadcast = {
+              courier: 'slot',
+              stateId: msg.courier.stateId,
+              state,
+              capturedAt,
+              baseFingerprint,
+              storeDigest,
+              carriedPrimary:
+                overlayEpoch !== null
+                  ? {
+                      chunkSizeBytes: overlayEpoch.chunkSizeBytes,
+                      chunks: overlayEpoch.chunks,
+                    }
+                  : null,
+              carriedSecondary:
+                carriedSecondary !== undefined && carriedSecondary.length > 0
+                  ? carriedSecondary
+                  : null,
+              secondaryGeneration: msg.courier.secondaryGeneration,
+              pendingForkGeneration: msg.courier.pendingForkGeneration,
+              terminal: msg.courier.terminal,
+              tanFlows,
+            };
+            try {
+              this.#courierPost(courier);
+            } catch { /* the courier must never break the capture */ }
+          }
           this.#post({
             type: 'state-captured',
             requestId: msg.requestId,
@@ -1941,6 +2024,7 @@ export class WorkerHost {
             referenceValid,
             overlayEpoch,
             ...(carriedSecondary !== undefined ? { carriedSecondary } : {}),
+            ...(tanFlows.length > 0 ? { tanFlows } : {}),
             ...(embedded && primaryBytes !== null
               ? {
                   primary: {

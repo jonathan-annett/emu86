@@ -28,6 +28,18 @@ import type {
 } from '../../src/browser/protocol.js';
 import { SECTOR_SIZE, WriteTrackingDisk } from '../../src/disk/disk.js';
 import { InMemoryHostClock } from '../../src/host-clock/host-clock.js';
+import type { FrameChannel } from '../../src/net/tan.js';
+import type { CourierSlotBroadcast } from '../../src/browser/protocol.js';
+import {
+  ETHERTYPE_IPV4,
+  IPPROTO_TCP,
+  TCP_ACK,
+  TCP_SYN,
+  buildEthernetFrame,
+  buildIpv4,
+  buildTcpSegment,
+  type Ipv4,
+} from '../../src/net/wire.js';
 import { captureMachineState } from '../../src/machine/machine-state.js';
 import { diffStates } from '../state-diff.js';
 
@@ -843,5 +855,169 @@ describe('WorkerHost — the torn resume pair (field fix #4)', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/different base image/);
     expect(b.host.machine).not.toBeNull();
+  });
+});
+
+describe('the dying-slot courier + stale-flow resets (fix #9)', () => {
+  const MOUSE: Ipv4 = [10, 0, 2, 16];
+  const CAT: Ipv4 = [10, 0, 2, 17];
+  const MAC = (o: number): number[] => [0x02, 0x65, 0x6d, 0x75, 0x38, o];
+
+  function nullChannel(): FrameChannel {
+    return { onmessage: null, postMessage: () => {} };
+  }
+
+  function telnetFrame(srcIp: Ipv4, dstIp: Ipv4, sp: number, dp: number, flags: number): Uint8Array {
+    const seg = buildTcpSegment(srcIp, dstIp, {
+      srcPort: sp, dstPort: dp, seq: 500, ack: 1, flags, window: 4380,
+      payload: new Uint8Array(0),
+    });
+    return buildEthernetFrame(
+      MAC(dstIp[3] ?? 0), MAC(srcIp[3] ?? 0), ETHERTYPE_IPV4,
+      buildIpv4(IPPROTO_TCP, srcIp, dstIp, seg),
+    );
+  }
+
+  async function bootWithTan(courier: unknown[]): Promise<Rig & { hostRef: WorkerHost }> {
+    const messages: WorkerToMainMessage[] = [];
+    const host = new WorkerHost({
+      post: (m) => messages.push(m),
+      autoRun: false,
+      hostClock: new InMemoryHostClock(),
+      tan: { channel: nullChannel(), hostOctet: 16 },
+      courierPost: (d) => courier.push(d),
+    });
+    host.handleMessage({ type: 'boot', config: { imageBytes: haltImage() } });
+    await host.whenIdle();
+    return { host, messages, hostRef: host };
+  }
+
+  it('broadcasts the complete slot at teardown — only with open flows', async () => {
+    const courier: unknown[] = [];
+    const rig = await bootWithTan(courier);
+    rig.host.runUntil(200);
+
+    // No flows yet: a courier'd capture stays SILENT (no peer, no
+    // session worth saving — the ruling).
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 1, disks: 'reference', markSecondaryClean: true,
+      courier: {
+        stateId: 'resume-x',
+        terminal: { tail: new Uint8Array([65]), viewportY: 0, modes: [] },
+        secondaryGeneration: null,
+        pendingForkGeneration: 'gen-1',
+      },
+    });
+    await awaitCaptured(rig);
+    expect(courier).toHaveLength(0);
+
+    // Open a flow (observed at the trunk), then the teardown capture.
+    const ct = rig.host.tan?.conntrack;
+    ct?.observe(telnetFrame(MOUSE, CAT, 1024, 23, TCP_SYN));
+    ct?.observe(telnetFrame(CAT, MOUSE, 23, 1024, TCP_SYN | TCP_ACK));
+    ct?.observe(telnetFrame(MOUSE, CAT, 1024, 23, TCP_ACK));
+    rig.messages.length = 0;
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 2, disks: 'reference', markSecondaryClean: true,
+      courier: {
+        stateId: 'resume-x',
+        terminal: { tail: new Uint8Array([66]), viewportY: 3, modes: [{ mode: 25, set: false }] },
+        secondaryGeneration: 'gen-0',
+        pendingForkGeneration: 'gen-1',
+      },
+    });
+    await awaitCaptured(rig);
+    expect(courier).toHaveLength(1);
+    const slot = courier[0] as CourierSlotBroadcast;
+    expect(slot.courier).toBe('slot');
+    expect(slot.stateId).toBe('resume-x');
+    expect(slot.state.v).toBe(1);
+    expect(slot.storeDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(slot.terminal.viewportY).toBe(3);
+    expect(slot.secondaryGeneration).toBe('gen-0');
+    expect(slot.pendingForkGeneration).toBe('gen-1');
+    expect(slot.tanFlows).toEqual([
+      { peerOctet: 17, localPort: 1024, peerPort: 23, expectFromPeer: 501 },
+    ]);
+
+    // A plain heartbeat (no courier field) with flows open: silent.
+    courier.length = 0;
+    rig.messages.length = 0;
+    rig.host.handleMessage({
+      type: 'capture-state', requestId: 3, disks: 'reference', markSecondaryClean: true,
+    });
+    await awaitCaptured(rig);
+    expect(courier).toHaveLength(0);
+  });
+
+  it('a stale resume with recorded flows injects clean in-sequence RSTs', async () => {
+    // Capture a clean state from host A…
+    const courier: unknown[] = [];
+    const a = await bootWithTan(courier);
+    a.host.runUntil(300);
+    a.host.handleMessage({ type: 'capture-state', requestId: 1, disks: 'reference' });
+    const reply = await awaitCaptured(a);
+    if (reply.state === undefined || reply.capturedAt === undefined ||
+        reply.storeDigest === undefined) throw new Error('capture incomplete');
+
+    // …and restore it as a STALE slot naming one open flow.
+    const messages: WorkerToMainMessage[] = [];
+    const b = new WorkerHost({
+      post: (m) => messages.push(m),
+      autoRun: false,
+      hostClock: new InMemoryHostClock(),
+      tan: { channel: nullChannel(), hostOctet: 16 },
+    });
+    b.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: haltImage(),
+        restore: {
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          expected: { storeDigest: reply.storeDigest, secondarySha: null },
+          staleFlows: [
+            { peerOctet: 17, localPort: 1024, peerPort: 23, expectFromPeer: 501 },
+          ],
+        },
+      },
+    });
+    await b.whenIdle();
+    const result = messages.find((m) => m.type === 'restore-result');
+    expect(result).toMatchObject({ type: 'restore-result', ok: true });
+    // The RST reached the guest's NIC (the all-HLT guest never
+    // STARTS its NE2K, so the ring counts it as dropped — arrival is
+    // what this test owns; acceptance-when-running is the NIC
+    // model's own tested behavior).
+    const nic = b.machine?.nic;
+    expect((nic?.rxAccepted ?? 0) + (nic?.rxDropped ?? 0)).toBeGreaterThanOrEqual(1);
+
+    // A DEATH-POINT slot (teardownCapture) injects nothing.
+    const messages2: WorkerToMainMessage[] = [];
+    const c = new WorkerHost({
+      post: (m) => messages2.push(m),
+      autoRun: false,
+      hostClock: new InMemoryHostClock(),
+      tan: { channel: nullChannel(), hostOctet: 16 },
+    });
+    c.handleMessage({
+      type: 'boot',
+      config: {
+        imageBytes: haltImage(),
+        restore: {
+          state: reply.state,
+          capturedAt: reply.capturedAt,
+          teardownCapture: true,
+          expected: { storeDigest: reply.storeDigest, secondarySha: null },
+          staleFlows: [
+            { peerOctet: 17, localPort: 1024, peerPort: 23, expectFromPeer: 501 },
+          ],
+        },
+      },
+    });
+    await c.whenIdle();
+    expect(messages2.find((m) => m.type === 'restore-result')).toMatchObject({ ok: true });
+    const nicC = c.machine?.nic;
+    expect((nicC?.rxAccepted ?? 0) + (nicC?.rxDropped ?? 0)).toBe(0);
   });
 });

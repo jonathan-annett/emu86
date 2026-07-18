@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TanConntrack } from '../../src/net/conntrack.js';
+import { TanConntrack, buildFlowResetFrame } from '../../src/net/conntrack.js';
 import { EthernetSwitch } from '../../src/net/switch.js';
 import { TabAreaNetwork, tanIdentityFor, type FrameChannel } from '../../src/net/tan.js';
 import {
@@ -21,6 +21,8 @@ import {
   buildEthernetFrame,
   buildIpv4,
   buildTcpSegment,
+  parseIpv4,
+  parseTcpSegment,
   type Ipv4,
 } from '../../src/net/wire.js';
 
@@ -69,10 +71,12 @@ describe('TanConntrack', () => {
     expect(ct.connectionsFor(16)).toEqual([{
       peerOctet: 17, peerName: 'cat', localPort: 1024, peerPort: 23,
       state: 'established', outbound: true,
+      expectFromPeer: 1001, // cat's SYN+ACK consumed seq 1000
     }]);
     expect(ct.connectionsFor(17)).toEqual([{
       peerOctet: 16, peerName: 'mouse', localPort: 23, peerPort: 1024,
       state: 'established', outbound: false,
+      expectFromPeer: 1000, // mouse's final plain ACK re-stamped 1000
     }]);
     expect(ct.hasPeer(16, 17)).toBe(true);
     expect(ct.hasPeer(17, 16)).toBe(true);
@@ -174,11 +178,30 @@ describe('TabAreaNetwork conntrack tap', () => {
 
     expect(tanA.conntrack.connectionsFor(16)).toEqual([{
       peerOctet: 17, peerName: 'cat', localPort: 1024, peerPort: 23,
-      state: 'established', outbound: true,
+      state: 'established', outbound: true, expectFromPeer: 1001,
     }]);
     expect(tanB.conntrack.connectionsFor(17)).toEqual([{
       peerOctet: 16, peerName: 'mouse', localPort: 23, peerPort: 1024,
-      state: 'established', outbound: false,
+      state: 'established', outbound: false, expectFromPeer: 1000,
     }]);
+  });
+});
+
+describe('buildFlowResetFrame (fix #9)', () => {
+  it('builds an in-sequence RST wearing the peer\'s identity', () => {
+    const frame = buildFlowResetFrame(16, {
+      peerOctet: 17, localPort: 1024, peerPort: 23, expectFromPeer: 0x1cd,
+    });
+    // Ethernet: to the local guest's MAC, from the peer's.
+    expect([...frame.subarray(0, 6)]).toEqual([0x02, 0x65, 0x6d, 0x75, 0x38, 16]);
+    expect([...frame.subarray(6, 12)]).toEqual([0x02, 0x65, 0x6d, 0x75, 0x38, 17]);
+    const ip = parseIpv4(frame.subarray(14));
+    expect(ip?.srcIp).toEqual([10, 0, 2, 17]);
+    expect(ip?.dstIp).toEqual([10, 0, 2, 16]);
+    const seg = ip !== null ? parseTcpSegment(ip.srcIp, ip.dstIp, ip.payload) : null;
+    expect(seg?.srcPort).toBe(23);
+    expect(seg?.dstPort).toBe(1024);
+    expect(seg?.flags).toBe(TCP_RST);
+    expect(seg?.seq).toBe(0x1cd); // the guest's rcv_nxt — the only seq ktcp accepts
   });
 });

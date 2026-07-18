@@ -131,6 +131,19 @@ export interface MachineStatePayload {
    */
   secondaryGeneration?: string | null;
   /**
+   * Fix #9: the open TAN flows recorded at capture (null/absent =
+   * none). A STALE resume (teardownCapture false) resets these
+   * cleanly; a death-point resume lets them continue.
+   */
+  tanFlows?: Array<{
+    peerOctet: number;
+    localPort: number;
+    peerPort: number;
+    expectFromPeer: number | null;
+  }> | null;
+  /** Fix #9: true when this row IS a death-point capture (courier). */
+  teardownCapture?: boolean;
+  /**
    * …or this: the generation the fork write BEGUN BY THIS CAPTURE
    * will stamp. If the teardown killed that write, the fork holds
    * `secondaryGeneration`'s bytes (fold the delta over them); if the

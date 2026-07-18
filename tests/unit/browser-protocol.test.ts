@@ -249,7 +249,7 @@ describe('browser protocol — exhaustiveness', () => {
         peerName: 'mouse',
         connections: [{
           peerOctet: 16, peerName: 'mouse', localPort: 23, peerPort: 1024,
-          state: 'established', outbound: false,
+          state: 'established', outbound: false, expectFromPeer: null,
         }],
       }),
     ).toBe('tan-freeze');

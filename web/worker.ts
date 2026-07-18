@@ -79,9 +79,14 @@ const fetchImage = async (url: string): Promise<Uint8Array> => {
 // (the onmessage property types are strictly contravariant-hostile;
 // a setter bridges them).
 const tanChannel = new BroadcastChannel('emu86-tan-v1');
+// Fix #9: the dying-slot courier — worker-side broadcasts escape a
+// dying page when worker→main replies cannot; any live peer's main
+// writes the slot it carries.
+const courierChannel = new BroadcastChannel('emu86-courier-v1');
 const host = new WorkerHost({
   post,
   fetchImage,
+  courierPost: (data: unknown) => courierChannel.postMessage(data),
   tan: {
     channel: {
       postMessage: (data: unknown) => tanChannel.postMessage(data),

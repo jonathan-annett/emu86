@@ -299,3 +299,44 @@ data is in flight, however small — the true guarantee needs the
 teardown capture to always win (the incremental dirty-page slot,
 next brief) and until then a lost race mid-session still costs the
 session, just with a much smaller window.
+
+## 10. Field fix #9 — the dying-slot courier + honest resets
+## (approved: "go ahead. the worst that can happen is it doesn't
+## work, and we can try again")
+
+Fix #8 made captures fast (23 ms measured in the field) and the
+Tetris refresh STILL restored "state from 3s ago": on a keyboard F5
+the dying page's event loop stops dispatching tasks the moment the
+pagehide handler returns — the capture reply is never DELIVERED, so
+no capture speed can ever win. The same trace showed the way out:
+the dying WORKER's freeze broadcast reached the peer in 4 ms.
+Worker-side broadcasts escape; worker→main replies don't.
+
+**The courier.** At pagehide, main sends everything only it knows —
+slot id, terminal snapshot, the generation pair — WITH the capture
+request (all synchronously available). The worker assembles the
+complete slot and broadcasts it on `emu86-courier-v1`; ANY live
+same-origin main writes it into the (origin-global) machine store.
+The reborn tab reads its slot exactly as before — the row is simply
+a death-point capture now. Jonathan's ruling shaped the gate: no
+open flows, no courier (a session-less stale resume is harmless);
+the catcher holds nothing (the write IS the handoff). The freeze
+protocol guarantees the catcher exists in exactly the case that
+matters.
+
+**The honest reset.** Slot rows now record the open flows at capture
+(conntrack, which also learned per-direction next-seq for this).
+Restoring a row that is NOT a death-point capture (`teardownCapture`
+absent) with flows recorded = an unreconcilable rewind — ktcp never
+heals one. The worker injects an in-sequence local RST per flow
+(seq = the restored guest's exact rcv_nxt — the only value ktcp
+accepts) the instant the restore lands: sessions die in one second
+with a syslog explanation instead of forty seconds of retransmit
+limbo. Death-point restores skip injection — their sessions simply
+continue.
+
+**Recorded limits.** The whole-rack refresh still has no catcher
+(every page dies at once) — those resumes fall to the honest reset.
+Rack-refresh SURVIVAL remains the argument for a worker-side IDB
+write at teardown (a rule-3 exception only Jonathan can grant) or
+the incremental dirty-page slot brief.

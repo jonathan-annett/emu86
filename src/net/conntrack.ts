@@ -43,8 +43,13 @@ import {
   TCP_FIN,
   TCP_RST,
   TCP_SYN,
+  buildEthernetFrame,
+  buildIpv4,
+  buildTcpSegment,
   parseIpv4,
   parseTcpSegment,
+  type Ipv4,
+  type Mac,
 } from './wire.js';
 
 export type TanFlowState = 'syn' | 'established' | 'closing';
@@ -70,6 +75,12 @@ export interface TanPeerConnection {
   /** true = our guest dialed, false = the peer dialed, null = unknown
    *  (tracked from mid-stream, e.g. after a restore). */
   readonly outbound: boolean | null;
+  /**
+   * Fix #9: the seq our guest expects the peer's next segment to
+   * carry (its rcv_nxt) — the ONLY seq an injected teardown RST may
+   * wear. Null until the peer has spoken.
+   */
+  readonly expectFromPeer: number | null;
 }
 
 interface FlowEntry {
@@ -81,6 +92,12 @@ interface FlowEntry {
   initiator: number | null;
   finFromA: boolean;
   finFromB: boolean;
+  /** Fix #9: the seq the NEXT segment from each side will carry —
+   *  i.e. the other side's rcv_nxt. This is what lets a restore
+   *  inject an acceptable RST (ktcp drops any segment, RST included,
+   *  whose seq isn't exactly rcv_nxt). Null until that side speaks. */
+  nextSeqFromA: number | null;
+  nextSeqFromB: number | null;
 }
 
 const DEFAULT_MAX_FLOWS = 256;
@@ -112,6 +129,20 @@ export class TanConntrack {
 
     const key = flowKey(srcOctet, seg.srcPort, dstOctet, seg.dstPort);
     const existing = this.#flows.get(key);
+    // Fix #9: what this side's NEXT segment will carry (SYN/FIN each
+    // consume a sequence number, data consumes its length).
+    const nextSeq =
+      (seg.seq +
+        seg.payload.length +
+        ((seg.flags & TCP_SYN) !== 0 ? 1 : 0) +
+        ((seg.flags & TCP_FIN) !== 0 ? 1 : 0)) >>>
+      0;
+    const c = canonical(srcOctet, seg.srcPort, dstOctet, seg.dstPort);
+    const srcIsA = c.octetA === srcOctet && c.portA === seg.srcPort;
+    const stampSeq = (entry: FlowEntry): void => {
+      if (srcIsA) entry.nextSeqFromA = nextSeq;
+      else entry.nextSeqFromB = nextSeq;
+    };
 
     if ((seg.flags & TCP_RST) !== 0) {
       this.#flows.delete(key);
@@ -120,6 +151,7 @@ export class TanConntrack {
 
     if ((seg.flags & TCP_SYN) !== 0) {
       if (existing !== undefined) {
+        stampSeq(existing);
         this.#touch(key, existing); // retransmit/simultaneous open — keep
         return;
       }
@@ -127,17 +159,20 @@ export class TanConntrack {
       // destination (it answers the SYN we didn't see).
       const isSynAck = (seg.flags & TCP_ACK) !== 0;
       this.#insert(key, {
-        ...canonical(srcOctet, seg.srcPort, dstOctet, seg.dstPort),
+        ...c,
         state: 'syn',
         initiator: isSynAck ? dstOctet : srcOctet,
         finFromA: false,
         finFromB: false,
+        nextSeqFromA: srcIsA ? nextSeq : null,
+        nextSeqFromB: srcIsA ? null : nextSeq,
       });
       return;
     }
 
     if ((seg.flags & TCP_FIN) !== 0) {
       if (existing === undefined) return; // half a close we never knew
+      stampSeq(existing);
       const fromA = srcOctet === existing.octetA && seg.srcPort === existing.portA;
       if (fromA) existing.finFromA = true;
       else existing.finFromB = true;
@@ -152,6 +187,7 @@ export class TanConntrack {
 
     // Plain segment (ACK and/or data).
     if (existing !== undefined) {
+      stampSeq(existing);
       if (existing.state === 'syn') existing.state = 'established';
       this.#touch(key, existing);
       return;
@@ -160,11 +196,13 @@ export class TanConntrack {
       // Mid-stream data on an unknown tuple: a live session we joined
       // late (restore, or tab-shark opened mid-conversation).
       this.#insert(key, {
-        ...canonical(srcOctet, seg.srcPort, dstOctet, seg.dstPort),
+        ...c,
         state: 'established',
         initiator: null,
         finFromA: false,
         finFromB: false,
+        nextSeqFromA: srcIsA ? nextSeq : null,
+        nextSeqFromB: srcIsA ? null : nextSeq,
       });
     }
     // Pure ACK on an unknown tuple: ignored (see header — ghosts).
@@ -196,6 +234,7 @@ export class TanConntrack {
         peerPort: localIsA ? f.portB : f.portA,
         state: f.state,
         outbound: f.initiator === null ? null : f.initiator === octet,
+        expectFromPeer: localIsA ? f.nextSeqFromB : f.nextSeqFromA,
       });
     }
     return out;
@@ -263,4 +302,37 @@ function canonical(
 function flowKey(oA: number, pA: number, oB: number, pB: number): string {
   const c = canonical(oA, pA, oB, pB);
   return `${c.octetA}:${c.portA}|${c.octetB}:${c.portB}`;
+}
+
+/**
+ * Fix #9: a clean RST for one of a STALE resume's dead flows,
+ * injected into the LOCAL guest as if the peer sent it. The seq MUST
+ * be the guest's rcv_nxt (`expectFromPeer`) — ktcp drops any other
+ * segment, RST included, without a word. Identity derivation matches
+ * tanIdentityFor (tan.ts imports this module, so the constant is
+ * inlined here rather than imported in a cycle).
+ */
+export function buildFlowResetFrame(
+  localOctet: number,
+  flow: { peerOctet: number; localPort: number; peerPort: number; expectFromPeer: number },
+): Uint8Array {
+  const localIp: Ipv4 = [10, 0, 2, localOctet];
+  const peerIp: Ipv4 = [10, 0, 2, flow.peerOctet];
+  const localMac: Mac = [0x02, 0x65, 0x6d, 0x75, 0x38, localOctet];
+  const peerMac: Mac = [0x02, 0x65, 0x6d, 0x75, 0x38, flow.peerOctet];
+  const segment = buildTcpSegment(peerIp, localIp, {
+    srcPort: flow.peerPort,
+    dstPort: flow.localPort,
+    seq: flow.expectFromPeer,
+    ack: 0,
+    flags: TCP_RST,
+    window: 0,
+    payload: new Uint8Array(0),
+  });
+  return buildEthernetFrame(
+    localMac,
+    peerMac,
+    ETHERTYPE_IPV4,
+    buildIpv4(IPPROTO_TCP, peerIp, localIp, segment),
+  );
 }

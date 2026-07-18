@@ -37,6 +37,7 @@ import '@xterm/xterm/css/xterm.css';
 import type {
   BootConfig,
   BootMessage,
+  CourierSlotBroadcast,
   MainToWorkerMessage,
   WorkerToMainMessage,
 } from '../src/browser/protocol.js';
@@ -548,7 +549,10 @@ async function init(): Promise<void> {
   let nextCaptureId = 1;
   function requestCapture(
     disks: 'embedded' | 'reference',
-    opts: { markSecondaryClean?: boolean } = {},
+    opts: {
+      markSecondaryClean?: boolean;
+      courier?: NonNullable<(MainToWorkerMessage & { type: 'capture-state' })['courier']>;
+    } = {},
   ): Promise<CapturedReply> {
     return new Promise((resolve) => {
       const requestId = nextCaptureId++;
@@ -558,6 +562,7 @@ async function init(): Promise<void> {
         requestId,
         disks,
         ...(opts.markSecondaryClean === true ? { markSecondaryClean: true } : {}),
+        ...(opts.courier !== undefined ? { courier: opts.courier } : {}),
       };
       worker.postMessage(msg);
     });
@@ -662,13 +667,15 @@ async function init(): Promise<void> {
   // 2026-07-16 — the in-flight beat's state predates the freeze, and
   // the sliver between them is exactly a half-typed line).
   let forceQueued = false;
+  let teardownQueued = false;
   // Multi-PC brief M2: the migrate dance must WAIT for the slot row
   // to be durable before handing the session to a rack — F5 gets this
   // from the teardown grace; a live handover has to await it.
   let resumeCaptureSettled: Promise<void> = Promise.resolve();
-  function maybeRefreshResumeSlot(force = false): void {
+  function maybeRefreshResumeSlot(force = false, teardown = false): void {
     if (resumeCaptureInFlight) {
       if (force) forceQueued = true;
+      if (teardown) teardownQueued = true;
       return;
     }
     if (resumeSlotBroken) return;
@@ -676,9 +683,34 @@ async function init(): Promise<void> {
     if (!force && Date.now() - lastResumeCaptureAt < cadence) return;
     resumeCaptureInFlight = true;
     leds?.set('state', 'amber', 'capturing resume slot…');
+    // Fix #8/#9: the fork generation this capture's write will stamp,
+    // minted at REQUEST time so the courier can carry it too.
+    const pendingForkGeneration =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `g-${Math.random().toString(36).slice(2)}`;
     let replyForNack: CapturedReply | null = null;
     resumeCaptureSettled = (async () => {
-      const reply = await requestCapture('reference', { markSecondaryClean: true });
+      const reply = await requestCapture('reference', {
+        markSecondaryClean: true,
+        // Fix #9: at teardown the worker broadcasts the complete slot
+        // for a live peer to write — main hands over everything only
+        // it knows, synchronously, before the page can die.
+        ...(teardown
+          ? {
+              courier: {
+                stateId: ownResumeSlotId,
+                terminal: {
+                  tail: txTailSnapshot(),
+                  viewportY: term.buffer.active.viewportY,
+                  modes: txModes.snapshot(),
+                },
+                secondaryGeneration: confirmedForkGeneration,
+                pendingForkGeneration,
+              },
+            }
+          : {}),
+      });
       replyForNack = reply;
       if (!reply.ok || reply.state === undefined || reply.capturedAt === undefined) {
         nackCaptureDeltas(reply);
@@ -718,10 +750,6 @@ async function init(): Promise<void> {
         reply.carriedSecondary !== undefined && reply.carriedSecondary.length > 0
           ? reply.carriedSecondary
           : null;
-      const pendingForkGeneration =
-        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `g-${Math.random().toString(36).slice(2)}`;
       pendingForkWrites.set(reply.requestId, {
         generation: pendingForkGeneration,
         carriedCount: reply.carriedSecondary?.length ?? 0,
@@ -757,6 +785,8 @@ async function init(): Promise<void> {
           carriedSecondary,
           secondaryGeneration: confirmedForkGeneration,
           pendingForkGeneration,
+          tanFlows: reply.tanFlows ?? null,
+          teardownCapture: teardown,
         },
       });
       // Fix #8: the fork row is no longer written here — the worker's
@@ -819,7 +849,9 @@ async function init(): Promise<void> {
         lastResumeCaptureAt = Date.now();
         if (forceQueued) {
           forceQueued = false;
-          maybeRefreshResumeSlot(true);
+          const replayTeardown = teardownQueued;
+          teardownQueued = false;
+          maybeRefreshResumeSlot(true, replayTeardown);
         }
       });
   }
@@ -857,13 +889,61 @@ async function init(): Promise<void> {
       reason: 'teardown',
     };
     worker.postMessage(freeze);
-    maybeRefreshResumeSlot(true);
+    maybeRefreshResumeSlot(true, true);
   });
   window.addEventListener('pageshow', () => {
     dbg('pageshow — bfcache revival thaw');
     const thaw: MainToWorkerMessage = { type: 'set-paused', paused: false };
     worker.postMessage(thaw);
   });
+
+  // Fix #9, the catcher's half: any live tab writes a dying peer's
+  // broadcast slot into the shared machine store. Holding it longer
+  // than the write takes would help nobody (Jonathan's insight: no
+  // peer, no session worth saving) — and the write IS the handoff,
+  // because the reborn tab already looks exactly there.
+  const courierChannel = new BroadcastChannel('emu86-courier-v1');
+  courierChannel.onmessage = (ev: MessageEvent<unknown>) => {
+    const data = ev.data as Partial<CourierSlotBroadcast> | null;
+    if (typeof data !== 'object' || data === null || data.courier !== 'slot') return;
+    if (typeof data.stateId !== 'string' || data.state === undefined) return;
+    if (typeof data.capturedAt !== 'number' || typeof data.storeDigest !== 'string') return;
+    if (typeof data.pendingForkGeneration !== 'string') return;
+    if (data.stateId === ownResumeSlotId) return; // never our own echo
+    const record: MachineStateRecord = {
+      meta: {
+        stateId: data.stateId,
+        label: null,
+        kind: 'resume',
+        createdAt: data.capturedAt,
+        lastTouched: Date.now(),
+        baseFingerprint: data.baseFingerprint ?? null,
+        schemaVersion: MACHINE_STATE_SCHEMA_VERSION,
+        sizeBytes: data.state.ram.pages.length * 4096 + 64 * 1024,
+      },
+      payload: {
+        stateId: data.stateId,
+        state: data.state,
+        capturedAt: data.capturedAt,
+        primary: null,
+        secondary: null,
+        primarySha: null,
+        secondarySha: null,
+        storeDigest: data.storeDigest,
+        terminal: data.terminal ?? null,
+        carriedPrimary: data.carriedPrimary ?? null,
+        carriedSecondary: data.carriedSecondary ?? null,
+        secondaryGeneration: data.secondaryGeneration ?? null,
+        pendingForkGeneration: data.pendingForkGeneration,
+        tanFlows: data.tanFlows ?? null,
+        teardownCapture: true,
+      },
+    };
+    void machineStore
+      .putState(record)
+      .then(() => dbg(`courier: caught a dying peer's slot (${record.meta.stateId.slice(0, 18)}…)`))
+      .catch((err: unknown) => dbg(`courier: catch FAILED — ${String(err)}`));
+  };
 
   // Multi-PC brief M2: the tab→rack move. The affordance appears only
   // while a rack tab is announcing, and never inside a rack iframe
@@ -1867,9 +1947,25 @@ async function init(): Promise<void> {
                 chunks: rec.payload.carriedPrimary.chunks,
               }
             : null;
+        const staleFlows =
+          rec.payload.teardownCapture !== true &&
+          rec.payload.tanFlows != null &&
+          rec.payload.tanFlows.length > 0
+            ? rec.payload.tanFlows
+            : undefined;
+        if (staleFlows !== undefined) {
+          syslog.log(
+            `resuming a pre-death state with ${staleFlows.length} open connection` +
+              `${staleFlows.length === 1 ? '' : 's'} — resetting ` +
+              `${staleFlows.length === 1 ? 'it' : 'them'} cleanly (unreconcilable rewind)`,
+            { toast: true },
+          );
+        }
         boot.config.restore = {
           state: rec.payload.state,
           capturedAt: rec.payload.capturedAt,
+          ...(rec.payload.teardownCapture === true ? { teardownCapture: true } : {}),
+          ...(staleFlows !== undefined ? { staleFlows } : {}),
           expected: {
             storeDigest: rec.payload.storeDigest,
             secondarySha: rec.payload.secondarySha,
