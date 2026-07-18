@@ -104,6 +104,19 @@
       }
       .pc-row:hover .pc-off { visibility: visible; }
       .pc-off:hover { color: #cc4444; }
+      /* The out-move buttons (brief §5d): same hover-visible shape as
+         ⏻ but accent on hover — moving is not destroying. */
+      .pc-move {
+        background: none;
+        border: none;
+        color: var(--dim);
+        cursor: pointer;
+        font: inherit;
+        padding: 0 2px;
+        visibility: hidden;
+      }
+      .pc-row:hover .pc-move { visibility: visible; }
+      .pc-move:hover { color: var(--accent); }
       .pc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
       .pc-dot.running { background: var(--accent); }
       .pc-dot.frozen { background: var(--frozen); }
@@ -123,6 +136,28 @@
         height: 100%;
         border: 0;
       }
+      /* A floated PC's pane slot (brief §5d): the placeholder that
+         restores the window back into the iframe. */
+      .pc-away {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        color: var(--dim);
+      }
+      .pc-away button {
+        background: #1c1c1c;
+        border: 1px solid #333;
+        border-radius: 6px;
+        color: #e0e0e0;
+        cursor: pointer;
+        font: inherit;
+        padding: 8px 14px;
+      }
+      .pc-away button:hover { border-color: var(--accent); color: #fff; }
       /* The picker */
       #picker-backdrop {
         position: fixed;
@@ -161,10 +196,10 @@
       .pick-row .age { color: var(--dim); white-space: nowrap; }
       .pick-none { color: var(--dim); padding: 8px 14px; }
     </style>
-    <script type="module" crossorigin src="./assets/rack-BXSpX2yL.js"></script>
+    <script type="module" crossorigin src="./assets/rack-DcKqGWgU.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/debug-log-ClT2_cU6.js">
-    <link rel="modulepreload" crossorigin href="./assets/overlay-session-BFAZ9fHi.js">
+    <link rel="modulepreload" crossorigin href="./assets/overlay-session-CGkglKgh.js">
   </head>
   <body>
     <nav>
