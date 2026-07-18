@@ -105,6 +105,25 @@ describe('agent cable server', () => {
     expect((await fetch(`http://127.0.0.1:${port}/nope`)).status).toBe(404);
   });
 
+  it('pushes spawn commands over the reverse channel, validating kind', async () => {
+    const ws = await connect();
+    const received: string[] = [];
+    ws.addEventListener('message', (ev) => received.push(String(ev.data)));
+    ws.send(JSON.stringify({ cable: 'hello', name: 'mouse', octet: 16, pc: null, build: 't' }));
+    await until(() => cable.machines.size === 1);
+
+    const ok = await fetch(`http://127.0.0.1:${port}/spawn?to=mouse&kind=rack`, { method: 'POST' });
+    expect(ok.status).toBe(200);
+    await until(() => received.length === 1);
+    expect(JSON.parse(received[0] ?? '{}')).toEqual({ cable: 'spawn', kind: 'rack' });
+
+    const badKind = await fetch(`http://127.0.0.1:${port}/spawn?to=mouse&kind=frisbee`, { method: 'POST' });
+    expect(badKind.status).toBe(400);
+    const nobody = await fetch(`http://127.0.0.1:${port}/spawn?to=nobody&kind=tab`, { method: 'POST' });
+    expect(nobody.status).toBe(404);
+    ws.close();
+  });
+
   it('parses masked frames split at every chunk boundary', () => {
     // A masked client frame built by hand, fed byte-by-byte.
     const payload = Buffer.from('{"cable":"tx","data":""}');

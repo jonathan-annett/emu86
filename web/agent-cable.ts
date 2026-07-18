@@ -82,6 +82,13 @@ export function plugAgentCable(opts: {
   identity: () => AgentCableIdentity;
   onRx: (bytes: Uint8Array) => void;
   onStatus: (text: string) => void;
+  /**
+   * The agent asked for a new blank PC (Jonathan's counter-proposal,
+   * 2026-07-18: a verb on the reverse channel beats a guest-side
+   * gateway URL — no guest changes, works on every tier). 'tab' =
+   * open a sibling tab; 'rack' = ask the embedding rack for a PC.
+   */
+  onSpawn?: (kind: 'tab' | 'rack') => void;
   /** Backoff floor, default 1000 ms — tests shrink it. */
   baseDelayMs?: number;
 }): AgentCable {
@@ -144,7 +151,11 @@ export function plugAgentCable(opts: {
         return; // not ours
       }
       if (msg === null || typeof msg !== 'object') return;
-      const m = msg as { cable?: unknown; data?: unknown };
+      const m = msg as { cable?: unknown; data?: unknown; kind?: unknown };
+      if (m.cable === 'spawn') {
+        if (m.kind === 'tab' || m.kind === 'rack') opts.onSpawn?.(m.kind);
+        return;
+      }
       if (m.cable !== 'rx' || typeof m.data !== 'string') return;
       let bytes: Uint8Array;
       try {

@@ -15,12 +15,16 @@
  *   GET  /console?from=<id>&since=<n>  → console bytes from offset n
  *        (X-Console-Offset header carries the next offset to poll)
  *   POST /rx?to=<id>                   → request body typed into the machine
+ *   POST /spawn?to=<id>&kind=tab|rack  → ask that machine's page to open
+ *        a new blank PC (tab = window.open, may need popups allowed;
+ *        rack = the embedding rack adds a PC — embedded pages only)
  *
  * Websocket protocol (browser → server, JSON text frames):
  *   {cable:'hello', name, octet, pc, build}   once, identity
  *   {cable:'tx', data:<base64>}               console output chunk
  * (server → browser):
  *   {cable:'rx', data:<base64>}               keystrokes to inject
+ *   {cable:'spawn', kind:'tab'|'rack'}        open a new blank PC
  *
  * Exported as a factory so tests can run instances on ephemeral
  * ports; the CLI block at the bottom only fires when run directly.
@@ -215,8 +219,26 @@ export function createCableServer({ log = () => {} } = {}) {
       });
       return;
     }
+    if (req.method === 'POST' && url.pathname === '/spawn') {
+      const machine = findMachine(url.searchParams.get('to'));
+      if (machine === null) {
+        res.statusCode = 404;
+        res.end('no such machine (GET /machines lists them)\n');
+        return;
+      }
+      const kind = url.searchParams.get('kind');
+      if (kind !== 'tab' && kind !== 'rack') {
+        res.statusCode = 400;
+        res.end("kind must be 'tab' or 'rack'\n");
+        return;
+      }
+      const msg = JSON.stringify({ cable: 'spawn', kind });
+      machine.socket.write(wsFrame(1, Buffer.from(msg)));
+      res.end(`spawn ${kind} sent to ${label(machine)}\n`);
+      return;
+    }
     res.statusCode = 404;
-    res.end('agent cable: GET /machines, GET /console?from=, POST /rx?to=\n');
+    res.end('agent cable: GET /machines, GET /console?from=, POST /rx?to=, POST /spawn?to=&kind=\n');
   });
 
   server.on('upgrade', (req, socket) => {

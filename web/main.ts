@@ -414,6 +414,27 @@ async function init(): Promise<void> {
         worker.postMessage(msg);
       },
       onStatus: (text) => syslog.log(text),
+      // The agent grows the lab from its terminal (2026-07-18): 'rack'
+      // relays to the embedding rack (source-bound there); 'tab' opens
+      // a sibling — which auto-dials this same cable, so the new
+      // machine reports for duty by itself.
+      onSpawn: (kind) => {
+        if (kind === 'rack') {
+          if (embeddedPcId !== null && window.parent !== window) {
+            window.parent.postMessage({ emu86: 'spawn-pc' }, location.origin);
+            syslog.log('agent cable: asked the rack for a new PC');
+          } else {
+            syslog.log('agent cable: no rack around this PC — spawn rack ignored');
+          }
+          return;
+        }
+        const w = window.open('./', '_blank');
+        syslog.log(
+          w === null
+            ? 'agent cable: the browser blocked the new tab — allow popups for this origin'
+            : 'agent cable: opened a new PC tab',
+        );
+      },
     });
   }
   applyAgentCable(settings.agentCableUrl);

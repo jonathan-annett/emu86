@@ -721,6 +721,22 @@ function loadPackage(members: RackPackageMember[]): void {
   }
 }
 
+// ---- agent-cable spawn (cable brief, 2026-07-18) -----------------------
+// An embedded PC relays the agent's ask for a new blank PC. Bound by
+// SOURCE, like pc-status — only our own iframes can grow the rack.
+
+window.addEventListener('message', (e: MessageEvent<unknown>) => {
+  if (e.origin !== location.origin) return;
+  if ((e.data as { emu86?: unknown } | null)?.emu86 !== 'spawn-pc') return;
+  for (const frame of frames.values()) {
+    if (frame.contentWindow === e.source) {
+      addPc(mintPcId());
+      note('a new PC joined — asked over the agent cable');
+      return;
+    }
+  }
+});
+
 // ---- status from the iframes ------------------------------------------
 
 window.addEventListener('message', (e: MessageEvent<unknown>) => {

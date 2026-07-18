@@ -49,21 +49,24 @@ function plug(url: string, over: Partial<Parameters<typeof plugAgentCable>[0]> =
   cable: AgentCable;
   statuses: string[];
   received: Uint8Array[];
+  spawns: string[];
   identity: { name: string | null; octet: number | null };
 } {
   const statuses: string[] = [];
   const received: Uint8Array[] = [];
+  const spawns: string[] = [];
   const identity = { name: null as string | null, octet: null as number | null };
   const cable = plugAgentCable({
     url,
     identity: () => ({ ...identity, pc: null, build: 'test-build' }),
     onRx: (bytes) => received.push(bytes),
     onStatus: (text) => statuses.push(text),
+    onSpawn: (kind) => spawns.push(kind),
     baseDelayMs: 25,
     ...over,
   });
   cleanups.push(() => cable.unplug());
-  return { cable, statuses, received, identity };
+  return { cable, statuses, received, spawns, identity };
 }
 
 describe('agent cable URL validation (the security boundary)', () => {
@@ -100,7 +103,7 @@ describe('agent cable client against a real server', () => {
     const server = makeServer();
     cleanups.push(() => server.close());
     const port = await server.listen(0);
-    const { cable, statuses, received, identity } = plug(`ws://127.0.0.1:${port}/cable`);
+    const { cable, statuses, received, spawns, identity } = plug(`ws://127.0.0.1:${port}/cable`);
 
     // Plug lands: one connected status, hello identity visible to the agent.
     await until(() => server.machines.size === 1);
@@ -118,6 +121,11 @@ describe('agent cable client against a real server', () => {
     await fetch(`http://127.0.0.1:${port}/rx?to=m1`, { method: 'POST', body: 'invaders\n' });
     await until(() => received.length === 1);
     expect(new TextDecoder().decode(received[0])).toBe('invaders\n');
+
+    // Agent grows the lab: POST /spawn lands as onSpawn(kind).
+    await fetch(`http://127.0.0.1:${port}/spawn?to=m1&kind=rack`, { method: 'POST' });
+    await until(() => spawns.length === 1);
+    expect(spawns[0]).toBe('rack');
 
     // TAN lease settles later → re-hello updates the listing in place.
     identity.name = 'mouse';

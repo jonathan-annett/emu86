@@ -72,11 +72,28 @@ parse/build is ~150 lines — the zip-writer precedent). Binds
   line + status on plug/unplug. Rack iframes dial in as themselves.
 - Full suite + dev deploy per the standing rulings.
 
+### M2.5 — the spawn verb (Jonathan's counter-proposal, 2026-07-18;
+### DONE same session)
+
+His first shape was guest-side (`urlget http://elk/?newtabpc` through
+the M3d gateway); his counter — "or just do it as a websocket
+command… over the reverse websocket channel" — is strictly better:
+no guest changes, no gateway surgery, works on every tier. So:
+`POST /spawn?to=<id>&kind=tab|rack` pushes `{cable:'spawn', kind}`
+down the reverse channel; the page opens a sibling tab (`'tab'` —
+may need popups allowed for the origin, no user gesture backs it) or
+relays `{emu86:'spawn-pc'}` to its embedding rack (`'rack'` —
+source-bound there; a standalone/floated PC logs the refusal
+honestly). The new machine reads the same origin settings, so it
+dials the cable itself and reports for duty — the agent can grow the
+lab from one terminal.
+
 ### M3 — field acceptance
 
 Jonathan tests on the dev tier with the cable set; the agent tails
 `/console` live during a repro and injects a command; the rack shows
-multiple machines on one cable server.
+multiple machines on one cable server; the agent spawns a PC over
+the cable and drives both ends of a telnet session.
 
 ## 2. Hard-rule notes
 

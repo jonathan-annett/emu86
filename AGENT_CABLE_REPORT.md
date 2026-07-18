@@ -69,3 +69,16 @@ WebSocket client (`tests/unit/agent-cable-server.test.ts`).
 3. `curl -s 127.0.0.1:8737/machines`, then tail
    `/console?from=<name>&since=<offset>` and type with
    `POST /rx?to=<name>`.
+
+## M2.5 — the spawn verb (same session)
+
+Jonathan's counter-proposal to his own guest-side idea ("or just do
+it as a websocket command… over the reverse websocket channel"):
+`POST /spawn?to=&kind=tab|rack` → `{cable:'spawn', kind}` down the
+socket → the page opens a sibling tab or relays `{emu86:'spawn-pc'}`
+to its rack (source-bound). The spawned context reads the same
+origin settings and dials the cable itself. Honest limits, syslogged
+in place: 'tab' has no user gesture behind it (popups must be
+allowed for the origin once); 'rack' from a standalone or floated PC
+has no rack to relay to and says so. Tested both sides against the
+real server (kind validation, 404s, push→onSpawn).
