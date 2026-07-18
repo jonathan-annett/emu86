@@ -279,3 +279,42 @@ lease ASK matches its capture and the pairing is deterministic.
 Additive manifest field — packages saved BEFORE the fix have no
 octets and stay racy: RE-SAVE the package once to pin it (recorded
 limit, honest).
+
+## 5g. Addendum — the pull model: racks adopt, PCs stay agnostic
+## (Jonathan's design, 2026-07-18; approved in-session — "yes,
+## retire immediately")
+
+The multi-rack targeting question ("which rack does 'move to the
+rack' mean?") is dissolved, not answered: INVERT the direction. The
+[+] picker lists every RUNNING standalone PC; picking one adopts it
+into THIS rack — the rack you clicked in is the answer. PCs become
+completely rack-agnostic; the per-tab "move to the rack" button and
+its whole discovery machinery (racks Set, presence tracking, the
+first-answerer pick) RETIRE immediately.
+
+Mechanics — the M2 dance survives verbatim, only the trigger
+inverts:
+
+- Picker open → rack broadcasts `{rack:'pc-probe'}`. Every
+  STANDALONE machine context (top-level, not a rack-owned float —
+  the §5d gate) answers `{rack:'pc-here', sessionId, name, octet,
+  state}`. Rack iframes and floats never answer, so "not in a rack"
+  falls out of the gate; the rack additionally filters its own
+  member sessionIds, belt and braces.
+- Picking a running PC sends `{rack:'adopt-invite', toSession,
+  rackId, nonce}`; the invited PC runs the EXISTING choreography
+  (freeze → durable slot → freshness gate → adopt-request to that
+  exact rackId → ack → clear own key → moved.html). Busy PCs ignore
+  further invites; every abort path still unfreezes.
+- Cross-rack poaching stays OUT (a member of another rack never
+  answers); recorded follow-on, buildable on the §5d out-move.
+
+The picker's three populations get unmistakable identities (his
+spec): RUNNING PCs are orange/gold rows with a small animated
+running/paused indicator; COLD STORAGE (saved machines AND
+packages) is blue — on ice; the new-PC action is a plain grey
+"boot a new PC" button, since it doesn't exist yet.
+
+Also required: main.ts starts tracking its machine state even when
+standalone (the rackStatus object previously updated only when
+embedded) so pc-here can honestly say running vs paused.
