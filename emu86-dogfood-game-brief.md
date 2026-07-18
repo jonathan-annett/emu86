@@ -118,3 +118,28 @@ findings.
 - **Status**: ttt.c + install-ttt.sh committed to 8086-tab-tools
   (9e31456), AWAITING JONATHAN'S PUSH; then the loop runs agent-
   driven end to end.
+
+## 6. End-of-day status (2026-07-18, session close)
+
+The loop is PROVEN (fetch → build → run, first-compile, three
+machines) and the game is ONE MOUSE-REBOOT from played: rev 3
+(bdde577) connects — cat reached "you are O" with a rendered board —
+but mouse's ktcp is undead (net stop won't kill it, its zombie
+3333-listeners eat every connect, and in-guest reboot is impossible:
+no /bin/reboot, shutdown -r aborts on busy umount). Tomorrow: modal-
+reboot mouse, `ttt` on mouse, `ttt 10.0.2.16` on cat, play.
+
+Findings banked today, each source-verified and mostly
+wire-verified: (1) ELKS clients MUST bind(PORT_ANY) before connect —
+unbound connect = silent eternal hang, no SYN (ktcp creates cbs only
+in tcpdev_bind; tcpdev_connect's no-cb path silently returns; only
+telnet.c knew); (2) ktcp control blocks OUTLIVE their processes —
+killed servers leave live listeners that steal future SYNs
+("improper state 1" spew = ktcp notifying the dead); (3) local
+ports restart at 1024 per boot → 4-tuple collisions with peers'
+zombies after every reboot; (4) `net stop` can fail to kill ktcp
+(new one can't open /dev/tcpdev) leaving a netless-looking machine
+with a live undead stack; (5) the install must run as root
+(autologin is user1; /bin is root's). Cable wishlist grown by the
+loop: M2.6 shark-on-cable, M2.7 refresh, and a reboot verb (M2.8
+candidate) — the modal button is today the only clean reset.
