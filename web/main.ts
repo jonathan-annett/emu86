@@ -1041,12 +1041,15 @@ async function init(): Promise<void> {
   };
 
   // Multi-PC brief M2: the tab→rack move. The affordance appears only
-  // while a rack tab is announcing, and never inside a rack iframe
-  // (an embedded PC has nowhere further to move). The dance is the F5
-  // path aimed elsewhere: freeze (+ TAN freeze), await a durable slot
-  // row, hand the session record to the rack, navigate to moved.html.
+  // while a rack tab is announcing, and only in a TOP-LEVEL tab that
+  // isn't a rack-owned floating window. The old gate was ?pc=-absent —
+  // wrong since §5d, whose moved-out tabs KEEP ?pc= (field 2026-07-18:
+  // a ⇲-spawned tab had no way back). A rack iframe fails the
+  // parent check; a 🗗 float carries the rack's window name (it goes
+  // back via its placeholder, not adoption); everything else — bare
+  // tabs and ?pc= tabs alike — can move to whichever rack answers.
   const moveBtn = document.getElementById('move-to-rack') as HTMLButtonElement | null;
-  if (moveBtn !== null && embeddedPcId === null) {
+  if (moveBtn !== null && window.parent === window && !window.name.startsWith('emu86-pc-')) {
     // The literal bridges DOM BroadcastChannel to the module's
     // structural channel shape (the worker.ts onmessage-setter trick).
     const rackChannelRaw = new BroadcastChannel(RACK_CHANNEL_NAME);
@@ -1092,10 +1095,12 @@ async function init(): Promise<void> {
         return octet !== null ? nameForOctet(octet) : null;
       },
       clearOwnSession: () => {
-        // A later visit to ./ in this tab must mint a fresh PC, not
-        // fight the rack over the one that just moved.
+        // A later visit in this tab must mint a fresh PC, not fight
+        // the rack over the one that just moved. The key is the
+        // AMBIENT one — a §5d moved-out tab lives under its ?pc=
+        // key, not the bare key (second half of the same field fix).
         try {
-          sessionStorage.removeItem(storageKeyFor(null));
+          sessionStorage.removeItem(storageKeyFor(embeddedPcId));
         } catch { /* nothing to clear */ }
       },
       report: (text) => syslog.log(text, { toast: true }),

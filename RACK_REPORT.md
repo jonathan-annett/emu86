@@ -163,3 +163,10 @@ package members' fresh PCs raced the TAN lease unseeded. Fix: the
 manifest now records each member's octet and loadPackage seeds it as
 the sticky lease ask. Pre-fix packages carry no octets — re-save the
 package once to pin the pairing. Full diagnosis in brief §5f.
+
+Field fix, same day: a ⇲-moved-out tab had no way back — the M2
+mover was gated on ?pc=-absent, which §5d's moved-out tabs fail by
+design, and its clearOwnSession cleared the bare key instead of the
+ambient one. Gate is now top-level + not-a-float (window name);
+the button reads "move to the rack" unchanged and works from bare
+and ?pc= tabs alike.
