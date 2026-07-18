@@ -101,10 +101,32 @@ describe('settings', () => {
       autologin: 'user1',
       autoNet: true,
       demoPlayed: false,
+      agentCableUrl: 'ws://localhost:8737/cable',
     };
     saveSettings(target);
     const loaded = loadSettings();
     expect(loaded).toEqual(target);
+  });
+
+  it('agent cable URL: loopback ws:// survives load, anything else loads as off', () => {
+    // The validator is the schema — a hand-edited localStorage value
+    // pointing anywhere but loopback must load as null (cable off).
+    const cases: Array<[unknown, string | null]> = [
+      ['ws://localhost:8737/cable', 'ws://localhost:8737/cable'],
+      ['ws://127.0.0.1:9000', 'ws://127.0.0.1:9000'],
+      ['wss://localhost:8737/cable', null],       // TLS ≠ loopback trust story
+      ['ws://example.com/cable', null],
+      ['ws://localhost.evil.com/cable', null],
+      ['ws://user:pass@localhost:8737/', null],   // no credentials
+      ['http://localhost:8737/', null],
+      ['not a url', null],
+      [42, null],
+      ['', null],
+    ];
+    for (const [stored, expected] of cases) {
+      storage.setItem(STORAGE_KEY, JSON.stringify({ agentCableUrl: stored }));
+      expect(loadSettings().agentCableUrl, JSON.stringify(stored)).toBe(expected);
+    }
   });
 
   it('boot scripts: malformed list falls back to the seed; dangling active id degrades to null', () => {
@@ -190,6 +212,7 @@ describe('settings', () => {
       autologin: 'user1',
       autoNet: true,
       demoPlayed: false,
+      agentCableUrl: null,
     };
     saveSettings(target);
     docTarget.removeEventListener(SETTINGS_CHANGED_EVENT, handler);
@@ -209,6 +232,7 @@ describe('settings', () => {
       autologin: 'user1',
       autoNet: true,
       demoPlayed: false,
+      agentCableUrl: null,
     });
     const original = loadSettings();
 
@@ -289,6 +313,7 @@ describe('settings', () => {
       autologin: 'user1',
       autoNet: true,
       demoPlayed: false,
+      agentCableUrl: null,
     });
     const stale = loadSettings();
     const fixed = await validateImageSourceAgainstLibrary(

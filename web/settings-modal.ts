@@ -39,6 +39,7 @@ import {
   THEME_PRESET_NAMES,
   type ThemePresetName,
 } from './themes.js';
+import { isValidAgentCableUrl } from './agent-cable.js';
 import type { ImageLibrary, StoredImageMeta } from './image-library.js';
 import { DRIVE_PRESETS } from './image-library.js';
 import {
@@ -633,6 +634,50 @@ export function mountSettingsModal(deps: SettingsModalDeps): void {
 
       host.appendChild(stateSection.el);
     }
+
+    /* Agent cable (agent-cable brief M2) -------------------------- */
+    const cableSection = section('Agent cable');
+    const cableHint = document.createElement('div');
+    cableHint.className = 'emu86-hint';
+    cableHint.textContent =
+      'Streams this machine’s serial console to an agent-cable server ' +
+      'on YOUR OWN machine (node tools/agent-cable/server.mjs) so a ' +
+      'coding agent can watch and type. Loopback only — ws://localhost ' +
+      'or ws://127.0.0.1 URLs are the only shape accepted. Empty = off. ' +
+      'Applies immediately.';
+    cableSection.body.appendChild(cableHint);
+    const cableInput = document.createElement('input');
+    cableInput.type = 'text';
+    cableInput.className = 'emu86-input-text';
+    cableInput.placeholder = 'ws://localhost:8737/cable';
+    cableInput.value = settingsAtRender.agentCableUrl ?? '';
+    cableInput.setAttribute('aria-label', 'Agent cable URL (loopback ws:// only)');
+    const cableError = document.createElement('div');
+    cableError.className = 'emu86-hint';
+    cableError.style.color = 'var(--emu86-danger, #e05555)';
+    cableError.hidden = true;
+    cableError.textContent =
+      'refused: only ws://localhost[:port]/… or ws://127.0.0.1[:port]/… — ' +
+      'the console never streams anywhere but your own machine.';
+    cableInput.addEventListener('change', () => {
+      const raw = cableInput.value.trim();
+      const cur = deps.getSettings();
+      if (raw === '') {
+        cableError.hidden = true;
+        if (cur.agentCableUrl !== null) deps.onChange({ ...cur, agentCableUrl: null });
+        return;
+      }
+      if (!isValidAgentCableUrl(raw)) {
+        // Hard refusal at the setting (brief §1 M2): the invalid value
+        // is never stored, so nothing downstream needs to distrust it.
+        cableError.hidden = false;
+        return;
+      }
+      cableError.hidden = true;
+      if (cur.agentCableUrl !== raw) deps.onChange({ ...cur, agentCableUrl: raw });
+    });
+    cableSection.body.append(cableInput, cableError);
+    host.appendChild(cableSection.el);
 
     /* Storage usage ---------------------------------------------- */
     const storageSection = section('Storage usage');

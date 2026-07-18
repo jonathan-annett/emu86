@@ -30,6 +30,7 @@ import {
   type ThemePresetName,
 } from './themes.js';
 import { buildPingInstallerScript } from './ping-installer.js';
+import { isValidAgentCableUrl } from './agent-cable.js';
 
 /**
  * Discriminated union so adding new sources later (e.g. github in 9.3) is
@@ -128,6 +129,15 @@ export interface Settings {
    * permanently on this origin.
    */
   demoPlayed: boolean;
+  /**
+   * Agent cable (agent-cable brief M2): where this page streams its
+   * serial console so the agent can watch and type — a websocket
+   * server on the USER'S OWN machine (tools/agent-cable/server.mjs).
+   * HARD-validated to loopback ws:// only, at save AND on load (a
+   * hand-edited localStorage value gets the same refusal); null = off.
+   * Applies live — main.ts replugs on settings-changed, no reload.
+   */
+  agentCableUrl: string | null;
 }
 
 export const FONT_SIZE_MIN = 8;
@@ -245,6 +255,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autologin: 'user1',
   demoPlayed: false,
   autoNet: true,
+  agentCableUrl: null,
 };
 
 /**
@@ -406,6 +417,11 @@ export function loadSettings(): Settings {
   const autoNet = typeof obj.autoNet === 'boolean' ? obj.autoNet : DEFAULT_SETTINGS.autoNet;
   const demoPlayed =
     typeof obj.demoPlayed === 'boolean' ? obj.demoPlayed : DEFAULT_SETTINGS.demoPlayed;
+  // Agent cable (M2): the validator IS the schema — anything that
+  // isn't a loopback ws:// URL loads as "off", stored garbage included.
+  const agentCableUrl = isValidAgentCableUrl(obj.agentCableUrl)
+    ? obj.agentCableUrl
+    : DEFAULT_SETTINGS.agentCableUrl;
 
   return {
     fontSize,
@@ -418,6 +434,7 @@ export function loadSettings(): Settings {
     autologin,
     autoNet,
     demoPlayed,
+    agentCableUrl,
   };
 }
 

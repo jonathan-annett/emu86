@@ -60,7 +60,7 @@ parse/build is ~150 lines — the zip-writer precedent). Binds
   trip, buffer paging, machine listing, disconnect cleanup.
 - Run: `node tools/agent-cable/server.mjs` (default port 8737).
 
-### M2 — the page client (separate, gated, AFTER field fix #7 lands)
+### M2 — the page client (DONE 2026-07-18 — see AGENT_CABLE_REPORT.md)
 
 - Settings gains "agent cable URL". HARD validation: only
   `ws://localhost[:port]/...` or `ws://127.0.0.1...` ever accepted —
