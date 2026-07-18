@@ -109,3 +109,16 @@ setting, not at connect time. The server binds loopback and serves
 no TLS (localhost is its trust boundary). No tokens in v1 — single
 user, single box; recorded: a path token is a five-line addition if
 the box ever becomes multi-user.
+
+### M2.6 / M2.7 — proposed same session (Jonathan, during the ttt
+### debugging loop; NOT yet built)
+
+- **M2.6 — tab-shark on the cable**: the tab-shark page also dials
+  ws://localhost, with verbs to CLEAR the capture and DOWNLOAD the
+  export over HTTP — the agent stops needing a human ⬇ click per
+  diagnostic round (this loop needed four). Same loopback-only
+  trust story as the console cable.
+- **M2.7 — a refresh verb per PC**: `POST /refresh?to=<id>` →
+  `{cable:'refresh'}` → the page reloads itself — the agent can
+  roll a fleet onto a fresh dev deploy without hands (reload-resume
+  makes it safe by construction).
