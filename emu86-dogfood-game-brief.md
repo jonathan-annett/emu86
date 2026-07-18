@@ -95,3 +95,26 @@ findings.
 - **D3 — where the source lives**: 8086-tab-tools (his repo, his
   push) vs a new repo. Recommended: 8086-tab-tools, beside the ping
   installer it imitates.
+
+## 5. Addenda (same session)
+
+- **M3 — the useful payload** (Jonathan: "we can even do something
+  useful once we prove the loop"): once ttt proves the pipeline,
+  fetch and build the RECENT upstream ELKS `dhcp` and `ping` (the
+  ones learned about from the maintainer — both newer than our
+  pinned submodule, whose elkscmd/inet has neither) straight from
+  raw.githubusercontent.com/ghaerr/elks — CORS-open, so the loop
+  reaches them today. c86-compatibility of upstream sources is the
+  expected porting work.
+- **XMS memory ruling** (Jonathan, on seeing `SBRK … OUT OF HEAP
+  SPACE`): XMS-era machines keep the network UP through compiles —
+  the daemons no longer starve c86 (supporting datum: the socket()
+  probe compiled with ktcp+telnetd+ftpd all resident).
+  install-ttt.sh ships without `net stop`; the failure hint keeps
+  the pre-XMS escape hatch documented. Console-paste delivery is
+  DEAD — the shell heredoc heap is a 64K segment XMS cannot grow;
+  urlget writes files without shell buffering and is the loop
+  anyway.
+- **Status**: ttt.c + install-ttt.sh committed to 8086-tab-tools
+  (9e31456), AWAITING JONATHAN'S PUSH; then the loop runs agent-
+  driven end to end.
