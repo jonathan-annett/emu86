@@ -255,3 +255,27 @@ live capture buffer), and only a genuinely fresh blank window gets
 navigated to tabshark.html. Name lookup spans the browsing-context
 group, so every PC in one rack shares one shark; an unrelated
 standalone tab starts its own — accepted.
+
+## 5f. Addendum — package members must keep their addresses (field
+## bug 2026-07-18)
+
+Field report, same session as §5d/§5e: "sometimes mouse and cat are
+loaded into opposing slots (mouse is cat, cat is mouse). when this
+happens it's not possible to telnet straight away, eth: DROPPING
+packet to 10.0.2.16, one already queued awaiting ARP reply."
+
+Diagnosis (code-verified): `loadPackage` seeded each fresh PC with
+only `pendingRestoreStateId` — no sticky octet — so the two booting
+iframes RACED the TAN lease (`tanPreferredOctet` unset → first come,
+first addressed). When the race inverted, the iframe hosting mouse's
+capture came up behind cat's octet and vice versa: the guest wears
+its captured IP while the host cable answers for the other address,
+so ARP for .16 dies, and the rejoining reboot then stamps the guest
+with the SWAPPED lease — crossed names that look stable.
+
+Fix: `RackPackageMember` gains `octet` (the rail's octet at save
+time); `loadPackage` seeds it as `tanHostOctet`, so each member's
+lease ASK matches its capture and the pairing is deterministic.
+Additive manifest field — packages saved BEFORE the fix have no
+octets and stay racy: RE-SAVE the package once to pin it (recorded
+limit, honest).

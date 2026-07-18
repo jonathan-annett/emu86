@@ -154,3 +154,12 @@ Verified: typecheck clean; 4 new handoff-guard + 4 mailbox tests in
 the row, TTL refusal, corrupt-mailbox survival). NOT verified, same
 honesty as above: the real browser dance (spawn, claim, resume,
 bring-back) needs the field pass on dev.
+
+## Addendum §5f — the swapped-members package bug (field, 2026-07-18)
+
+Loading a saved 2-PC rack sometimes swapped mouse/cat (and killed
+telnet: unanswerable ARP for the swapped address). Root cause: the
+package members' fresh PCs raced the TAN lease unseeded. Fix: the
+manifest now records each member's octet and loadPackage seeds it as
+the sticky lease ask. Pre-fix packages carry no octets — re-save the
+package once to pin the pairing. Full diagnosis in brief §5f.

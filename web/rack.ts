@@ -675,7 +675,7 @@ async function saveRack(): Promise<void> {
       const label = pc.name ?? pc.id.slice(0, 11);
       note(`saving “${name.trim()}” — capturing ${label}…`, true);
       const stateId = await saveNamedViaPc(pc.id, `${name.trim()} / ${label}`);
-      members.push({ label: pc.name, stateId });
+      members.push({ label: pc.name, stateId, octet: pc.octet });
     }
     await packageStore.put({
       packageId:
@@ -704,11 +704,19 @@ saveBtn.addEventListener('click', () => { void saveRack(); });
 
 /** Load every member of a package as a fresh PC (named-save path).
  *  Restored members boot with a detached cable until their first
- *  reboot — existing named-save semantics, recorded in the brief. */
+ *  reboot — existing named-save semantics, recorded in the brief.
+ *  The saved octet seeds the sticky lease ask so each capture comes
+ *  up behind ITS OWN address (field bug 2026-07-18: unseeded, the
+ *  members raced the lease and sometimes loaded swapped — mouse
+ *  behind cat's octet, ARP for .16 unanswerable, names crossed
+ *  after the rejoining reboot). */
 function loadPackage(members: RackPackageMember[]): void {
   for (const member of members) {
     const id = mintPcId();
-    saveSessionAt(id, { pendingRestoreStateId: member.stateId });
+    saveSessionAt(id, {
+      pendingRestoreStateId: member.stateId,
+      tanHostOctet: member.octet ?? null,
+    });
     addPc(id, member.label);
   }
 }

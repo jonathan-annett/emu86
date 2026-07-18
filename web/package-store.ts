@@ -22,6 +22,15 @@ export interface RackPackageMember {
   label: string | null;
   /** The member's named save in `emu86-machines`. */
   stateId: string;
+  /**
+   * The member's TAN octet at save time, seeded back as the sticky
+   * lease ask on load (field bug 2026-07-18: without it the loading
+   * iframes RACE the lease, and mouse's capture can come up behind
+   * cat's address — swapped rail names, unanswerable ARP until the
+   * mismatch reboots away). Absent on pre-fix manifests (old rows
+   * stay racy — re-save the package to pin the pairing).
+   */
+  octet?: number | null;
 }
 
 export interface RackPackage {

@@ -18,8 +18,10 @@ function pkg(id: string, name: string, createdAt: number): RackPackage {
     name,
     createdAt,
     members: [
-      { label: 'mouse', stateId: `named-${id}-a` },
-      { label: 'cat', stateId: `named-${id}-b` },
+      // Octets ride the manifest (field bug 2026-07-18: they seed the
+      // sticky lease so members can't load behind each other's address).
+      { label: 'mouse', stateId: `named-${id}-a`, octet: 16 },
+      { label: 'cat', stateId: `named-${id}-b`, octet: 17 },
     ],
   };
 }
