@@ -115,3 +115,42 @@ dialog.
   `style.css` (the pill), rack.ts (adoption + lock poll)
 - M3: `web/package-store.ts` + tests, rack.ts (save/load/delete),
   `web/main.ts` (parent commands, saveNamedState returns the id)
+
+## Addenda §5d/§5e — the out-move + 🦈 (field asks 2026-07-18, same-day)
+
+Jonathan's housekeeping asks, ruled in mid-session (this rules IN
+D4's recorded "eject back"; brief §5d/§5e carry the full design):
+
+- **⇲ / 🗗 on every rail row** — move a PC out to its own tab (it
+  leaves the rack) or float it in its own window (it stays, the pane
+  shows a "bring it back" placeholder; "floating" = a separate
+  browser window, his clarification). The out-move mirrors the M2
+  dance with the requester reversed: `{emu86:'handoff'}` →
+  embedded main.ts runs the SAME freeze → durable-capture →
+  freshness-gate sequence as mountMoveToRack → `handoff-ready`
+  carries the record; only then is the iframe killed. The record
+  reaches the spawned top-level context through a nonce'd one-shot
+  localStorage mailbox (`emu86.handoff.v1`, 60 s TTL) claimed by
+  main.ts BEFORE anything reads the session, because a new tab
+  cannot read the rack's sessionStorage (the spec's session-storage
+  copy on window.open exists but its timing against a
+  blank-then-navigate spawn is not something to build on). The spawn
+  window opens synchronously in the click — popup blockers honor the
+  gesture, not the async dance. A 15 s dead-man in the PC unfreezes
+  if the requester dies mid-move; a hand-closed floating window
+  re-docks by itself (2 s poll; its pagehide teardown updated the
+  slot, sessionId is the continuity anchor). Package save refuses
+  while PCs float (their member capture would time out late).
+  Recorded wart (brief §5d): identity drifted while floating heals
+  by re-lease / honest refusal, the standing rewind law.
+- **🦈 on every PC page** (standalone, iframe, floated alike): opens
+  the shared NAMED tab-shark window, or brings it forward
+  UN-reloaded (`window.open('', 'emu86-tabshark')` first — a reload
+  would dump the capture buffer; only a genuinely fresh blank gets
+  navigated).
+
+Verified: typecheck clean; 4 new handoff-guard + 4 mailbox tests in
+`tests/unit/migrate.test.ts` (one-shot claim, nonce mismatch burns
+the row, TTL refusal, corrupt-mailbox survival). NOT verified, same
+honesty as above: the real browser dance (spawn, claim, resume,
+bring-back) needs the field pass on dev.

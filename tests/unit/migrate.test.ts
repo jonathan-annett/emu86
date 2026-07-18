@@ -11,7 +11,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ADOPT_ACK_TIMEOUT_MS,
+  HANDOFF_MAILBOX_TTL_MS,
+  claimHandoffMailbox,
+  isHandoffReply,
+  isHandoffRequest,
   mountMoveToRack,
+  writeHandoffMailbox,
   type AdoptRequestMsg,
   type MoveToRackDeps,
   type RackChannel,
@@ -195,5 +200,68 @@ describe('mountMoveToRack', () => {
     await mover.requestMove();
     expect(rig.events).toHaveLength(1);
     expect(rig.events[0]).toMatch(/^report:no rack tab is open/);
+  });
+});
+
+// ---- the out-move's shared pieces (brief §5d) --------------------------
+
+describe('handoff message guards', () => {
+  it('recognises exactly the handoff shapes', () => {
+    expect(isHandoffRequest({ emu86: 'handoff', requestId: 3 })).toBe(true);
+    expect(isHandoffRequest({ emu86: 'handoff' })).toBe(false); // no id
+    expect(isHandoffRequest({ emu86: 'focus' })).toBe(false);
+    expect(isHandoffRequest(null)).toBe(false);
+    expect(isHandoffRequest('handoff')).toBe(false);
+
+    expect(isHandoffReply({ emu86: 'handoff-ready', requestId: 1, record: RECORD, name: 'mouse' })).toBe(true);
+    expect(isHandoffReply({ emu86: 'handoff-refused', requestId: 1, error: 'nope' })).toBe(true);
+    expect(isHandoffReply({ emu86: 'handoff-ready' })).toBe(false); // no id
+    expect(isHandoffReply({ emu86: 'pc-status', requestId: 1 })).toBe(false);
+    expect(isHandoffReply(null)).toBe(false);
+  });
+});
+
+describe('handoff mailbox (the record carrier to the spawned context)', () => {
+  const store = new Map<string, string>();
+  beforeEach(() => {
+    store.clear();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k),
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+
+  it('round-trips a parked record, one-shot', () => {
+    writeHandoffMailbox({ nonce: 'n1', pcId: 'pc-a', record: RECORD, at: 1_000 });
+    const box = claimHandoffMailbox('n1', 1_500);
+    expect(box).not.toBeNull();
+    expect(box?.pcId).toBe('pc-a');
+    expect(box?.record).toEqual(RECORD);
+    // One-shot: the row is gone whatever happens next.
+    expect(claimHandoffMailbox('n1', 1_600)).toBeNull();
+    expect(store.size).toBe(0);
+  });
+
+  it('refuses a nonce mismatch — and still burns the row', () => {
+    writeHandoffMailbox({ nonce: 'n1', pcId: 'pc-a', record: RECORD, at: 1_000 });
+    expect(claimHandoffMailbox('other', 1_100)).toBeNull();
+    expect(store.size).toBe(0); // a mismatched row is another move's garbage
+  });
+
+  it('refuses a stale mailbox — a wreck from an interrupted move', () => {
+    writeHandoffMailbox({ nonce: 'n1', pcId: 'pc-a', record: RECORD, at: 1_000 });
+    expect(claimHandoffMailbox('n1', 1_000 + HANDOFF_MAILBOX_TTL_MS + 1)).toBeNull();
+  });
+
+  it('survives an empty or corrupt mailbox', () => {
+    expect(claimHandoffMailbox('n1', 0)).toBeNull();
+    store.set('emu86.handoff.v1', 'not json');
+    expect(claimHandoffMailbox('n1', 0)).toBeNull();
+    store.set('emu86.handoff.v1', JSON.stringify({ nonce: 'n1', pcId: 42, record: RECORD, at: 0 }));
+    expect(claimHandoffMailbox('n1', 0)).toBeNull();
   });
 });

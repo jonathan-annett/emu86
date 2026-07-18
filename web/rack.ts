@@ -41,6 +41,8 @@ import { forkLockName } from './drive-session.js';
 import {
   RACK_CHANNEL_NAME,
   isRackMsg,
+  isHandoffReply,
+  writeHandoffMailbox,
   type AdoptRequestMsg,
 } from './migrate.js';
 import { PackageStore, type RackPackageMember } from './package-store.js';
@@ -128,6 +130,9 @@ const machineStore = new MachineStore();
 const packageStore = new PackageStore();
 const pcs: RackPc[] = [];
 const frames = new Map<string, HTMLIFrameElement>();
+/** PCs floated to their own window (brief §5d): the WindowProxy we
+ *  opened (the hand-back channel) and the pane placeholder. */
+const floating = new Map<string, { win: Window; placeholder: HTMLDivElement }>();
 let selected: string | null = null;
 
 const rail = document.getElementById('rail') as HTMLDivElement;
@@ -160,14 +165,18 @@ function mintPcId(): string {
 
 // ---- PCs -------------------------------------------------------------
 
-function addPc(id: string, name: string | null = null): void {
-  pcs.push({ id, name, octet: null, state: 'booting' });
+function spawnFrame(id: string): void {
   const iframe = document.createElement('iframe');
   iframe.src = `./?pc=${encodeURIComponent(id)}`;
   iframe.title = `PC ${id}`;
   iframe.style.display = 'none';
   frames.set(id, iframe);
   pane.appendChild(iframe);
+}
+
+function addPc(id: string, name: string | null = null): void {
+  pcs.push({ id, name, octet: null, state: 'booting' });
+  spawnFrame(id);
   select(id);
 }
 
@@ -176,14 +185,21 @@ function select(id: string): void {
   for (const [pcId, frame] of frames) {
     frame.style.display = pcId === id ? '' : 'none';
   }
+  // A floated PC's pane slot is its placeholder (brief §5d).
+  for (const [pcId, f] of floating) {
+    f.placeholder.style.display = pcId === id ? '' : 'none';
+  }
   emptyHint.style.display = pcs.length === 0 ? '' : 'none';
   persistRack();
   renderRail();
   // Focus the machine the user just picked: the iframe window first,
   // then the terminal inside it (field ask 2026-07-18 — window focus
-  // alone leaves xterm's textarea unfocused).
+  // alone leaves xterm's textarea unfocused). A floated PC's real
+  // window comes forward instead.
   frames.get(id)?.contentWindow?.focus();
   postToPc(id, { emu86: 'focus' });
+  const away = floating.get(id);
+  if (away !== undefined && !away.win.closed) away.win.focus();
 }
 
 function renderRail(): void {
@@ -199,15 +215,46 @@ function renderRail(): void {
     const sub = document.createElement('span');
     sub.className = 'pc-sub';
     sub.textContent = pc.octet !== null ? `.${pc.octet}` : '';
-    const off = document.createElement('button');
-    off.className = 'pc-off';
-    off.textContent = '⏻';
-    off.title = 'turn off — removes this PC (unsaved machine state is lost; saved states and its drive fork persist)';
-    off.addEventListener('click', (e) => {
-      e.stopPropagation();
-      powerOff(pc);
-    });
-    row.append(dot, name, sub, off);
+    if (floating.has(pc.id)) {
+      // Floated out (brief §5d): the only rail action is bring-back —
+      // ⏻ and re-float wait until the machine is docked again.
+      sub.textContent = `${sub.textContent} · in a window`;
+      const back = document.createElement('button');
+      back.className = 'pc-move';
+      back.textContent = '⇱';
+      back.title = 'bring this PC back into the rack';
+      back.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void bringBack(pc.id);
+      });
+      row.append(dot, name, sub, back);
+    } else {
+      const toTab = document.createElement('button');
+      toTab.className = 'pc-move';
+      toTab.textContent = '⇲';
+      toTab.title = 'move this PC out to its own tab (it leaves the rack)';
+      toTab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void moveOut(pc, 'tab');
+      });
+      const toWin = document.createElement('button');
+      toWin.className = 'pc-move';
+      toWin.textContent = '🗗';
+      toWin.title = 'float this PC in its own window (it stays in the rack)';
+      toWin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void moveOut(pc, 'window');
+      });
+      const off = document.createElement('button');
+      off.className = 'pc-off';
+      off.textContent = '⏻';
+      off.title = 'turn off — removes this PC (unsaved machine state is lost; saved states and its drive fork persist)';
+      off.addEventListener('click', (e) => {
+        e.stopPropagation();
+        powerOff(pc);
+      });
+      row.append(dot, name, sub, toTab, toWin, off);
+    }
     row.addEventListener('click', () => select(pc.id));
     rail.appendChild(row);
   }
@@ -246,6 +293,191 @@ function powerOff(pc: RackPc): void {
   renderRail();
   note(`${label} turned off`);
 }
+
+// ---- the out-move (brief §5d): to a tab, or a floating window ---------
+//
+// Mirror of the M2 adoption with the requester reversed: the PC runs
+// the same freeze → durable-capture → freshness-gate dance and hands
+// its record over; only then does the rack kill its context and let
+// the spawned window resume it. Never pagehide-and-pray.
+
+let handoffSeq = 0;
+const handoffWaiters = new Map<
+  number,
+  (reply:
+    | { ok: true; record: SessionState; name: string | null }
+    | { ok: false; error: string }) => void
+>();
+
+window.addEventListener('message', (e: MessageEvent<unknown>) => {
+  if (e.origin !== location.origin) return;
+  if (!isHandoffReply(e.data)) return;
+  const waiter = handoffWaiters.get(e.data.requestId);
+  if (waiter === undefined) return;
+  handoffWaiters.delete(e.data.requestId);
+  if (e.data.emu86 === 'handoff-ready') {
+    waiter({ ok: true, record: e.data.record, name: e.data.name });
+  } else {
+    waiter({ ok: false, error: e.data.error });
+  }
+});
+
+/** A 640K capture can take a while — the M3 member-save number. */
+const HANDOFF_TIMEOUT_MS = 30_000;
+
+function requestHandoff(
+  post: (data: unknown) => void,
+): Promise<{ record: SessionState; name: string | null }> {
+  return new Promise((resolve, reject) => {
+    const requestId = ++handoffSeq;
+    const timer = setTimeout(() => {
+      handoffWaiters.delete(requestId);
+      reject(new Error('the PC did not answer the handoff'));
+    }, HANDOFF_TIMEOUT_MS);
+    handoffWaiters.set(requestId, (reply) => {
+      clearTimeout(timer);
+      if (reply.ok) resolve({ record: reply.record, name: reply.name });
+      else reject(new Error(reply.error));
+    });
+    post({ emu86: 'handoff', requestId });
+  });
+}
+
+function mintNonce(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `n-${Math.random().toString(36).slice(2)}`;
+}
+
+async function moveOut(pc: RackPc, mode: 'tab' | 'window'): Promise<void> {
+  const label = pc.name ?? pc.id.slice(0, 11);
+  // The spawn window opens SYNCHRONOUSLY in the click — popup blockers
+  // honor the gesture, not the async dance that follows. Named target
+  // for the float, so a double-click can't fork two windows.
+  const spawn = window.open(
+    '',
+    mode === 'window' ? `emu86-pc-${pc.id}` : '_blank',
+    mode === 'window' ? 'popup=yes,width=1000,height=720' : '',
+  );
+  if (spawn === null) {
+    note('the browser blocked the new window — allow popups for this site');
+    return;
+  }
+  try {
+    spawn.document.title = `moving ${label}…`;
+    spawn.document.body.append(`moving ${label}…`);
+  } catch { /* cosmetic only */ }
+  dbg(`moving ${label} out to a ${mode} — requesting handoff`);
+  note(`moving ${label} out…`, true);
+  try {
+    const { record } = await requestHandoff((data) => postToPc(pc.id, data));
+    const nonce = mintNonce();
+    writeHandoffMailbox({ nonce, pcId: pc.id, record, at: Date.now() });
+    frames.get(pc.id)?.remove();
+    frames.delete(pc.id);
+    await locksClear(lockNamesFor(record), 5_000);
+    spawn.location.href = `./?pc=${encodeURIComponent(pc.id)}&claim=${encodeURIComponent(nonce)}`;
+    if (mode === 'tab') {
+      // The PC has LEFT the rack: row and namespaced record go. The
+      // resume slot is KEPT — the machine lives on (contrast ⏻).
+      const at = pcs.findIndex((p) => p.id === pc.id);
+      if (at >= 0) pcs.splice(at, 1);
+      try {
+        sessionStorage.removeItem(storageKeyFor(pc.id));
+      } catch { /* dies with the tab anyway */ }
+      if (selected === pc.id) selected = pcs[0]?.id ?? null;
+      note(`${label} moved to its own tab`);
+    } else {
+      floating.set(pc.id, { win: spawn, placeholder: mountPlaceholder(pc) });
+      note(`${label} floated to its own window`);
+    }
+    if (selected !== null) {
+      select(selected);
+    } else {
+      emptyHint.style.display = pcs.length === 0 ? '' : 'none';
+      persistRack();
+      renderRail();
+    }
+  } catch (err) {
+    try {
+      spawn.close();
+    } catch { /* already gone */ }
+    // Belt and braces: a PC that never answered may still be frozen —
+    // an unfreeze to a healthy one is a no-op.
+    postToPc(pc.id, { emu86: 'set-paused', paused: false });
+    note(`move failed — ${String(err)}`);
+  }
+}
+
+function mountPlaceholder(pc: RackPc): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = 'pc-away';
+  const text = document.createElement('p');
+  text.textContent = `${pc.name ?? 'this PC'} is running in its own window.`;
+  const back = document.createElement('button');
+  back.textContent = 'bring it back into the rack';
+  back.addEventListener('click', () => {
+    void bringBack(pc.id);
+  });
+  el.append(text, back);
+  el.style.display = 'none';
+  pane.appendChild(el);
+  return el;
+}
+
+async function bringBack(id: string): Promise<void> {
+  const away = floating.get(id);
+  const pc = pcs.find((p) => p.id === id);
+  if (away === undefined || pc === undefined) return;
+  const label = pc.name ?? pc.id.slice(0, 11);
+  if (away.win.closed) {
+    // Closed by hand: its pagehide teardown updated the resume slot,
+    // and sessionId (the slot key) never drifts — the rack's copy of
+    // the record is enough. Octet/fork drift heals by re-lease / the
+    // generation machinery's honest refusal (recorded wart, §5d).
+    reDock(pc, loadSessionAt(pc.id));
+    return;
+  }
+  dbg(`bringing ${label} back — requesting handoff from its window`);
+  note(`bringing ${label} back…`, true);
+  try {
+    const { record } = await requestHandoff((data) =>
+      away.win.postMessage(data, location.origin));
+    saveSessionAt(pc.id, record); // the window's truth over our stale copy
+    away.win.close();
+    reDock(pc, record);
+  } catch (err) {
+    note(`bring-back failed — ${String(err)} (the window keeps the machine)`);
+  }
+}
+
+function reDock(pc: RackPc, record: SessionState): void {
+  const away = floating.get(pc.id);
+  away?.placeholder.remove();
+  floating.delete(pc.id);
+  void (async () => {
+    await locksClear(lockNamesFor(record), 5_000);
+    spawnFrame(pc.id);
+    select(pc.id);
+    note(`${pc.name ?? pc.id.slice(0, 11)} is back in the rack`);
+  })();
+}
+
+// A floated window the user closes by hand re-docks on its own — the
+// poll notices and restores from the rack's copy of the record.
+setInterval(() => {
+  for (const [id, away] of floating) {
+    if (!away.win.closed) continue;
+    const pc = pcs.find((p) => p.id === id);
+    if (pc === undefined) {
+      floating.delete(id);
+      away.placeholder.remove();
+      continue;
+    }
+    note(`${pc.name ?? id.slice(0, 11)}'s window closed — re-docking`);
+    reDock(pc, loadSessionAt(id));
+  }
+}, 2_000);
 
 // ---- the [+] picker ---------------------------------------------------
 
@@ -426,6 +658,12 @@ async function saveRack(): Promise<void> {
     note('nothing to save — the rack is empty');
     return;
   }
+  if (floating.size > 0) {
+    // A floated PC has no iframe to answer the member capture — the
+    // save would sit on the 30 s timeout and fail late. Refuse early.
+    note('bring floating PCs back into the rack before saving it as a package');
+    return;
+  }
   const name = prompt('package name?', 'my lab');
   if (name === null || name.trim() === '') return;
   saveBtn.disabled = true;
@@ -570,12 +808,7 @@ announce();
 const saved = loadRack();
 for (const { id } of saved.pcs) {
   pcs.push({ id, name: null, octet: null, state: 'booting' });
-  const iframe = document.createElement('iframe');
-  iframe.src = `./?pc=${encodeURIComponent(id)}`;
-  iframe.title = `PC ${id}`;
-  iframe.style.display = 'none';
-  frames.set(id, iframe);
-  pane.appendChild(iframe);
+  spawnFrame(id);
 }
 if (saved.selected !== null) {
   select(saved.selected);

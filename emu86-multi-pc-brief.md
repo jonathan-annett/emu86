@@ -196,3 +196,62 @@ WINDOW; the terminal inside needs it explicitly. The rack now also
 posts `{emu86:'focus'}` down the parent-command channel and embedded
 main.ts answers with term.focus() — the same funnel every overlay
 dismissal uses.
+
+## 5d. Addendum — move a PC OUT: to a tab or its own window (field
+## ask 2026-07-18; this RULES IN D4's recorded "eject back")
+
+Jonathan: "add a way to move a pc back to either a tab or a floating
+window. with the floating window, keep the pc in the list, but put a
+placeholder button in the iframe view to restore the floating window
+back into the iframe" (clarified same session: floating = a separate
+browser window, not system z-order).
+
+The out-move mirrors the M2 dance with the requester reversed —
+durable capture FIRST, never pagehide-and-pray:
+
+1. The rail row gains ⇲ (to a tab) and 🗗 (to a window). The click
+   opens the spawn window SYNCHRONOUSLY (popup blockers honor the
+   gesture) as a blank "moving…" placeholder, then asks the iframe
+   to hand off: `{emu86:'handoff'}` → embedded main.ts runs the SAME
+   freeze → durable-capture → freshness-gate dance mountMoveToRack
+   runs, and answers `handoff-ready` with its session record (or
+   `handoff-refused` and unfreezes; a 15 s dead-man unfreezes the
+   machine if the requester dies mid-dance).
+2. The rack writes the record to a one-shot localStorage mailbox
+   (`emu86.handoff.v1`, nonce'd, 60 s shelf life), removes the
+   iframe, waits for its Web Locks to clear (the adopt() pattern),
+   then navigates the spawn window to `./?pc=<id>&claim=<nonce>`.
+   main.ts claims the mailbox into its own sessionStorage BEFORE
+   anything reads the session record, strips `claim` from the URL,
+   and the ordinary reload-resume path does the rest. (The spawned
+   context keeps `?pc=`; a top-level `?pc=` page was already legal —
+   postRackStatus self-gates on `window.parent === window`.)
+3. To a TAB: the PC leaves the rack — row and namespaced session
+   record removed; the resume slot is KEPT (the machine lives on;
+   contrast ⏻ power-off, which deletes it).
+   To a WINDOW: the row stays; the pane shows a placeholder with a
+   "bring it back" button; the popup is a NAMED window
+   (`emu86-pc-<id>`), so a double-click can't fork two.
+4. Bring-back = the same handoff aimed at the popup through its
+   WindowProxy: ready → saveSessionAt(pc, record) over the rack's
+   stale copy → rack closes the popup → locks clear → fresh iframe,
+   same pc id, same rail row. A popup the user closed by hand is
+   noticed (2 s poll) and restored from the rack's copy — the
+   popup's own pagehide teardown updated the resume slot, and
+   sessionId is the continuity anchor. Recorded wart: identity that
+   drifted while floating (sticky octet, fork generation) heals by
+   re-lease / the generation machinery's honest refusal — the same
+   law as every other rewind.
+
+## 5e. Addendum — 🦈 on every PC (field ask 2026-07-18)
+
+"add a link on each pc to open a tab-shark tab (or if one exists, to
+switch to it)." A 🦈 button on the PC page itself — so standalone
+tabs, rack iframes and floated windows all carry it — opens
+tab-shark in a shared NAMED window (`emu86-tabshark`). The
+open-or-focus trick: `window.open('', name)` first; an existing
+named window comes forward UN-reloaded (a reload would dump its
+live capture buffer), and only a genuinely fresh blank window gets
+navigated to tabshark.html. Name lookup spans the browsing-context
+group, so every PC in one rack shares one shark; an unrelated
+standalone tab starts its own — accepted.

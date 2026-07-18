@@ -119,6 +119,35 @@ header code {
   outline-offset: 1px;
 }
 
+/* 🦈 on every PC (multi-PC brief §5e): open-or-focus the shared
+   tab-shark window. Below the gear — the top row is spoken for
+   (gear, demo ▶, the move-to-rack pill). */
+#tab-shark {
+  position: fixed;
+  top: 3rem;
+  right: 0.5rem;
+  z-index: 10;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #333;
+  border-radius: 50%;
+  background: #1c1c1c;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tab-shark:hover,
+#tab-shark:focus-visible {
+  background: #2a2a2a;
+  outline: 2px solid #4a90e2;
+  outline-offset: 1px;
+}
+
 /* Multi-PC brief M2: the migrate affordance — a pill beside the gear,
    present only while a rack tab is announcing. */
 #move-to-rack {

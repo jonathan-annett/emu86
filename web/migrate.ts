@@ -97,6 +97,100 @@ export interface MoveToRack {
   requestMove(): Promise<void>;
 }
 
+// ---- the rack→tab/window move (brief §5d) -----------------------------
+//
+// The out-move's shared pieces: the window-message shapes the rack and
+// a PC exchange (over parent/opener postMessage, NOT the broadcast
+// channel — the requester holds a direct reference to the context it
+// is asking), and the one-shot localStorage mailbox that carries the
+// session record to the freshly spawned top-level context (a new tab
+// cannot read the rack's sessionStorage; the spec's session-storage
+// copy on window.open is real but its timing against a blank-then-
+// navigate spawn is not something to build on — the mailbox is
+// deterministic).
+
+/** Rack/opener → PC: freeze, capture durably, hand your record over. */
+export interface HandoffRequestMsg {
+  emu86: 'handoff';
+  requestId: number;
+}
+/** PC → requester: slot is durable, here is everything; kill me. */
+export interface HandoffReadyMsg {
+  emu86: 'handoff-ready';
+  requestId: number;
+  record: SessionState;
+  name: string | null;
+}
+/** PC → requester: cannot move (reason inside); machine resumed. */
+export interface HandoffRefusedMsg {
+  emu86: 'handoff-refused';
+  requestId: number;
+  error: string;
+}
+
+export function isHandoffRequest(data: unknown): data is HandoffRequestMsg {
+  return typeof data === 'object' && data !== null
+    && (data as { emu86?: unknown }).emu86 === 'handoff'
+    && typeof (data as { requestId?: unknown }).requestId === 'number';
+}
+
+export function isHandoffReply(data: unknown): data is HandoffReadyMsg | HandoffRefusedMsg {
+  if (data === null || typeof data !== 'object') return false;
+  const tag = (data as { emu86?: unknown }).emu86;
+  if (tag !== 'handoff-ready' && tag !== 'handoff-refused') return false;
+  return typeof (data as { requestId?: unknown }).requestId === 'number';
+}
+
+const HANDOFF_MAILBOX_KEY = 'emu86.handoff.v1';
+/** A mailbox older than this is a wreck from an interrupted move, not
+ *  a live handoff — refuse it so a stale claim can't resurrect. */
+export const HANDOFF_MAILBOX_TTL_MS = 60_000;
+
+export interface HandoffMailbox {
+  nonce: string;
+  pcId: string;
+  record: SessionState;
+  at: number;
+}
+
+/** Rack side: park the record for the spawned context to claim. */
+export function writeHandoffMailbox(box: HandoffMailbox): void {
+  try {
+    localStorage.setItem(HANDOFF_MAILBOX_KEY, JSON.stringify(box));
+  } catch { /* quota/private mode — the claim will simply find nothing */ }
+}
+
+/**
+ * Spawned-context side: claim the mailbox if the nonce matches and it
+ * is fresh. One-shot — the row is removed whether or not it matched
+ * this claimant's nonce (a mismatched row is another move's garbage).
+ */
+export function claimHandoffMailbox(
+  nonce: string,
+  now: number = Date.now(),
+): HandoffMailbox | null {
+  try {
+    const raw = localStorage.getItem(HANDOFF_MAILBOX_KEY);
+    if (raw === null) return null;
+    localStorage.removeItem(HANDOFF_MAILBOX_KEY);
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') return null;
+    const box = parsed as { nonce?: unknown; pcId?: unknown; record?: unknown; at?: unknown };
+    if (box.nonce !== nonce) return null;
+    if (typeof box.pcId !== 'string' || typeof box.at !== 'number') return null;
+    if (box.record === null || typeof box.record !== 'object') return null;
+    if (now - box.at > HANDOFF_MAILBOX_TTL_MS) return null;
+    return {
+      nonce,
+      pcId: box.pcId,
+      record: box.record as SessionState,
+      at: box.at,
+    };
+  } catch {
+    return null; // unparseable/blocked storage — the boot just proceeds fresh
+  }
+}
+
 export function mountMoveToRack(deps: MoveToRackDeps): MoveToRack {
   const now = deps.now ?? (() => Date.now());
   const racks = new Set<string>();

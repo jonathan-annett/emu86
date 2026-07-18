@@ -58,6 +58,7 @@ import {
   type DriveSession,
 } from './drive-session.js';
 import { mountSettingsModal } from './settings-modal.js';
+import { plugAgentCable, type AgentCable } from './agent-cable.js';
 import { AutoexecRunner } from './autoexec.js';
 import { createKeyClick } from './keyfx.js';
 import { modeSequence, TxModeTracker, type TxModeState } from './tx-modes.js';
@@ -66,9 +67,16 @@ import {
   mintSessionId,
   sanitizePcId,
   saveSession,
+  saveSessionAt,
   storageKeyFor,
 } from './session-store.js';
-import { RACK_CHANNEL_NAME, mountMoveToRack } from './migrate.js';
+import {
+  RACK_CHANNEL_NAME,
+  claimHandoffMailbox,
+  isHandoffRequest,
+  mountMoveToRack,
+  type HandoffReadyMsg,
+} from './migrate.js';
 import {
   CLONE_CHANNEL_NAME,
   mountCloneParent,
@@ -117,6 +125,31 @@ async function init(): Promise<void> {
   if (!container) {
     throw new Error('main.ts: missing #terminal container');
   }
+
+  // The rack→tab/window move (multi-PC brief §5d), claimant side: a
+  // context spawned by a rack handoff adopts the parked session record
+  // into its OWN sessionStorage before anything below reads it, then
+  // strips the nonce from the URL so a later reload is an ordinary
+  // ?pc= boot. A failed claim (stale mailbox, nonce mismatch) just
+  // boots fresh — honest and visible, never a half-adopted identity.
+  try {
+    const params = new URLSearchParams(location.search);
+    const claimNonce = params.get('claim');
+    const claimPc = sanitizePcId(params.get('pc'));
+    if (claimNonce !== null) {
+      const box = claimHandoffMailbox(claimNonce);
+      if (box !== null && claimPc !== null && box.pcId === claimPc) {
+        saveSessionAt(claimPc, box.record);
+      }
+      params.delete('claim');
+      const rest = params.toString();
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${rest === '' ? '' : `?${rest}`}`,
+      );
+    }
+  } catch { /* no storage/History API — the fresh-boot fallback stands */ }
 
   // Settings are read synchronously up-front. Library validation is async
   // and runs after the library is opened — we still want the terminal to
@@ -345,6 +378,47 @@ async function init(): Promise<void> {
   const worker = new Worker(new URL('./worker.ts', import.meta.url), {
     type: 'module',
     name: 'emu86-worker',
+  });
+
+  // The agent cable (agent-cable brief M2): with a loopback URL set in
+  // settings, dial the localhost cable server and give the agent live
+  // console access on ANY tier — unlike the dev-only M2.5 bridge below.
+  // TX out and RX in ride the exact paths the terminal and keyboard
+  // use, so what the agent sees and types is what the human would.
+  // Identity re-hellos when the TAN lease settles; URL changes replug
+  // live off settings-changed (no reload). Rack iframes run this same
+  // code against the same localStorage and dial in as themselves (?pc=).
+  let agentCable: AgentCable | null = null;
+  let agentCableUrl: string | null = null;
+  let cableTanName: string | null = null;
+  function applyAgentCable(url: string | null): void {
+    if (url === agentCableUrl) return;
+    const hadCable = agentCable !== null;
+    agentCableUrl = url;
+    agentCable?.unplug();
+    agentCable = null;
+    if (url === null) {
+      if (hadCable) syslog.log('agent cable: unplugged');
+      return;
+    }
+    agentCable = plugAgentCable({
+      url,
+      identity: () => ({
+        name: cableTanName,
+        octet: loadSession().tanHostOctet,
+        pc: embeddedPcId,
+        build: buildLabel,
+      }),
+      onRx: (bytes) => {
+        const msg: MainToWorkerMessage = { type: 'rx', bytes };
+        worker.postMessage(msg);
+      },
+      onStatus: (text) => syslog.log(text),
+    });
+  }
+  applyAgentCable(settings.agentCableUrl);
+  document.addEventListener(SETTINGS_CHANGED_EVENT, (e) => {
+    applyAgentCable((e as CustomEvent<Settings>).detail.agentCableUrl);
   });
 
   // Latest pacing stats (worker posts ~1/sec) — read by the console
@@ -1016,6 +1090,98 @@ async function init(): Promise<void> {
     });
   }
 
+  // Multi-PC brief §5d — the out-move's PC side. The rack asks this
+  // context to hand itself over: through window.parent for an embedded
+  // PC (⇲/🗗 on the rail), through window.opener for a floated window
+  // being brought back. Same dance as mountMoveToRack — freeze,
+  // durable capture, freshness gate, then the record — and the
+  // REQUESTER kills this context; a dead-man timer unfreezes the
+  // machine if it never does.
+  if (embeddedPcId !== null) {
+    let handoffBusy = false;
+    window.addEventListener('message', (e: MessageEvent<unknown>) => {
+      if (e.origin !== location.origin) return;
+      const fromParent = window.parent !== window && e.source === window.parent;
+      const fromOpener = window.opener !== null && e.source === window.opener;
+      if (!fromParent && !fromOpener) return;
+      if (!isHandoffRequest(e.data)) return;
+      if (handoffBusy) return;
+      handoffBusy = true;
+      const requestId = e.data.requestId;
+      const requester = e.source as Window;
+      void (async () => {
+        const refuse = (error: string): void => {
+          handoffBusy = false;
+          const thaw: MainToWorkerMessage = { type: 'set-paused', paused: false };
+          worker.postMessage(thaw);
+          requester.postMessage(
+            { emu86: 'handoff-refused', requestId, error },
+            location.origin,
+          );
+        };
+        dbg('handoff — freezing for the out-move (teardown freeze)');
+        const freeze: MainToWorkerMessage = {
+          type: 'set-paused',
+          paused: true,
+          reason: 'teardown',
+        };
+        worker.postMessage(freeze);
+        const started = Date.now();
+        try {
+          await resumeCaptureSettled.catch(() => { /* that beat already reported */ });
+          maybeRefreshResumeSlot(true);
+          await resumeCaptureSettled;
+        } catch (err) {
+          refuse(`capture failed — ${String(err)}`);
+          return;
+        }
+        const meta = await machineStore.getMeta(ownResumeSlotId).catch(() => null);
+        if (meta === null || meta.lastTouched < started) {
+          refuse(
+            'no resumable state (a machine restored from a named save needs a reboot first)',
+          );
+          return;
+        }
+        const octet = loadSession().tanHostOctet;
+        const ready: HandoffReadyMsg = {
+          emu86: 'handoff-ready',
+          requestId,
+          record: loadSession(),
+          name: octet !== null ? nameForOctet(octet) : null,
+        };
+        dbg('handoff — slot durable, record handed over; awaiting teardown');
+        requester.postMessage(ready, location.origin);
+        setTimeout(() => {
+          if (!handoffBusy) return;
+          handoffBusy = false;
+          const thaw: MainToWorkerMessage = { type: 'set-paused', paused: false };
+          worker.postMessage(thaw);
+          syslog.log('the move never completed — machine resumed here', { toast: true });
+        }, 15_000);
+      })();
+    });
+  }
+
+  // 🦈 on every PC (multi-PC brief §5e): open-or-focus the shared
+  // tab-shark window. `window.open('', name)` finds an existing named
+  // window WITHOUT navigating it — a reload would dump its live
+  // capture buffer — and only a genuinely fresh blank window gets
+  // pointed at tabshark.html.
+  const sharkBtn = document.getElementById('tab-shark');
+  sharkBtn?.addEventListener('click', () => {
+    const w = window.open('', 'emu86-tabshark');
+    if (w === null) {
+      syslog.log('the browser blocked the tab-shark window', { toast: true });
+      return;
+    }
+    let isShark = false;
+    try {
+      isShark = w.location.pathname.endsWith('/tabshark.html');
+    } catch { /* same-origin by construction; belt and braces */ }
+    if (!isShark) w.location.href = './tabshark.html';
+    w.focus();
+  });
+
   // Rack M3: an embedded PC obeys two parent commands — freeze/thaw
   // (the package capture holds the whole rack still) and save-named
   // (a member capture, answered with its stateId for the manifest).
@@ -1289,6 +1455,7 @@ async function init(): Promise<void> {
     const msg = event.data;
     if (msg.type === 'tx') {
       term.write(msg.bytes);
+      agentCable?.tx(msg.bytes);
       txTailAppend(msg.bytes);
       txModes.feed(msg.bytes);
       if (autoexec !== null && autoexec.active) {
@@ -1568,6 +1735,10 @@ async function init(): Promise<void> {
       saveSession({ tanHostOctet: msg.hostOctet });
       postRackStatus({ name: msg.name ?? null, octet: msg.hostOctet });
       dbg.setIdentity(msg.hostOctet, msg.name ?? null);
+      // Tell the cable server who this machine turned out to be —
+      // identity() reads the session, so save first, hello second.
+      cableTanName = msg.name ?? null;
+      agentCable?.refreshIdentity();
       if (msg.detached === true) {
         // Phase 18 M3 field find: a restored (cloned / named-save)
         // machine wears the CAPTURE's network identity, so its cable
