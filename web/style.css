@@ -122,7 +122,7 @@ header code {
 /* 🦈 on every PC (multi-PC brief §5e): open-or-focus the shared
    tab-shark window. Left of the gear (field ask 2026-07-18: the
    below-the-gear spot collided with the editor slide-out tab); the
-   conditional demo ▶ / move-to-rack pill shift further left. */
+   conditional demo ▶ sits further left. */
 #tab-shark {
   position: fixed;
   top: 0.5rem;
@@ -144,32 +144,6 @@ header code {
 
 #tab-shark:hover,
 #tab-shark:focus-visible {
-  background: #2a2a2a;
-  outline: 2px solid #4a90e2;
-  outline-offset: 1px;
-}
-
-/* Multi-PC brief M2: the migrate affordance — a pill beside the gear,
-   present only while a rack tab is announcing. */
-#move-to-rack {
-  position: fixed;
-  top: 0.5rem;
-  right: 5.5rem;
-  z-index: 10;
-  height: 2rem;
-  padding: 0 0.8rem;
-  border: 1px solid #333;
-  border-radius: 1rem;
-  background: #1c1c1c;
-  color: #e0e0e0;
-  font: inherit;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-#move-to-rack:hover,
-#move-to-rack:focus-visible {
   background: #2a2a2a;
   outline: 2px solid #4a90e2;
   outline-offset: 1px;

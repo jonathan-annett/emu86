@@ -1,19 +1,27 @@
 /**
- * The tab→rack move (multi-PC brief M2) — the standalone tab's side.
+ * The rack adoption protocol (multi-PC brief M2, INVERTED by §5g) —
+ * the standalone PC's side.
  *
- * Discovery: racks announce `{rack:'here', rackId}` on the
- * `emu86-rack-v1` channel (on open, and again for every `probe`);
- * a standalone tab probes at mount and shows its "move to the rack"
- * affordance while at least one rack has answered.
+ * §5g's pull model (Jonathan's design, 2026-07-18): PCs are
+ * completely rack-agnostic. They never discover racks, never choose
+ * one, carry no button. A rack's [+] picker broadcasts
+ * `{rack:'pc-probe'}`; every standalone machine answers
+ * `{rack:'pc-here', sessionId, name, octet, state}`; picking one
+ * sends `{rack:'adopt-invite', toSession, rackId}` — and only then
+ * does the PC run the move, aimed at exactly that rack. (The M2
+ * push model — racks announcing 'here', tabs probing, a per-tab
+ * "move to the rack" button picking the first answerer — retired
+ * with §5g. Archived builds still speak it on this channel; both
+ * sides ignore the other era's verbs by construction.)
  *
- * The move itself is the F5 path aimed elsewhere:
+ * The move itself is unchanged — the F5 path aimed elsewhere:
  *   1. freeze the machine (set-paused reason:'teardown' — the worker
  *      broadcasts the TAN freeze, so open connections hold);
  *   2. capture the frozen machine into the resume slot and WAIT for
  *      the row to be durable (the one new requirement over F5, where
  *      the teardown grace does the waiting);
- *   3. send the whole session record to the chosen rack and wait for
- *      its ack;
+ *   3. send the whole session record to the INVITING rack and wait
+ *      for its ack;
  *   4. clear this tab's own record (a later visit to ./ must mint a
  *      fresh PC, not fight the rack over this one) and navigate to
  *      moved.html — pagehide fires, the page dies, its Web Locks
@@ -21,7 +29,9 @@
  *      machine, thawing its peers.
  *
  * Every abort path unfreezes: a machine must never stay frozen
- * because a rack stopped answering.
+ * because a rack stopped answering. A PC mid-move ignores further
+ * invites (two racks inviting at once: first wins, second times out
+ * at its picker with the machine unharmed).
  */
 
 import type { SessionState } from './session-store.js';
@@ -30,12 +40,23 @@ export const RACK_CHANNEL_NAME = 'emu86-rack-v1';
 /** How long the tab waits for the rack's adopt-ack before aborting. */
 export const ADOPT_ACK_TIMEOUT_MS = 4_000;
 
-export interface RackHereMsg {
-  rack: 'here';
-  rackId: string;
+/** Rack → everyone: who's out there? (picker open, §5g) */
+export interface PcProbeMsg {
+  rack: 'pc-probe';
 }
-export interface RackProbeMsg {
-  rack: 'probe';
+/** Standalone PC → racks: identity card for the picker's gold rows. */
+export interface PcHereMsg {
+  rack: 'pc-here';
+  sessionId: string;
+  name: string | null;
+  octet: number | null;
+  state: 'booting' | 'running' | 'frozen' | 'halted';
+}
+/** Rack → one PC: this rack wants you; run the move at me. */
+export interface AdoptInviteMsg {
+  rack: 'adopt-invite';
+  toSession: string;
+  rackId: string;
 }
 export interface AdoptRequestMsg {
   rack: 'adopt-request';
@@ -52,7 +73,12 @@ export interface AdoptAckMsg {
   nonce: string;
   ok: boolean;
 }
-export type RackMsg = RackHereMsg | RackProbeMsg | AdoptRequestMsg | AdoptAckMsg;
+export type RackMsg =
+  | PcProbeMsg
+  | PcHereMsg
+  | AdoptInviteMsg
+  | AdoptRequestMsg
+  | AdoptAckMsg;
 
 export function isRackMsg(data: unknown): data is RackMsg {
   return typeof data === 'object' && data !== null && 'rack' in data;
@@ -64,10 +90,14 @@ export interface RackChannel {
   onmessage: ((ev: { data: unknown }) => void) | null;
 }
 
-export interface MoveToRackDeps {
+export interface PcPresenceDeps {
   channel: RackChannel;
-  /** Show/hide the affordance as racks appear/disappear from memory. */
-  onRackPresence(present: boolean): void;
+  /** This context's stable session id — how invites find us. */
+  sessionId(): string;
+  currentName(): string | null;
+  currentOctet(): number | null;
+  /** Live machine state for the picker's animated indicator. */
+  machineState(): PcHereMsg['state'];
   /** set-paused reason:'teardown' → the worker (freeze + TAN freeze). */
   freeze(): void;
   /** set-paused false → the worker (also takes the TAN freeze back). */
@@ -80,7 +110,6 @@ export interface MoveToRackDeps {
    *  reference slot, and migrating it would silently cold-boot). */
   slotFreshSince(since: number): Promise<boolean>;
   currentRecord(): SessionState;
-  currentName(): string | null;
   /** Drop this tab's own session record (post-ack, pre-navigation). */
   clearOwnSession(): void;
   report(text: string): void;
@@ -89,12 +118,9 @@ export interface MoveToRackDeps {
   now?(): number;
 }
 
-export interface MoveToRack {
-  /** Racks currently known — the affordance's enable state. */
-  rackCount(): number;
-  /** Run the whole move dance. Resolves when the tab is navigating
-   *  (success) or after an abort (machine unfrozen, reason reported). */
-  requestMove(): Promise<void>;
+export interface PcPresence {
+  /** A move is in flight (invite accepted, not yet navigated/aborted). */
+  moving(): boolean;
 }
 
 // ---- the rack→tab/window move (brief §5d) -----------------------------
@@ -191,35 +217,44 @@ export function claimHandoffMailbox(
   }
 }
 
-export function mountMoveToRack(deps: MoveToRackDeps): MoveToRack {
+export function mountPcPresence(deps: PcPresenceDeps): PcPresence {
   const now = deps.now ?? (() => Date.now());
-  const racks = new Set<string>();
   let ackWaiter: ((msg: AdoptAckMsg) => void) | null = null;
+  let moving = false;
 
   deps.channel.onmessage = (ev) => {
     const data = ev.data;
     if (!isRackMsg(data)) return;
-    if (data.rack === 'here') {
-      if (typeof data.rackId === 'string' && data.rackId.length > 0) {
-        racks.add(data.rackId);
-        deps.onRackPresence(true);
-      }
+    if (data.rack === 'pc-probe') {
+      const here: PcHereMsg = {
+        rack: 'pc-here',
+        sessionId: deps.sessionId(),
+        name: deps.currentName(),
+        octet: deps.currentOctet(),
+        state: deps.machineState(),
+      };
+      deps.channel.postMessage(here);
+      return;
+    }
+    if (data.rack === 'adopt-invite') {
+      if (data.toSession !== deps.sessionId()) return; // someone else's card
+      if (moving) return; // first inviter wins; the second's picker times out
+      moving = true;
+      void moveTo(data.rackId).finally(() => {
+        moving = false;
+      });
       return;
     }
     if (data.rack === 'adopt-ack') {
       ackWaiter?.(data);
       return;
     }
-    // 'probe' is rack-bound; 'adopt-request' is another tab's business.
+    // 'pc-here' is rack-bound; 'adopt-request' is another PC's business.
+    // Retired-era verbs ('here'/'probe' from archived builds) fall
+    // through here too — deliberately ignored.
   };
-  deps.channel.postMessage({ rack: 'probe' });
 
-  async function requestMove(): Promise<void> {
-    const rackId = [...racks][0];
-    if (rackId === undefined) {
-      deps.report('no rack tab is open — open rack.html first');
-      return;
-    }
+  async function moveTo(rackId: string): Promise<void> {
     deps.freeze();
     const started = now();
     try {
@@ -265,8 +300,6 @@ export function mountMoveToRack(deps: MoveToRackDeps): MoveToRack {
 
     if (ack === null || !ack.ok) {
       deps.unfreeze();
-      racks.delete(rackId);
-      deps.onRackPresence(racks.size > 0);
       deps.report(
         ack === null
           ? 'the rack did not answer — machine resumed here'
@@ -279,5 +312,5 @@ export function mountMoveToRack(deps: MoveToRackDeps): MoveToRack {
     deps.navigateToMoved(deps.currentName());
   }
 
-  return { rackCount: () => racks.size, requestMove };
+  return { moving: () => moving };
 }

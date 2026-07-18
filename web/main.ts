@@ -74,7 +74,7 @@ import {
   RACK_CHANNEL_NAME,
   claimHandoffMailbox,
   isHandoffRequest,
-  mountMoveToRack,
+  mountPcPresence,
   type HandoffReadyMsg,
 } from './migrate.js';
 import {
@@ -488,8 +488,10 @@ async function init(): Promise<void> {
     state: 'booting' | 'running' | 'frozen' | 'halted';
   } = { name: null, octet: null, state: 'booting' };
   function postRackStatus(patch: Partial<typeof rackStatus>): void {
-    if (embeddedPcId === null || window.parent === window) return;
+    // Track ALWAYS (§5g: pc-here answers need the state standalone
+    // too); POST only when embedded — the rail is the only listener.
     Object.assign(rackStatus, patch);
+    if (embeddedPcId === null || window.parent === window) return;
     window.parent.postMessage(
       { emu86: 'pc-status', pc: embeddedPcId, ...rackStatus },
       location.origin,
@@ -1040,29 +1042,32 @@ async function init(): Promise<void> {
       .catch((err: unknown) => dbg(`courier: catch FAILED — ${String(err)}`));
   };
 
-  // Multi-PC brief M2: the tab→rack move. The affordance appears only
-  // while a rack tab is announcing, and only in a TOP-LEVEL tab that
-  // isn't a rack-owned floating window. The old gate was ?pc=-absent —
-  // wrong since §5d, whose moved-out tabs KEEP ?pc= (field 2026-07-18:
-  // a ⇲-spawned tab had no way back). A rack iframe fails the
-  // parent check; a 🗗 float carries the rack's window name (it goes
-  // back via its placeholder, not adoption); everything else — bare
-  // tabs and ?pc= tabs alike — can move to whichever rack answers.
-  const moveBtn = document.getElementById('move-to-rack') as HTMLButtonElement | null;
-  if (moveBtn !== null && window.parent === window && !window.name.startsWith('emu86-pc-')) {
+  // Multi-PC brief §5g — the pull model. This PC never discovers
+  // racks and carries no button (the M2 "move to the rack" affordance
+  // retired with §5g): it just answers pc-probe with its identity
+  // card and, when a rack's [+] picker invites it, runs the SAME M2
+  // choreography aimed at exactly that rack. Mounted only where a
+  // machine is adoptable: a TOP-LEVEL tab (bare or ?pc= — §5d's
+  // moved-out tabs qualify) that isn't a rack-owned floating window
+  // (those go home via their placeholder, not adoption).
+  if (window.parent === window && !window.name.startsWith('emu86-pc-')) {
     // The literal bridges DOM BroadcastChannel to the module's
     // structural channel shape (the worker.ts onmessage-setter trick).
     const rackChannelRaw = new BroadcastChannel(RACK_CHANNEL_NAME);
-    const mover = mountMoveToRack({
+    mountPcPresence({
       channel: {
         postMessage: (data: unknown) => rackChannelRaw.postMessage(data),
         set onmessage(handler: ((ev: { data: unknown }) => void) | null) {
           rackChannelRaw.onmessage = handler;
         },
       },
-      onRackPresence: (present) => {
-        moveBtn.hidden = !present;
+      sessionId: () => loadSession().sessionId,
+      currentName: () => {
+        const octet = loadSession().tanHostOctet;
+        return octet !== null ? nameForOctet(octet) : null;
       },
+      currentOctet: () => loadSession().tanHostOctet,
+      machineState: () => rackStatus.state,
       freeze: () => {
         dbg('migrate — freezing for handover (teardown freeze)');
         const msg: MainToWorkerMessage = {
@@ -1090,36 +1095,29 @@ async function init(): Promise<void> {
         return meta !== null && meta.lastTouched >= since;
       },
       currentRecord: () => loadSession(),
-      currentName: () => {
-        const octet = loadSession().tanHostOctet;
-        return octet !== null ? nameForOctet(octet) : null;
-      },
       clearOwnSession: () => {
         // A later visit in this tab must mint a fresh PC, not fight
         // the rack over the one that just moved. The key is the
         // AMBIENT one — a §5d moved-out tab lives under its ?pc=
-        // key, not the bare key (second half of the same field fix).
+        // key, not the bare key.
         try {
           sessionStorage.removeItem(storageKeyFor(embeddedPcId));
         } catch { /* nothing to clear */ }
       },
       report: (text) => syslog.log(text, { toast: true }),
       navigateToMoved: (name) => {
-        dbg('migrate — adopted by the rack, navigating to moved.html');
+        dbg('migrate — adopted by a rack, navigating to moved.html');
         location.replace(
           `./moved.html${name !== null ? `?name=${encodeURIComponent(name)}` : ''}`,
         );
       },
-    });
-    moveBtn.addEventListener('click', () => {
-      void mover.requestMove();
     });
   }
 
   // Multi-PC brief §5d — the out-move's PC side. The rack asks this
   // context to hand itself over: through window.parent for an embedded
   // PC (⇲/🗗 on the rail), through window.opener for a floated window
-  // being brought back. Same dance as mountMoveToRack — freeze,
+  // being brought back. Same dance as the §5g mover — freeze,
   // durable capture, freshness gate, then the record — and the
   // REQUESTER kills this context; a dead-man timer unfreezes the
   // machine if it never does.

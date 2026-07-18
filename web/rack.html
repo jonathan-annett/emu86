@@ -195,6 +195,45 @@
       .pick-row:hover { background: #1f1f1f; }
       .pick-row .age { color: var(--dim); white-space: nowrap; }
       .pick-none { color: var(--dim); padding: 8px 14px; }
+      /* §5g picker identities (Jonathan's spec): RUNNING PCs are
+         gold with a breathing dot (adopting a live machine); COLD
+         STORAGE is blue — on ice; a new PC doesn't exist yet, so
+         its action is a plain grey button. */
+      .pick-new {
+        display: block;
+        width: calc(100% - 28px);
+        margin: 2px 14px 8px;
+        padding: 8px 12px;
+        background: #222;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        color: #bbb;
+        font: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+      .pick-new:hover { border-color: #555; color: #e0e0e0; }
+      .pick-run { color: #e0b25a; justify-content: flex-start; align-items: center; }
+      .pick-run:hover { background: #241d10; }
+      .pick-run .age { margin-left: auto; color: #8a6d35; }
+      .run-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .run-dot.live {
+        background: #e0b25a;
+        animation: rack-breathe 1.6s ease-in-out infinite;
+      }
+      .run-dot.held { background: #8a6d35; }
+      @keyframes rack-breathe {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+      .pick-ice { color: #8ab8e8; }
+      .pick-ice:hover { background: #101a24; }
+      .pick-ice .age { color: #4a6d8c; }
     </style>
   </head>
   <body>

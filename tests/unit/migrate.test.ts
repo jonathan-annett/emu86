@@ -1,9 +1,10 @@
 /**
- * The tab→rack move dance (multi-PC brief M2).
+ * The rack adoption dance (multi-PC brief M2, inverted by §5g).
  *
- * The mover talks to a fake rack over the synchronous hub; the deps
- * record every side effect in order, so the tests assert the dance's
- * CHOREOGRAPHY: freeze before capture, capture durable before the
+ * The PC's presence mount talks to a fake rack over the synchronous
+ * hub; the deps record every side effect in order, so the tests
+ * assert the CHOREOGRAPHY: probe answered with the identity card,
+ * invite → freeze before capture, capture durable before the
  * request, navigation only after a matching ack — and every abort
  * path unfreezing the machine it froze.
  */
@@ -15,10 +16,10 @@ import {
   claimHandoffMailbox,
   isHandoffReply,
   isHandoffRequest,
-  mountMoveToRack,
+  mountPcPresence,
   writeHandoffMailbox,
   type AdoptRequestMsg,
-  type MoveToRackDeps,
+  type PcPresenceDeps,
   type RackChannel,
 } from '../../web/migrate.js';
 import type { SessionState } from '../../web/session-store.js';
@@ -54,27 +55,27 @@ const RECORD: SessionState = {
 
 interface Rig {
   events: string[];
-  deps: MoveToRackDeps;
+  deps: PcPresenceDeps;
   requests: AdoptRequestMsg[];
   rackSide: RackChannel;
-  presence: boolean[];
   slotFresh: boolean;
 }
 
 function makeRig(hub: { join(): RackChannel }): Rig {
   const events: string[] = [];
   const requests: AdoptRequestMsg[] = [];
-  const presence: boolean[] = [];
   const rackSide = hub.join();
   const rig: Rig = {
     events,
     requests,
     rackSide,
-    presence,
     slotFresh: true,
     deps: {
       channel: hub.join(),
-      onRackPresence: (p) => presence.push(p),
+      sessionId: () => RECORD.sessionId,
+      currentName: () => 'mouse',
+      currentOctet: () => RECORD.tanHostOctet,
+      machineState: () => 'running',
       freeze: () => events.push('freeze'),
       unfreeze: () => events.push('unfreeze'),
       settleResumeSlot: async () => {
@@ -82,7 +83,6 @@ function makeRig(hub: { join(): RackChannel }): Rig {
       },
       slotFreshSince: async () => rig.slotFresh,
       currentRecord: () => RECORD,
-      currentName: () => 'mouse',
       clearOwnSession: () => events.push('clear'),
       report: (text) => events.push(`report:${text}`),
       navigateToMoved: (name) => events.push(`navigate:${name}`),
@@ -95,6 +95,11 @@ function makeRig(hub: { join(): RackChannel }): Rig {
   return rig;
 }
 
+/** Let the invite-triggered async dance drain its microtasks. */
+async function drain(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -102,24 +107,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('mountMoveToRack', () => {
-  it('probes at mount and surfaces rack presence', () => {
+describe('mountPcPresence (§5g pull model)', () => {
+  it('answers a probe with its identity card', () => {
     const hub = makeHub();
     const rig = makeRig(hub);
-    let probed = 0;
+    const cards: unknown[] = [];
     const prior = rig.rackSide.onmessage;
     rig.rackSide.onmessage = (ev) => {
-      if ((ev.data as { rack?: string }).rack === 'probe') probed++;
+      if ((ev.data as { rack?: string }).rack === 'pc-here') cards.push(ev.data);
       prior?.(ev);
     };
-    const mover = mountMoveToRack(rig.deps);
-    expect(mover.rackCount()).toBe(0);
-    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-1' });
-    expect(mover.rackCount()).toBe(1);
-    expect(rig.presence).toEqual([true]);
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'pc-probe' });
+    expect(cards).toEqual([
+      { rack: 'pc-here', sessionId: 'sess-1', name: 'mouse', octet: 16, state: 'running' },
+    ]);
   });
 
-  it('runs the whole dance in order and navigates on ack', async () => {
+  it('runs the whole dance on invite and navigates on ack', async () => {
     const hub = makeHub();
     const rig = makeRig(hub);
     rig.rackSide.onmessage = (ev) => {
@@ -129,10 +134,9 @@ describe('mountMoveToRack', () => {
         rig.rackSide.postMessage({ rack: 'adopt-ack', nonce: data.nonce, ok: true });
       }
     };
-    const mover = mountMoveToRack(rig.deps);
-    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-1' });
-
-    await mover.requestMove();
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-1' });
+    await drain();
 
     expect(rig.events).toEqual(['freeze', 'settle', 'clear', 'navigate:mouse']);
     expect(rig.requests).toHaveLength(1);
@@ -143,37 +147,55 @@ describe('mountMoveToRack', () => {
     });
   });
 
+  it("ignores an invite addressed to someone else's session", async () => {
+    const hub = makeHub();
+    const rig = makeRig(hub);
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-other', rackId: 'rack-1' });
+    await drain();
+    expect(rig.events).toEqual([]); // froze nothing, told nobody
+  });
+
+  it('ignores a second invite while a move is in flight (one freeze)', async () => {
+    const hub = makeHub();
+    const rig = makeRig(hub); // rack side records requests, never acks
+    const presence = mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-1' });
+    await drain();
+    expect(presence.moving()).toBe(true);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-2' });
+    await vi.advanceTimersByTimeAsync(ADOPT_ACK_TIMEOUT_MS + 1);
+
+    expect(rig.events.filter((e) => e === 'freeze')).toHaveLength(1);
+    expect(rig.requests.map((r) => r.to)).toEqual(['rack-1']); // rack-2 never entered
+    expect(presence.moving()).toBe(false); // and the PC is invitable again
+  });
+
   it('aborts unfrozen when the slot never became fresh', async () => {
     const hub = makeHub();
     const rig = makeRig(hub);
     rig.slotFresh = false;
-    const mover = mountMoveToRack(rig.deps);
-    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-1' });
-
-    await mover.requestMove();
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-1' });
+    await drain();
 
     expect(rig.events.slice(0, 3)).toEqual(['freeze', 'settle', 'unfreeze']);
     expect(rig.events[3]).toMatch(/^report:cannot move: this session has no resumable/);
     expect(rig.requests).toHaveLength(0); // the record never left the tab
   });
 
-  it('aborts unfrozen when no ack arrives, and forgets that rack', async () => {
+  it('aborts unfrozen when no ack arrives', async () => {
     const hub = makeHub();
     const rig = makeRig(hub); // rack side records requests, never acks
-    const mover = mountMoveToRack(rig.deps);
-    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-1' });
-
-    const dance = mover.requestMove();
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-1' });
     await vi.advanceTimersByTimeAsync(ADOPT_ACK_TIMEOUT_MS + 1);
-    await dance;
 
     expect(rig.events.slice(0, 3)).toEqual(['freeze', 'settle', 'unfreeze']);
     expect(rig.events[3]).toMatch(/^report:the rack did not answer/);
-    expect(mover.rackCount()).toBe(0); // silent racks stop offering the button
-    expect(rig.presence.at(-1)).toBe(false);
   });
 
-  it('ignores an ack with a foreign nonce (someone else’s dance)', async () => {
+  it('ignores an ack with a foreign nonce (someone else\u2019s dance)', async () => {
     const hub = makeHub();
     const rig = makeRig(hub);
     rig.rackSide.onmessage = (ev) => {
@@ -182,24 +204,22 @@ describe('mountMoveToRack', () => {
         rig.rackSide.postMessage({ rack: 'adopt-ack', nonce: 'not-ours', ok: true });
       }
     };
-    const mover = mountMoveToRack(rig.deps);
-    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-1' });
-
-    const dance = mover.requestMove();
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'adopt-invite', toSession: 'sess-1', rackId: 'rack-1' });
     await vi.advanceTimersByTimeAsync(ADOPT_ACK_TIMEOUT_MS + 1);
-    await dance;
 
     expect(rig.events.at(-2)).toBe('unfreeze'); // timed out, not navigated
     expect(rig.events.some((e) => e.startsWith('navigate'))).toBe(false);
   });
 
-  it('refuses to start with no rack known — and freezes nothing', async () => {
+  it('retired-era rack verbs fall through ignored', async () => {
     const hub = makeHub();
     const rig = makeRig(hub);
-    const mover = mountMoveToRack(rig.deps);
-    await mover.requestMove();
-    expect(rig.events).toHaveLength(1);
-    expect(rig.events[0]).toMatch(/^report:no rack tab is open/);
+    mountPcPresence(rig.deps);
+    rig.rackSide.postMessage({ rack: 'here', rackId: 'rack-old' });
+    rig.rackSide.postMessage({ rack: 'probe' });
+    await drain();
+    expect(rig.events).toEqual([]); // archived builds' chatter is inert
   });
 });
 

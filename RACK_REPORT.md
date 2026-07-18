@@ -170,3 +170,28 @@ design, and its clearOwnSession cleared the bare key instead of the
 ambient one. Gate is now top-level + not-a-float (window name);
 the button reads "move to the rack" unchanged and works from bare
 and ?pc= tabs alike.
+
+## §5g — the pull model landed (same day)
+
+Racks adopt; PCs are rack-agnostic. The [+] picker probes
+(`pc-probe`), standalone PCs answer with identity cards
+(`pc-here`: sessionId, name, octet, state), and picking a gold row
+invites exactly that PC (`adopt-invite`) — which then runs the
+unchanged M2 choreography aimed at the inviting rack. The per-tab
+"move to the rack" button and the whole rack-discovery half of the
+protocol ('here'/'probe', the racks Set, first-answerer targeting)
+are RETIRED — including today's own move-back gate fix, alive for
+about an hour. Multi-rack ambiguity is dissolved structurally: the
+rack you clicked in is the answer.
+
+Picker identities per Jonathan's spec: running = gold rows with a
+breathing (running) or held (frozen) dot; cold storage (packages +
+saved machines) = blue, on ice; "boot a new PC" = plain grey button.
+Cross-era note: archived builds still probe for racks on this
+channel and now go unanswered — their button stays hidden, which is
+the retirement behaving; their adopt-request path was only reachable
+from that button, so no half-era dances can start. main.ts also now
+tracks machine state while standalone (rackStatus updated always,
+posted only when embedded) so identity cards say running vs frozen
+honestly. Choreography tests rewritten invite-driven (13 pass);
+cross-rack poaching stays out, recorded as a §5d-based follow-on.

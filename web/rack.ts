@@ -44,6 +44,7 @@ import {
   isHandoffReply,
   writeHandoffMailbox,
   type AdoptRequestMsg,
+  type PcHereMsg,
 } from './migrate.js';
 import { PackageStore, type RackPackageMember } from './package-store.js';
 import { createDebugTrace } from './debug-log.js';
@@ -491,6 +492,9 @@ function describeAge(ms: number): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+/** While the picker is open, pc-here answers land here (§5g). */
+let onPcHere: ((msg: PcHereMsg) => void) | null = null;
+
 async function openPicker(): Promise<void> {
   picker.textContent = '';
 
@@ -498,18 +502,71 @@ async function openPicker(): Promise<void> {
   h.textContent = 'add a PC';
   picker.appendChild(h);
 
-  const blank = document.createElement('div');
-  blank.className = 'pick-row';
-  blank.textContent = '▷ new blank PC';
+  // A new PC doesn't exist yet — plain grey button (§5g identities).
+  const blank = document.createElement('button');
+  blank.className = 'pick-new';
+  blank.textContent = 'boot a new PC';
   blank.addEventListener('click', () => {
     closePicker();
     addPc(mintPcId());
   });
   picker.appendChild(blank);
 
-  // Packages (M3) — whole racks, restored PC by PC.
+  // Running PCs (§5g — the pull model): probe, and render the gold
+  // rows as identity cards arrive. Picking one INVITES that PC; it
+  // then runs the M2 choreography at this rack and the adopt()
+  // handler below does the rest. Own members never answer (they are
+  // iframes), but filter by sessionId anyway — belt and braces.
+  const hRun = document.createElement('h2');
+  hRun.textContent = 'running PCs — adopt into this rack';
+  picker.appendChild(hRun);
+  const runList = document.createElement('div');
+  picker.appendChild(runList);
+  const runNone = document.createElement('div');
+  runNone.className = 'pick-none';
+  runNone.textContent = '(listening — standalone PCs appear here as they answer)';
+  runList.appendChild(runNone);
+  const knownSessions = new Set(pcs.map((p) => loadSessionAt(p.id).sessionId));
+  onPcHere = (msg) => {
+    if (knownSessions.has(msg.sessionId)) return;
+    knownSessions.add(msg.sessionId);
+    runNone.remove();
+    const row = document.createElement('div');
+    row.className = 'pick-row pick-run';
+    const dot = document.createElement('span');
+    dot.className = msg.state === 'running' ? 'run-dot live' : 'run-dot held';
+    const label = document.createElement('span');
+    label.textContent =
+      `${msg.name ?? 'unnamed'}${msg.octet !== null ? ` — 10.0.2.${msg.octet}` : ''}`;
+    const state = document.createElement('span');
+    state.className = 'age';
+    state.textContent = msg.state;
+    row.append(dot, label, state);
+    row.addEventListener('click', () => {
+      closePicker();
+      const label2 = msg.name ?? 'the PC';
+      note(`inviting ${label2} into the rack…`, true);
+      const before = pcs.length;
+      rackChannel.postMessage({
+        rack: 'adopt-invite',
+        toSession: msg.sessionId,
+        rackId,
+      });
+      // The invited PC freezes, captures durably, then adopt-requests
+      // us — normally a few seconds. If nothing arrived, say so.
+      setTimeout(() => {
+        if (pcs.length === before) {
+          note(`${label2} did not answer the invitation — is its tab still open?`);
+        }
+      }, 8_000);
+    });
+    runList.appendChild(row);
+  };
+  rackChannel.postMessage({ rack: 'pc-probe' });
+
+  // Cold storage (§5g identities: blue — on ice). Packages first.
   const hPkg = document.createElement('h2');
-  hPkg.textContent = 'infrastructure packages';
+  hPkg.textContent = 'cold storage — infrastructure packages';
   picker.appendChild(hPkg);
   try {
     const packages = await packageStore.list();
@@ -521,7 +578,7 @@ async function openPicker(): Promise<void> {
     }
     for (const p of packages) {
       const row = document.createElement('div');
-      row.className = 'pick-row';
+      row.className = 'pick-row pick-ice';
       const label = document.createElement('span');
       label.textContent = `📦 ${p.name} (${p.members.length} PC${p.members.length === 1 ? '' : 's'})`;
       const right = document.createElement('span');
@@ -554,7 +611,7 @@ async function openPicker(): Promise<void> {
   } catch { /* the section just stays empty */ }
 
   const h2 = document.createElement('h2');
-  h2.textContent = 'saved machines';
+  h2.textContent = 'cold storage — saved machines';
   picker.appendChild(h2);
 
   let named: MachineStateMeta[] = [];
@@ -572,7 +629,7 @@ async function openPicker(): Promise<void> {
   }
   for (const meta of named) {
     const row = document.createElement('div');
-    row.className = 'pick-row';
+    row.className = 'pick-row pick-ice';
     const label = document.createElement('span');
     label.textContent = meta.label ?? meta.stateId;
     const age = document.createElement('span');
@@ -595,6 +652,7 @@ async function openPicker(): Promise<void> {
 }
 
 function closePicker(): void {
+  onPcHere = null; // stop collecting identity cards (§5g)
   pickerBackdrop.classList.remove('open');
 }
 
@@ -765,10 +823,10 @@ const rackId =
     ? `rack-${crypto.randomUUID()}`
     : `rack-${Math.random().toString(36).slice(2)}`;
 const rackChannel = new BroadcastChannel(RACK_CHANNEL_NAME);
-
-function announce(): void {
-  rackChannel.postMessage({ rack: 'here', rackId });
-}
+// (The M2-era announce()/'here'/'probe' rack-discovery verbs retired
+// with §5g — PCs no longer look for racks; racks probe for PCs from
+// the [+] picker. Archived builds still probe on this channel; going
+// unanswered is the retirement behaving — their button stays hidden.)
 
 /** The Web Locks the dying tab's document holds — all derivable from
  *  its session record. They release when moved.html commits. */
@@ -812,20 +870,20 @@ async function adopt(req: AdoptRequestMsg): Promise<void> {
       `${Date.now() - t0} ms, spawning the iframe`,
   );
   addPc(id, req.name);
+  note(`${req.name ?? 'a PC'} joined the rack`);
 }
 
 rackChannel.onmessage = (ev: MessageEvent<unknown>) => {
   const data = ev.data;
   if (!isRackMsg(data)) return;
-  if (data.rack === 'probe') {
-    announce();
+  if (data.rack === 'pc-here') {
+    onPcHere?.(data); // the open picker collects identity cards (§5g)
     return;
   }
   if (data.rack === 'adopt-request' && data.to === rackId) {
     void adopt(data);
   }
 };
-announce();
 
 // ---- boot: restore the rail from the rack's own session ----------------
 
