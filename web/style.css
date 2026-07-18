@@ -100,7 +100,7 @@ header code {
 #demo-button {
   position: fixed;
   top: 0.5rem;
-  right: 2.9rem;
+  right: 5.4rem;
   z-index: 30;
   font: 0.8rem ui-monospace, Menlo, monospace;
   background: #1d2a22;
@@ -120,12 +120,13 @@ header code {
 }
 
 /* 🦈 on every PC (multi-PC brief §5e): open-or-focus the shared
-   tab-shark window. Below the gear — the top row is spoken for
-   (gear, demo ▶, the move-to-rack pill). */
+   tab-shark window. Left of the gear (field ask 2026-07-18: the
+   below-the-gear spot collided with the editor slide-out tab); the
+   conditional demo ▶ / move-to-rack pill shift further left. */
 #tab-shark {
   position: fixed;
-  top: 3rem;
-  right: 0.5rem;
+  top: 0.5rem;
+  right: 3rem;
   z-index: 10;
   width: 2rem;
   height: 2rem;
@@ -153,7 +154,7 @@ header code {
 #move-to-rack {
   position: fixed;
   top: 0.5rem;
-  right: 3rem;
+  right: 5.5rem;
   z-index: 10;
   height: 2rem;
   padding: 0 0.8rem;

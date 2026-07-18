@@ -1629,9 +1629,14 @@ async function init(): Promise<void> {
         const age = msg.capturedAt !== undefined ? Date.now() - msg.capturedAt : null;
         // The fresh resume is deliberately SILENT in the syslog (the
         // crown's "nothing breaks") — but the debug trace tells all.
-        dbg(`restore resumed ok (state from ${age !== null ? describeAge(age) : '?'} ago)`);
+        // Wording (field 2026-07-18): the age is capture-to-restore
+        // WALL time — mostly the reload itself, not lost execution
+        // (a whole-rack F5 showed "9s ago" for a 0.7s rewind).
+        // "captured Xs ago" says what it measures; "from Xs ago"
+        // read as the machine losing that much.
+        dbg(`restore resumed ok (captured ${age !== null ? describeAge(age) : '?'} ago)`);
         if (age !== null && age > RESTORE_NOTICE_AGE_MS) {
-          syslog.log(`resumed machine state from ${describeAge(age)} ago`, { toast: true });
+          syslog.log(`resumed machine state (captured ${describeAge(age)} ago)`, { toast: true });
         }
         if (activeRestoreStateId !== null) {
           void machineStore.touch(activeRestoreStateId);
